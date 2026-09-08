@@ -1,3 +1,11 @@
+// Despite the generic name, this is the FiveM server store specifically —
+// `framework`/`artifactVersion`/`resourceCount` are FXServer concepts, and
+// nothing here is meant to represent Minecraft/Assetto Corsa/BeamNG state.
+// It also carries theme/sidebar UI state, which is a separate concern that
+// ended up here historically. Left as-is rather than split/renamed: it's
+// imported across ~15 files, and a rename would be pure churn with real
+// regression risk for a cosmetic gain — see config/games.ts for the actual
+// cross-game registry.
 import { create } from 'zustand';
 
 export interface Server {
