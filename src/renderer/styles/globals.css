@@ -43,6 +43,29 @@
     --mesh-opacity: 0;
   }
 
+  /* ═══ Theme Engine tokens ═══ */
+  /* Accent + status colors, independent of light/dark — these are what the
+     Theme Engine (see config/themes.ts, stores/useTheme.ts) actually
+     overwrites at runtime via style.setProperty on :root. Defaults here are
+     the "Mercy Default" preset, kept identical to the app's original
+     hardcoded indigo so nothing shifts before the theme store hydrates. */
+  :root {
+    --primary-50: #eef2ff; --primary-100: #e0e7ff; --primary-200: #c7d2fe;
+    --primary-300: #a5b4fc; --primary-400: #818cf8; --primary-500: #6366f1;
+    --primary-600: #4f46e5; --primary-700: #4338ca; --primary-800: #3730a3;
+    --primary-900: #312e81; --primary-950: #1e1b4b;
+
+    --success: #34d399; --success-bg: rgba(52, 211, 153, 0.15);
+    --warning: #fbbf24; --warning-bg: rgba(251, 191, 36, 0.15);
+    --error: #f87171; --error-bg: rgba(248, 113, 113, 0.15);
+    --info: #38bdf8; --info-bg: rgba(56, 189, 248, 0.15);
+
+    /* Per-nav-item color overrides are intentionally NOT declared here —
+       left genuinely unset so `var(--nav-home, var(--primary-500))` in
+       Sidebar.tsx falls back correctly. The customizer sets them directly
+       on :root only once the user actually picks a color for that item. */
+  }
+
   /* Dark mode: low numbers = light (text), high numbers = dark (backgrounds) */
   .dark {
     --surface-50: #f8fafc;
@@ -99,7 +122,7 @@
   ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
 
   ::selection {
-    @apply bg-primary-500/30;
+    background: color-mix(in srgb, var(--primary-500) 30%, transparent);
     color: var(--text-primary);
   }
 
@@ -210,11 +233,11 @@
   /* ═══ Buttons ═══ */
   .btn-primary {
     @apply relative px-5 py-2.5 rounded-xl font-semibold text-sm text-white transition-all duration-200 active:scale-[0.97] overflow-hidden;
-    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 50%, #4338ca 100%);
-    box-shadow: 0 2px 12px -2px rgba(99, 102, 241, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+    background: linear-gradient(135deg, var(--primary-500) 0%, var(--primary-600) 50%, var(--primary-700) 100%);
+    box-shadow: 0 2px 12px -2px color-mix(in srgb, var(--primary-500) 40%, transparent), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
   }
   .btn-primary:hover {
-    box-shadow: 0 4px 20px -2px rgba(99, 102, 241, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+    box-shadow: 0 4px 20px -2px color-mix(in srgb, var(--primary-500) 50%, transparent), 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
     transform: translateY(-1px);
   }
 
@@ -258,19 +281,20 @@
     color: var(--text-faint);
   }
   .input-field:focus {
-    @apply outline-none border-primary-500/50;
+    outline: none;
+    border-color: color-mix(in srgb, var(--primary-500) 50%, transparent);
     background: var(--bg-hover);
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), 0 0 0 1px rgba(99, 102, 241, 0.3) inset;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-500) 15%, transparent), 0 0 0 1px color-mix(in srgb, var(--primary-500) 30%, transparent) inset;
   }
 
   /* ═══ Badges ═══ */
   .badge {
     @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium;
   }
-  .badge-primary { @apply badge bg-primary-500/15 text-primary-400 border border-primary-500/25; }
-  .badge-success { @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/25; }
-  .badge-warning { @apply badge bg-amber-500/15 text-amber-400 border border-amber-500/25; }
-  .badge-danger { @apply badge bg-red-500/15 text-red-400 border border-red-500/25; }
+  .badge-primary { @apply badge; background: color-mix(in srgb, var(--primary-500) 15%, transparent); color: var(--primary-400); border: 1px solid color-mix(in srgb, var(--primary-500) 25%, transparent); }
+  .badge-success { @apply badge; background: var(--success-bg); color: var(--success); border: 1px solid var(--success-bg); }
+  .badge-warning { @apply badge; background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-bg); }
+  .badge-danger { @apply badge; background: var(--error-bg); color: var(--error); border: 1px solid var(--error-bg); }
 
   /* ═══ Page header gradient line ═══ */
   .page-header-line {

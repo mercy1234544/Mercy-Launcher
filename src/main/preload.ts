@@ -15,6 +15,17 @@ const electronAPI = {
     setLoginItem: (enabled: boolean) => ipcRenderer.invoke('settings:setLoginItem', enabled),
   },
 
+  // Theme & personalization
+  theme: {
+    get: () => ipcRenderer.invoke('theme:get'),
+    setActive: (id: string) => ipcRenderer.invoke('theme:setActive', id),
+    setCustom: (tokens: Record<string, string>) => ipcRenderer.invoke('theme:setCustom', tokens),
+    reset: () => ipcRenderer.invoke('theme:reset'),
+    getAvatar: () => ipcRenderer.invoke('theme:getAvatar'),
+    removeAvatar: () => ipcRenderer.invoke('theme:removeAvatar'),
+    pickAvatar: () => ipcRenderer.invoke('theme:pickAvatar'),
+  },
+
   // Dialog
   openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   openFile: (filters?: any) => ipcRenderer.invoke('dialog:openFile', filters),
@@ -36,6 +47,53 @@ const electronAPI = {
     maintenance: (id: string): Promise<string[]> => ipcRenderer.invoke('server:maintenance', id),
     import: (serverPath: string, name?: string) => ipcRenderer.invoke('server:import', serverPath, name),
     scan: (serverPath: string) => ipcRenderer.invoke('server:scan', serverPath),
+  },
+
+  // Minecraft server management
+  minecraft: {
+    getAll: () => ipcRenderer.invoke('minecraft:getAll'),
+    get: (id: string) => ipcRenderer.invoke('minecraft:get', id),
+    consoleBuffer: (id: string) => ipcRenderer.invoke('minecraft:consoleBuffer', id),
+    delete: (id: string, deleteFiles: boolean) => ipcRenderer.invoke('minecraft:delete', id, deleteFiles),
+    detectJava: () => ipcRenderer.invoke('minecraft:detectJava'),
+    javaRequirement: (version: string) => ipcRenderer.invoke('minecraft:javaRequirement', version),
+    fetchVanillaVersions: () => ipcRenderer.invoke('minecraft:fetchVanillaVersions'),
+    fetchPaperVersions: () => ipcRenderer.invoke('minecraft:fetchPaperVersions'),
+    create: (config: any) => ipcRenderer.invoke('minecraft:create', config),
+    detectExisting: (dirPath: string) => ipcRenderer.invoke('minecraft:detectExisting', dirPath),
+    import: (dirPath: string, name: string, ramMB: number) => ipcRenderer.invoke('minecraft:import', dirPath, name, ramMB),
+    start: (id: string) => ipcRenderer.invoke('minecraft:start', id),
+    stop: (id: string, force?: boolean) => ipcRenderer.invoke('minecraft:stop', id, force),
+    restart: (id: string) => ipcRenderer.invoke('minecraft:restart', id),
+    setAutoRestart: (id: string, enabled: boolean) => ipcRenderer.invoke('minecraft:setAutoRestart', id, enabled),
+    sendCommand: (id: string, command: string) => ipcRenderer.invoke('minecraft:command', id, command),
+    processStats: (id: string) => ipcRenderer.invoke('minecraft:processStats', id),
+    players: (id: string) => ipcRenderer.invoke('minecraft:players', id),
+    readProperties: (id: string) => ipcRenderer.invoke('minecraft:readProperties', id),
+    writeProperties: (id: string, changes: Record<string, string>) => ipcRenderer.invoke('minecraft:writeProperties', id, changes),
+    listFiles: (id: string, relPath: string) => ipcRenderer.invoke('minecraft:listFiles', id, relPath),
+    readFile: (id: string, relPath: string) => ipcRenderer.invoke('minecraft:readFile', id, relPath),
+    writeFile: (id: string, relPath: string, content: string) => ipcRenderer.invoke('minecraft:writeFile', id, relPath, content),
+    createBackup: (id: string) => ipcRenderer.invoke('minecraft:createBackup', id),
+    listBackups: (id: string) => ipcRenderer.invoke('minecraft:listBackups', id),
+    restoreBackup: (backupId: string) => ipcRenderer.invoke('minecraft:restoreBackup', backupId),
+    deleteBackup: (backupId: string) => ipcRenderer.invoke('minecraft:deleteBackup', backupId),
+  },
+
+  onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('minecraft:console', handler);
+    return () => { ipcRenderer.removeListener('minecraft:console', handler); };
+  },
+  onMinecraftStatusChange: (callback: (data: { serverId: string; status: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('minecraft:statusChange', handler);
+    return () => { ipcRenderer.removeListener('minecraft:statusChange', handler); };
+  },
+  onMinecraftCreateProgress: (callback: (data: { pct: number; message: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('minecraft:createProgress', handler);
+    return () => { ipcRenderer.removeListener('minecraft:createProgress', handler); };
   },
 
   // Resources

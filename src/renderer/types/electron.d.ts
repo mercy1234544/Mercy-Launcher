@@ -13,6 +13,16 @@ interface ElectronAPI {
     setLoginItem: (enabled: boolean) => Promise<boolean>;
   };
 
+  theme: {
+    get: () => Promise<{ activeThemeId: string; customTokens: Record<string, string>; hasCustomTheme: boolean }>;
+    setActive: (id: string) => Promise<boolean>;
+    setCustom: (tokens: Record<string, string>) => Promise<boolean>;
+    reset: () => Promise<boolean>;
+    getAvatar: () => Promise<string | null>;
+    removeAvatar: () => Promise<boolean>;
+    pickAvatar: () => Promise<{ success: boolean; dataUrl?: string; error?: string | null }>;
+  };
+
   openDirectory: () => Promise<string | null>;
   openFile: (filters?: any) => Promise<string | null>;
   openPath: (path: string) => Promise<void>;
@@ -49,6 +59,46 @@ interface ElectronAPI {
       serverName: string;
     }>;
   };
+
+  minecraft: {
+    getAll: () => Promise<MinecraftServer[]>;
+    get: (id: string) => Promise<MinecraftServer | undefined>;
+    consoleBuffer: (id: string) => Promise<string[]>;
+    delete: (id: string, deleteFiles: boolean) => Promise<boolean>;
+    detectJava: () => Promise<{ found: boolean; version: string | null; major: number | null }>;
+    javaRequirement: (version: string) => Promise<number>;
+    fetchVanillaVersions: () => Promise<{ id: string; type: string; releaseTime: string }[]>;
+    fetchPaperVersions: () => Promise<string[]>;
+    create: (config: {
+      name: string; installPath: string; version: string; serverType: 'vanilla' | 'paper';
+      ramMB: number; port: number; acceptedEula: boolean;
+    }) => Promise<{ success: boolean; server?: MinecraftServer; error?: string }>;
+    detectExisting: (dirPath: string) => Promise<{
+      valid: boolean; reason?: string; jarFile?: string; version?: string; serverType?: 'vanilla' | 'paper';
+      hasProperties: boolean; hasWorld: boolean; hasEula: boolean; port?: number;
+    }>;
+    import: (dirPath: string, name: string, ramMB: number) => Promise<{ success: boolean; server?: MinecraftServer; error?: string }>;
+    start: (id: string) => Promise<{ success: boolean; error?: string }>;
+    stop: (id: string, force?: boolean) => Promise<boolean>;
+    restart: (id: string) => Promise<boolean>;
+    setAutoRestart: (id: string, enabled: boolean) => Promise<boolean>;
+    sendCommand: (id: string, command: string) => Promise<boolean>;
+    processStats: (id: string) => Promise<{ pid: number | null; uptimeMs: number | null }>;
+    players: (id: string) => Promise<{ name: string; online: boolean; lastSeen: string }[]>;
+    readProperties: (id: string) => Promise<{ key: string; value: string; isComment: boolean; raw: string }[]>;
+    writeProperties: (id: string, changes: Record<string, string>) => Promise<{ success: boolean; error?: string }>;
+    listFiles: (id: string, relPath: string) => Promise<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[] | null>;
+    readFile: (id: string, relPath: string) => Promise<string | null>;
+    writeFile: (id: string, relPath: string, content: string) => Promise<boolean>;
+    createBackup: (id: string) => Promise<{ success: boolean; backup?: MinecraftBackup; error?: string }>;
+    listBackups: (id: string) => Promise<MinecraftBackup[]>;
+    restoreBackup: (backupId: string) => Promise<{ success: boolean; error?: string }>;
+    deleteBackup: (backupId: string) => Promise<boolean>;
+  };
+
+  onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
+  onMinecraftStatusChange: (callback: (data: { serverId: string; status: string }) => void) => () => void;
+  onMinecraftCreateProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
 
   resource: {
     scan: (serverPath: string) => Promise<any[]>;
@@ -261,6 +311,33 @@ interface ElectronAPI {
 declare global {
   interface Window {
     electronAPI: ElectronAPI;
+  }
+
+  // ── Minecraft types (mirror src/main/services/MinecraftManager.ts) ─────────
+  interface MinecraftServer {
+    id: string;
+    name: string;
+    installPath: string;
+    version: string;
+    serverType: 'vanilla' | 'paper';
+    jarFile: string;
+    ramMB: number;
+    port: number;
+    status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
+    pid: number | null;
+    startedAt: string | null;
+    autoRestart: boolean;
+    lastBackup: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }
+  interface MinecraftBackup {
+    id: string;
+    serverId: string;
+    name: string;
+    path: string;
+    size: number;
+    createdAt: string;
   }
 
   // ── Vehicle Studio types (mirror src/main/services/VehicleStudio.ts) ────────

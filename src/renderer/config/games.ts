@@ -37,7 +37,7 @@ export const GAMES: GameDef[] = [
     Art: FiveMArt, tagline: 'Manage your FiveM servers.',
   },
   {
-    id: 'minecraft', label: 'Minecraft', path: '/minecraft', hasRealHub: false,
+    id: 'minecraft', label: 'Minecraft', path: '/minecraft', hasRealHub: true,
     icon: Blocks, tint: 'text-emerald-300', tintBadge: 'bg-emerald-500/15 border-emerald-500/25 text-emerald-300',
     Art: MinecraftArt, tagline: 'Manage your Minecraft servers.',
   },

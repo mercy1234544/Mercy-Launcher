@@ -27,21 +27,28 @@ import VehiclePackManager from './pages/VehiclePackManager';
 import ServerConsole from './pages/ServerConsole';
 import ServerPanel from './pages/ServerPanel';
 import LiveryEditor from './pages/LiveryEditor';
+import MinecraftHub from './pages/MinecraftHub';
+import MinecraftServerWizard from './pages/MinecraftServerWizard';
+import MinecraftServerPanel from './pages/MinecraftServerPanel';
 import Settings from './pages/Settings';
 import AdminPanel from './pages/AdminPanel';
 import VehicleStudio from './pages/VehicleStudio';
 import { useAuth } from './stores/useAuth';
 import { useAppAuth } from './stores/useAppAuth';
+import { useTheme } from './stores/useTheme';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const initAuth = useAuth((s) => s.init);
   const initAppAuth = useAppAuth((s) => s.init);
+  const initTheme = useTheme((s) => s.init);
 
   // Restore the account session (no-op until Supabase is configured).
   useEffect(() => { initAuth(); }, [initAuth]);
   // Check backend-authorized app access + start periodic revalidation.
   useEffect(() => { initAppAuth(); }, [initAppAuth]);
+  // Apply the user's saved theme (or Mercy Default) before first paint settles.
+  useEffect(() => { initTheme(); }, [initTheme]);
 
   const handleSplashComplete = useCallback(() => {
     setShowSplash(false);
@@ -52,13 +59,14 @@ export default function App() {
       <Toaster
         position="bottom-right"
         toastOptions={{
-          className: 'bg-surface-800 text-surface-100 border border-surface-700',
           duration: 4000,
           style: {
-            background: '#1e293b',
-            color: '#f1f5f9',
-            border: '1px solid #334155',
+            background: 'var(--surface-850)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border-color)',
           },
+          success: { iconTheme: { primary: 'var(--success)', secondary: 'var(--surface-850)' } },
+          error: { iconTheme: { primary: 'var(--error)', secondary: 'var(--surface-850)' } },
         }}
       />
       <AnimatePresence>
@@ -72,7 +80,9 @@ export default function App() {
               <Route path="/fivem" element={<FiveMHub />} />
               <Route path="/browse-servers" element={<BrowseServers />} />
               <Route path="/mercy-servers/:game" element={<MercyServers />} />
-              <Route path="/minecraft" element={<ComingSoon />} />
+              <Route path="/minecraft" element={<MinecraftHub />} />
+              <Route path="/minecraft/create" element={<MinecraftServerWizard />} />
+              <Route path="/minecraft/server/:id" element={<MinecraftServerPanel />} />
               <Route path="/assetto-corsa" element={<ComingSoon />} />
               <Route path="/beamng" element={<ComingSoon />} />
               <Route path="/library" element={<Library />} />

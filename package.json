@@ -1,6 +1,6 @@
 {
   "name": "fivem-server-builder",
-  "version": "1.82.0",
+  "version": "1.83.0",
   "description": "Mercy Launcher — a centralized game-management hub, starting with a full FiveM server-management ecosystem",
   "main": "dist/main/main.js",
   "scripts": {
@@ -9,6 +9,9 @@
     "dev:renderer": "npx vite",
     "build": "npx tsc -p tsconfig.main.json && npx vite build",
     "test:vs": "npx tsc -p tsconfig.main.json && node test/vehicle-studio/meta.test.js && node test/vehicle-studio/service.test.js",
+    "test:minecraft": "npx tsc -p tsconfig.main.json && node test/minecraft/service.test.js",
+    "test:theme": "npx tsc -p tsconfig.main.json && node test/theme/manager.test.js",
+    "test:all": "npm run test:vs && node test/minecraft/service.test.js && node test/theme/manager.test.js",
     "build:exe": "npm run build && npx electron-builder --win --dir --publish never && node scripts/patch-windows-exe.js && npx electron-builder --win --prepackaged releases/win-unpacked --publish never",
     "start": "npx electron .",
     "electron:dev": "npx concurrently -k \"npx vite\" \"npx tsc -p tsconfig.main.json -w\" \"npx wait-on http://localhost:5173 && npx electron .\""

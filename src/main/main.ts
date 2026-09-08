@@ -15,6 +15,8 @@ import { VehicleResourceScanner } from './services/VehicleResourceScanner';
 import { VehicleStudio } from './services/VehicleStudio';
 import { VehicleStudioAuth } from './services/VehicleStudioAuth';
 import { SettingsManager } from './services/SettingsManager';
+import { MinecraftManager } from './services/MinecraftManager';
+import { ThemeManager } from './services/ThemeManager';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 
@@ -42,6 +44,8 @@ let accessManager: AccessManager;
 let vehicleStudio: VehicleStudio;
 let vehicleStudioAuth: VehicleStudioAuth;
 let settingsManager: SettingsManager;
+let minecraftManager: MinecraftManager;
+let themeManager: ThemeManager;
 const vehicleResourceScanner = new VehicleResourceScanner();
 
 // Tray icon only exists while "Minimize to tray" is enabled — off by default,
@@ -130,6 +134,8 @@ function initializeServices() {
   vehicleStudio = new VehicleStudio(userDataPath);
   vehicleStudioAuth = new VehicleStudioAuth(userDataPath);
   settingsManager = new SettingsManager();
+  minecraftManager = new MinecraftManager(userDataPath);
+  themeManager = new ThemeManager(userDataPath);
   serverManager.setDatabaseManager(databaseManager);
   healthScanner.setDatabaseManager(databaseManager);
 }
@@ -143,6 +149,7 @@ function initializeServices() {
 const PROTECTED_IPC_PREFIXES = [
   'server:', 'resource:', 'health:', 'backup:', 'file:', 'import:',
   'artifact:', 'vehicle:', 'vehicleStudio:', 'livery:', 'git:', 'bridge:',
+  'minecraft:',
 ];
 let ipcGuardInstalled = false;
 function installIpcAuthGuard() {
@@ -190,6 +197,23 @@ function registerIpcHandlers() {
     return true;
   });
 
+  // Theme & personalization — persisted outside the packaged app directory
+  // (see ThemeManager), so it survives every future update/reinstall.
+  ipcMain.handle('theme:get', () => themeManager.get());
+  ipcMain.handle('theme:setActive', (_, id: string) => { themeManager.setActiveTheme(id); return true; });
+  ipcMain.handle('theme:setCustom', (_, tokens: Record<string, string>) => { themeManager.setCustomTokens(tokens); return true; });
+  ipcMain.handle('theme:reset', () => { themeManager.resetToDefault(); return true; });
+  ipcMain.handle('theme:getAvatar', () => themeManager.getAvatar());
+  ipcMain.handle('theme:removeAvatar', () => themeManager.removeAvatar());
+  ipcMain.handle('theme:pickAvatar', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return { success: false, error: null };
+    return themeManager.setAvatar(result.filePaths[0]);
+  });
+
   // Dialog
   ipcMain.handle('dialog:openDirectory', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -231,6 +255,38 @@ function registerIpcHandlers() {
   ipcMain.handle('server:command', (_, id: string, command: string) => serverManager.sendCommand(id, command));
   // Apply known config fixes shipped with app updates to an existing server
   ipcMain.handle('server:maintenance', (_, id: string) => serverManager.applyMaintenanceFixes(id));
+
+  // Minecraft server management — the second real game backend (see
+  // MinecraftManager.ts for why this stays its own service instead of a
+  // shared abstraction with FiveM's ServerManager).
+  ipcMain.handle('minecraft:getAll', () => minecraftManager.getAllServers());
+  ipcMain.handle('minecraft:get', (_, id: string) => minecraftManager.getServer(id));
+  ipcMain.handle('minecraft:consoleBuffer', (_, id: string) => minecraftManager.getConsoleBuffer(id));
+  ipcMain.handle('minecraft:delete', (_, id: string, deleteFiles: boolean) => minecraftManager.deleteServer(id, deleteFiles));
+  ipcMain.handle('minecraft:detectJava', () => minecraftManager.detectJava());
+  ipcMain.handle('minecraft:javaRequirement', (_, version: string) => minecraftManager.javaRequirementFor(version));
+  ipcMain.handle('minecraft:fetchVanillaVersions', () => minecraftManager.fetchVanillaVersions());
+  ipcMain.handle('minecraft:fetchPaperVersions', () => minecraftManager.fetchPaperVersions());
+  ipcMain.handle('minecraft:create', (event, config) =>
+    minecraftManager.createServer(config, (pct, message) => event.sender.send('minecraft:createProgress', { pct, message })));
+  ipcMain.handle('minecraft:detectExisting', (_, dirPath: string) => minecraftManager.detectExistingServer(dirPath));
+  ipcMain.handle('minecraft:import', (_, dirPath: string, name: string, ramMB: number) => minecraftManager.importServer(dirPath, name, ramMB));
+  ipcMain.handle('minecraft:start', (_, id: string) => minecraftManager.startServer(id));
+  ipcMain.handle('minecraft:stop', (_, id: string, force?: boolean) => minecraftManager.stopServer(id, !!force));
+  ipcMain.handle('minecraft:restart', (_, id: string) => minecraftManager.restartServer(id));
+  ipcMain.handle('minecraft:setAutoRestart', (_, id: string, enabled: boolean) => minecraftManager.setAutoRestart(id, enabled));
+  ipcMain.handle('minecraft:command', (_, id: string, command: string) => minecraftManager.sendCommand(id, command));
+  ipcMain.handle('minecraft:processStats', (_, id: string) => minecraftManager.getProcessStats(id));
+  ipcMain.handle('minecraft:players', (_, id: string) => minecraftManager.getPlayers(id));
+  ipcMain.handle('minecraft:readProperties', (_, id: string) => minecraftManager.readProperties(id));
+  ipcMain.handle('minecraft:writeProperties', (_, id: string, changes: Record<string, string>) => minecraftManager.writeProperties(id, changes));
+  ipcMain.handle('minecraft:listFiles', (_, id: string, relPath: string) => minecraftManager.listFiles(id, relPath));
+  ipcMain.handle('minecraft:readFile', (_, id: string, relPath: string) => minecraftManager.readServerFile(id, relPath));
+  ipcMain.handle('minecraft:writeFile', (_, id: string, relPath: string, content: string) => minecraftManager.writeServerFile(id, relPath, content));
+  ipcMain.handle('minecraft:createBackup', (_, id: string) => minecraftManager.createBackup(id));
+  ipcMain.handle('minecraft:listBackups', (_, id: string) => minecraftManager.listBackups(id));
+  ipcMain.handle('minecraft:restoreBackup', (_, backupId: string) => minecraftManager.restoreBackup(backupId));
+  ipcMain.handle('minecraft:deleteBackup', (_, backupId: string) => minecraftManager.deleteBackup(backupId));
 
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());

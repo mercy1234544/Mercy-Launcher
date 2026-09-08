@@ -3,19 +3,22 @@ import { motion } from 'framer-motion';
 import * as Tabs from '@radix-ui/react-tabs';
 import { useNavigate } from 'react-router-dom';
 import {
-  Moon, Sun, Monitor, HardDrive, Cpu, MemoryStick, Activity, Info, Database,
+  HardDrive, Cpu, MemoryStick, Activity, Info, Database,
   Shield, KeyRound, LogOut, SlidersHorizontal, Download, Gamepad2, RefreshCw,
   UserCircle2, FolderOpen, Power, PictureInPicture2, CheckCircle2, Loader2,
-  ArrowUpCircle, Star, Server as ServerIcon, Package, ChevronRight,
+  ArrowUpCircle, Star, Server as ServerIcon, Package, ChevronRight, Palette,
+  Check, RotateCcw, ImagePlus, Trash2, X,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { useLocalAccess } from '../stores/useLocalAccess';
 import { useAppAuth } from '../stores/useAppAuth';
 import { useFavorites } from '../stores/useFavorites';
+import { useTheme } from '../stores/useTheme';
 import { isSupabaseConfigured } from '../lib/supabase';
 import MercyLogo from '../components/MercyLogo';
 import { Panel, Toggle, SectionHeading } from '../components/ui';
 import { GAMES } from '../config/games';
+import { THEMES, NAV_COLOR_TARGETS, CUSTOMIZABLE_TOKEN_GROUPS, getTheme } from '../config/themes';
 import toast from 'react-hot-toast';
 
 interface SysInfo {
@@ -53,6 +56,7 @@ function Row({ icon: Icon, iconClass, title, sub, control }: { icon: React.Compo
 
 const CATEGORIES = [
   { id: 'general', label: 'General', icon: SlidersHorizontal },
+  { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'downloads', label: 'Downloads', icon: Download },
   { id: 'games', label: 'Games', icon: Gamepad2 },
   { id: 'updates', label: 'Updates', icon: RefreshCw },
@@ -63,7 +67,7 @@ const CATEGORIES = [
 type CategoryId = typeof CATEGORIES[number]['id'];
 
 export default function Settings() {
-  const { theme, toggleTheme, servers } = useAppStore();
+  const { servers } = useAppStore();
   const [sys, setSys] = useState<SysInfo | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const navigate = useNavigate();
@@ -78,6 +82,30 @@ export default function Settings() {
   const [signingOut, setSigningOut] = useState(false);
   const handleSignOut = async () => { setSigningOut(true); await signOut(); setSigningOut(false); toast('Signed out'); };
   const favoritesCount = useFavorites((s) => s.favorites.length);
+
+  // ── Appearance ─────────────────────────────────────────────────────────────
+  const activeThemeId = useTheme((s) => s.activeThemeId);
+  const customTokens = useTheme((s) => s.customTokens);
+  const hasCustomTheme = useTheme((s) => s.hasCustomTheme);
+  const avatarDataUrl = useTheme((s) => s.avatarDataUrl);
+  const previewPreset = useTheme((s) => s.previewPreset);
+  const previewToken = useTheme((s) => s.previewToken);
+  const previewNavColor = useTheme((s) => s.previewNavColor);
+  const saveTheme = useTheme((s) => s.save);
+  const discardThemeChanges = useTheme((s) => s.discardChanges);
+  const restoreDefaultTheme = useTheme((s) => s.restoreDefault);
+  const pickAvatar = useTheme((s) => s.pickAvatar);
+  const removeAvatarAction = useTheme((s) => s.removeAvatar);
+  const [savingTheme, setSavingTheme] = useState(false);
+  const activePreset = getTheme(activeThemeId);
+  const tokenValue = (key: string) => customTokens[key] ?? (activePreset.tokens as any)[key] ?? '';
+  const navColorValue = (navId: string) => customTokens[`nav-${navId}`] ?? '';
+  const handleSaveTheme = async () => { setSavingTheme(true); await saveTheme(); setSavingTheme(false); toast.success('Theme saved'); };
+  const handleAvatarPick = async () => {
+    const res = await pickAvatar();
+    if (!res.success && res.error) toast.error(res.error);
+    else if (res.success) toast.success('Profile image updated');
+  };
 
   // ── General: launch behavior ──────────────────────────────────────────────
   const [startWithWindows, setStartWithWindows] = useState(false);
@@ -184,13 +212,8 @@ export default function Settings() {
                     control={<Toggle checked={startWithWindows} onChange={handleStartWithWindows} />} />
                   <Row icon={PictureInPicture2} iconClass="bg-sky-600/20 border-sky-500/20 text-sky-400" title="Minimize to tray" sub="Keep running in the background when you close the window"
                     control={<Toggle checked={minimizeToTray} onChange={handleMinimizeToTray} />} />
-                  <Row icon={theme === 'dark' ? Moon : Sun} iconClass="bg-purple-600/20 border-purple-500/20 text-purple-400" title="Theme" sub="Switch between dark and light mode"
-                    control={
-                      <button onClick={toggleTheme} className="flex items-center gap-2 px-4 py-2 bg-overlay-6 rounded-xl hover:bg-overlay-10 border border-overlay-8 transition-colors">
-                        {theme === 'dark' ? <Moon size={15} className="text-blue-400" /> : <Sun size={15} className="text-amber-400" />}
-                        <span className="text-sm capitalize text-surface-200">{theme} Mode</span>
-                      </button>
-                    } />
+                  <Row icon={Palette} iconClass="bg-purple-600/20 border-purple-500/20 text-purple-400" title="Appearance" sub="Themes, colors, and your profile image have their own tab now"
+                    control={<button onClick={() => setTab('appearance')} className="btn-secondary text-xs py-2 px-3 shrink-0 flex items-center gap-1.5">Open <ChevronRight size={13} /></button>} />
 
                   {!isSupabaseConfigured() && (
                     <Row icon={Shield} iconClass="bg-primary-600/20 border-primary-500/25 text-primary-300" title={adminUnlocked ? 'Admin access is on for this computer' : adminHasPin ? 'Admin access' : 'Set up admin access'}
@@ -202,6 +225,119 @@ export default function Settings() {
                       )} />
                   )}
                 </>
+              </Tabs.Content>
+
+              {/* ═══ Appearance ═══ */}
+              <Tabs.Content value="appearance" className="space-y-5 outline-none">
+                {/* Profile image */}
+                <Panel>
+                  <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Profile Image</p>
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 rounded-2xl bg-primary-500/15 border border-primary-500/25 flex items-center justify-center overflow-hidden shrink-0">
+                      {avatarDataUrl ? <img src={avatarDataUrl} alt="" className="w-full h-full object-cover" /> : <UserCircle2 size={28} className="text-primary-300" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-surface-100">{avatarDataUrl ? 'Custom image set' : 'Using the default Mercy avatar'}</p>
+                      <p className="text-xs text-surface-500 mt-0.5">PNG, JPG, WEBP, or GIF — shown in the sidebar and Settings.</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button onClick={handleAvatarPick} className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"><ImagePlus size={13} /> Choose Image</button>
+                      {avatarDataUrl && (
+                        <button onClick={removeAvatarAction} className="p-2 rounded-lg text-surface-500 hover:text-error hover:bg-overlay-6 transition-colors"><Trash2 size={14} /></button>
+                      )}
+                    </div>
+                  </div>
+                </Panel>
+
+                {/* Presets */}
+                <Panel>
+                  <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Theme Presets</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    {THEMES.map((t) => {
+                      const active = activeThemeId === t.id && !hasCustomTheme;
+                      return (
+                        <button key={t.id} onClick={() => previewPreset(t.id)}
+                          className={`relative rounded-xl border p-3 text-left transition-all ${active ? 'border-primary-500/50 bg-primary-500/10' : 'border-overlay-6 bg-overlay-3 hover:bg-overlay-6 hover:border-overlay-10'}`}>
+                          {active && <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-primary-500 flex items-center justify-center"><Check size={10} className="text-white" /></div>}
+                          <div className="flex gap-1 mb-2">
+                            {t.swatch.map((c, i) => <div key={i} className="w-5 h-5 rounded-md border border-overlay-10" style={{ background: c }} />)}
+                          </div>
+                          <p className="text-xs font-bold text-surface-100">{t.name}</p>
+                          <p className="text-[10px] text-surface-500 mt-0.5 line-clamp-2">{t.description}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Panel>
+
+                {/* Custom colors */}
+                <Panel>
+                  <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Custom Colors</p>
+                  <div className="space-y-4">
+                    {CUSTOMIZABLE_TOKEN_GROUPS.map((group) => (
+                      <div key={group.label}>
+                        <p className="text-[11px] font-semibold text-surface-400 mb-2">{group.label}</p>
+                        <div className="flex flex-wrap gap-3">
+                          {group.keys.map((key) => (
+                            <label key={key} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-overlay-3 border border-overlay-6 cursor-pointer hover:bg-overlay-6 transition-colors">
+                              <input type="color" value={tokenValue(key).startsWith('#') ? tokenValue(key) : '#6366f1'}
+                                onChange={(e) => previewToken(key, e.target.value)}
+                                className="w-6 h-6 rounded border-0 bg-transparent cursor-pointer" />
+                              <span className="text-[11px] text-surface-300 capitalize">{key.replace(/-/g, ' ')}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Panel>
+
+                {/* Navigation colors */}
+                <Panel>
+                  <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-1">Navigation Colors</p>
+                  <p className="text-[11px] text-surface-500 mb-3">Give individual sidebar items their own active color.</p>
+                  <div className="flex flex-wrap gap-3">
+                    {NAV_COLOR_TARGETS.map((nav) => (
+                      <label key={nav.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-overlay-3 border border-overlay-6 cursor-pointer hover:bg-overlay-6 transition-colors">
+                        <input type="color" value={navColorValue(nav.id) || '#6366f1'}
+                          onChange={(e) => previewNavColor(nav.id, e.target.value)}
+                          className="w-6 h-6 rounded border-0 bg-transparent cursor-pointer" />
+                        <span className="text-[11px] text-surface-300">{nav.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </Panel>
+
+                {/* Live preview */}
+                <Panel>
+                  <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Preview</p>
+                  <div className="rounded-xl border border-overlay-6 p-4 flex items-center gap-4" style={{ background: 'var(--bg-base)' }}>
+                    <div className="w-32 rounded-lg p-2 space-y-1 shrink-0" style={{ background: 'var(--surface-925)' }}>
+                      {['Home', 'Library', 'Settings'].map((label, i) => (
+                        <div key={label} className="text-[10px] px-2 py-1.5 rounded-md" style={i === 0
+                          ? { background: 'color-mix(in srgb, var(--primary-500) 15%, transparent)', color: 'var(--primary-400)' }
+                          : { color: 'var(--text-muted)' }}>{label}</div>
+                      ))}
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <div className="rounded-lg p-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+                        <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Card title</p>
+                        <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Secondary text in this theme</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="text-[10px] font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: 'var(--primary-600)' }}>Primary Button</div>
+                        <div className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg badge-success">Success</div>
+                        <div className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg badge-danger">Error</div>
+                      </div>
+                    </div>
+                  </div>
+                </Panel>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={discardThemeChanges} className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"><X size={13} /> Discard</button>
+                  <button onClick={restoreDefaultTheme} className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"><RotateCcw size={13} /> Restore Default</button>
+                  <button onClick={handleSaveTheme} disabled={savingTheme} className="btn-primary text-xs py-2 px-3 flex items-center gap-1.5"><Check size={13} /> {savingTheme ? 'Saving…' : 'Save Theme'}</button>
+                </div>
               </Tabs.Content>
 
               {/* ═══ Downloads ═══ */}
