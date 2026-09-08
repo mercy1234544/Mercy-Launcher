@@ -7,6 +7,7 @@ import {
   Settings as SettingsIcon, FolderOpen,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
+import { Panel, SectionHeading } from '../components/ui';
 import toast from 'react-hot-toast';
 
 // The FiveM hub — Mercy Launcher's first fully functional game hub. This is the
@@ -76,24 +77,23 @@ export default function FiveMHub() {
   return (
     <motion.div variants={containerVariants} initial="hidden" animate="show" className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* Header */}
-      <motion.div variants={itemVariants} className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-orange-500/15 border border-orange-500/25 flex items-center justify-center">
-            <Car size={26} className="text-orange-300" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-extrabold text-surface-100 tracking-tight">FIVEM</h1>
-            <p className="text-sm text-surface-400 font-medium">FiveM Management</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={handleRefresh} disabled={refreshing} className="btn-secondary text-xs py-2 flex items-center gap-1.5">
-            {refreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
-          </button>
-          <button onClick={() => navigate('/settings')} className="btn-secondary text-xs py-2 flex items-center gap-1.5">
-            <SettingsIcon size={13} /> Settings
-          </button>
-        </div>
+      <motion.div variants={itemVariants}>
+        <SectionHeading
+          icon={Car}
+          iconClass="bg-orange-500/15 border-orange-500/25 text-orange-300"
+          title="FiveM"
+          subtitle="FiveM Management"
+          action={
+            <div className="flex items-center gap-2">
+              <button onClick={handleRefresh} disabled={refreshing} className="btn-secondary text-xs py-2 flex items-center gap-1.5">
+                {refreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
+              </button>
+              <button onClick={() => navigate('/settings')} className="btn-secondary text-xs py-2 flex items-center gap-1.5">
+                <SettingsIcon size={13} /> Settings
+              </button>
+            </div>
+          }
+        />
       </motion.div>
 
       {/* Stats */}
@@ -103,11 +103,11 @@ export default function FiveMHub() {
           { icon: Zap, value: String(runningServers), label: 'Running Now', tint: 'bg-purple-600/20 text-purple-400 border-purple-500/20' },
           { icon: Package, value: totalResources.toLocaleString(), label: 'Total Resources', tint: 'bg-amber-600/20 text-amber-400 border-amber-500/20' },
         ].map((s) => (
-          <div key={s.label} className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+          <Panel key={s.label}>
             <div className={`w-11 h-11 rounded-xl border flex items-center justify-center mb-4 ${s.tint}`}><s.icon size={19} /></div>
             <p className="text-3xl font-extrabold text-surface-100 tracking-tight">{s.value}</p>
             <p className="text-xs text-surface-500 mt-0.5">{s.label}</p>
-          </div>
+          </Panel>
         ))}
       </motion.div>
 
@@ -118,15 +118,14 @@ export default function FiveMHub() {
           { icon: Compass, title: 'Browse Servers', sub: 'Find and join FiveM servers', tint: 'bg-orange-600/20 text-orange-400 border-orange-500/20', path: '/browse-servers' },
           { icon: Server, title: 'My Servers', sub: `${servers.length} server${servers.length !== 1 ? 's' : ''} configured`, tint: 'bg-emerald-600/20 text-emerald-400 border-emerald-500/20', path: '/servers' },
         ].map((c) => (
-          <button key={c.title} onClick={() => navigate(c.path)}
-            className="group flex items-center gap-5 rounded-2xl border border-overlay-6 bg-surface-900/40 hover:bg-overlay-4 hover:border-primary-500/30 p-6 text-left transition-all">
+          <Panel as="button" interactive key={c.title} padding="lg" onClick={() => navigate(c.path)} className="group flex items-center gap-5">
             <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.tint}`}><c.icon size={24} /></div>
             <div className="flex-1 min-w-0">
               <p className="text-base font-bold text-surface-100">{c.title}</p>
               <p className="text-xs text-surface-500 mt-0.5">{c.sub}</p>
             </div>
             <ArrowRight size={17} className="text-surface-600 group-hover:text-primary-300 group-hover:translate-x-0.5 transition-all shrink-0" />
-          </button>
+          </Panel>
         ))}
       </motion.div>
 
@@ -138,14 +137,13 @@ export default function FiveMHub() {
           { icon: Package, title: 'Store', sub: 'Scripts & resources', tint: 'bg-blue-600/20 text-blue-400 border-blue-500/20', path: '/marketplace' },
           { icon: Download, title: 'Import Server', sub: 'Bring in an existing folder', tint: 'bg-rose-600/20 text-rose-400 border-rose-500/20', onClick: () => setShowImportModal(true) },
         ].map((c: any) => (
-          <button key={c.title} onClick={() => (c.onClick ? c.onClick() : navigate(c.path))}
-            className="group flex items-center gap-3 rounded-2xl border border-overlay-6 bg-surface-900/40 hover:bg-overlay-4 hover:border-overlay-10 p-4 text-left transition-all">
+          <Panel as="button" interactive key={c.title} padding="sm" onClick={() => (c.onClick ? c.onClick() : navigate(c.path))} className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${c.tint}`}><c.icon size={17} /></div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-surface-100">{c.title}</p>
               <p className="text-xs text-surface-500 truncate">{c.sub}</p>
             </div>
-          </button>
+          </Panel>
         ))}
       </motion.div>
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Car, Blocks, FlagTriangleRight, Truck, Globe2, ArrowLeft, Users, Gauge, Package, LogIn } from 'lucide-react';
 import type { MercyServer, MercyGameId } from '../types/mercyServer';
+import { Panel } from '../components/ui';
 
 // Mercy's Servers — official/public servers Mercy will eventually operate,
 // separate from a user's own servers (managed via each game's hub). This is
@@ -43,18 +44,21 @@ export default function MercyServers() {
 
         {servers.length === 0 ? (
           <div className="text-center">
-            <div className="w-16 h-16 rounded-2xl bg-primary-500/15 border border-primary-500/25 flex items-center justify-center mx-auto mb-5">
-              <Globe2 size={28} className="text-primary-300" />
+            <div className="relative w-16 h-16 mx-auto mb-5">
+              <div className="absolute inset-0 rounded-2xl bg-primary-500/20 blur-xl" />
+              <div className="relative w-16 h-16 rounded-2xl bg-primary-500/15 border border-primary-500/25 flex items-center justify-center">
+                <Globe2 size={28} className="text-primary-300" />
+              </div>
             </div>
             <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-overlay-6 text-surface-400 border border-overlay-10 mb-3">Coming Soon</span>
-            <h1 className="text-2xl font-extrabold text-surface-100">Mercy's Servers</h1>
+            <h1 className="text-2xl font-extrabold text-surface-100 tracking-tight">Mercy's Servers</h1>
             <p className="text-sm text-surface-400 mt-2">Official servers from Mercy.</p>
             <p className="text-sm text-surface-500 mt-3 leading-relaxed">
               Our official playable {meta.label} servers are currently being prepared. Once they're online, you'll be able to see them here — status, players, and everything you need to join — right from Mercy Launcher.
             </p>
 
-            <div className="mt-6 rounded-2xl border border-overlay-6 bg-surface-900/40 p-5 text-left">
-              <p className="text-[10px] uppercase tracking-wider text-surface-500 mb-2.5">Planned for this page</p>
+            <Panel className="mt-6 text-left">
+              <p className="text-[10px] uppercase tracking-wider text-surface-500 mb-2.5 font-semibold">Planned for this page</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
                 {PLANNED.map((p) => (
                   <div key={p} className="flex items-center gap-2 text-xs text-surface-300">
@@ -62,7 +66,7 @@ export default function MercyServers() {
                   </div>
                 ))}
               </div>
-            </div>
+            </Panel>
 
             <button onClick={() => navigate('/')} className="btn-secondary text-xs py-2 mt-6 mx-auto flex items-center gap-1.5">
               <ArrowLeft size={13} /> Back to Home
@@ -75,7 +79,7 @@ export default function MercyServers() {
           <div className="space-y-4">
             <h1 className="text-xl font-extrabold text-surface-100">Mercy's {meta.label} Servers</h1>
             {servers.map((s) => (
-              <div key={s.id} className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+              <Panel key={s.id}>
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-bold text-surface-100">{s.name}</p>
                   <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${s.status === 'online' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-overlay-6 text-surface-400'}`}>{s.status}</span>
@@ -87,7 +91,7 @@ export default function MercyServers() {
                   {s.requiredContent.length > 0 && <span className="flex items-center gap-1"><Package size={12} /> {s.requiredContent.length} content items</span>}
                 </div>
                 <button className="btn-primary text-xs py-1.5 mt-3 flex items-center gap-1.5"><LogIn size={13} /> Join Server</button>
-              </div>
+              </Panel>
             ))}
           </div>
         )}

@@ -68,14 +68,16 @@ export default function TitleBar() {
         </button>
       </div>
 
+      <div className="w-px h-6 bg-overlay-8 shrink-0" style={{ WebkitAppRegion: 'no-drag' } as any} />
+
       <div className="flex shrink-0" style={{ WebkitAppRegion: 'no-drag' } as any}>
-        <button onClick={handleMinimize} className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 transition-all duration-150">
+        <button onClick={handleMinimize} aria-label="Minimize" title="Minimize" className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 transition-colors duration-150">
           <Minus size={14} />
         </button>
-        <button onClick={handleMaximize} className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 transition-all duration-150">
+        <button onClick={handleMaximize} aria-label="Maximize" title="Maximize" className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 transition-colors duration-150">
           <Square size={11} />
         </button>
-        <button onClick={handleClose} className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-100 hover:bg-red-600/90 transition-all duration-150">
+        <button onClick={handleClose} aria-label="Close" title="Close" className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-100 hover:bg-red-600/90 transition-colors duration-150">
           <X size={14} />
         </button>
       </div>

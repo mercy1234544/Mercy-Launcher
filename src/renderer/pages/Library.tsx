@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Car, Blocks, FlagTriangleRight, Truck, LayoutGrid, Package, ArrowRight } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
+import { Panel, SectionHeading } from '../components/ui';
 
 // Unified Library shell across every game hub. FiveM shows REAL numbers pulled
 // from the servers already loaded by ServerManager; the other games show an
@@ -25,7 +26,6 @@ export default function Library() {
 
   const totalResources = servers.reduce((sum, s) => sum + s.resourceCount, 0);
   const showFivem = filter === 'all' || filter === 'fivem';
-  const showOthers = filter === 'all';
   const comingSoonGames = [
     { id: 'minecraft', label: 'Minecraft', icon: Blocks, tint: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/25' },
     { id: 'assetto', label: 'Assetto Corsa', icon: FlagTriangleRight, tint: 'text-rose-300 bg-rose-500/15 border-rose-500/25' },
@@ -34,22 +34,19 @@ export default function Library() {
 
   return (
     <div className="p-7 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl bg-primary-500/15 border border-primary-500/25 flex items-center justify-center"><LayoutGrid size={20} className="text-primary-300" /></div>
-        <div><h1 className="text-xl font-extrabold text-surface-100">Library</h1><p className="text-xs text-surface-500">All your installed content, across every game.</p></div>
-      </div>
+      <SectionHeading icon={LayoutGrid} title="Library" subtitle="All your installed content, across every game." />
 
       <div className="flex flex-wrap gap-1.5">
         {FILTERS.map((f) => (
           <button key={f.id} onClick={() => setFilter(f.id)}
-            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all ${filter === f.id ? 'bg-primary-500/15 text-primary-200 border-primary-500/30' : 'bg-overlay-3 text-surface-300 border-overlay-6 hover:bg-overlay-6'}`}>
+            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all duration-150 ${filter === f.id ? 'bg-primary-500/15 text-primary-200 border-primary-500/30' : 'bg-overlay-3 text-surface-300 border-overlay-6 hover:bg-overlay-6'}`}>
             {f.label}
           </button>
         ))}
       </div>
 
       {showFivem && (
-        <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+        <Panel>
           <div className="flex items-center gap-2 mb-3">
             <Car size={16} className="text-orange-300" /><p className="text-sm font-bold text-surface-100">FiveM</p>
           </div>
@@ -64,17 +61,17 @@ export default function Library() {
               <button onClick={() => navigate('/servers')} className="btn-secondary text-xs py-1.5 flex items-center gap-1.5">Open My Servers <ArrowRight size={12} /></button>
             </div>
           )}
-        </div>
+        </Panel>
       )}
 
       {comingSoonGames.map((g) => (
-        <div key={g.id} className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+        <Panel key={g.id}>
           <div className="flex items-center gap-2 mb-2">
             <g.icon size={16} className={g.tint.split(' ')[0]} /><p className="text-sm font-bold text-surface-100">{g.label}</p>
             <span className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-overlay-6 text-surface-500 border border-overlay-10">Soon</span>
           </div>
           <p className="text-xs text-surface-500">No content yet — this hub isn't built yet.</p>
-        </div>
+        </Panel>
       ))}
     </div>
   );

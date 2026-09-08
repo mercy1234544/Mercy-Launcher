@@ -18,6 +18,15 @@ import { SettingsManager } from './services/SettingsManager';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
 
+// On some Windows profiles Chromium's GPU shader disk cache fails to
+// initialize ("Unable to move the cache: Access is denied" / "Gpu Cache
+// Creation failed") and leaves a stuck, unpainted compositor tile on screen —
+// a fixed black rectangle that persists across navigation because it's a
+// viewport-space GPU tile, not a real DOM element. Must run before the app is
+// ready. Disabling the shader disk cache only costs a slightly slower shader
+// (re)compile per launch, never visual correctness.
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;

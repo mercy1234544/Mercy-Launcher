@@ -6,6 +6,7 @@ import { useAppStore } from '../stores/useAppStore';
 import { useAppAuth } from '../stores/useAppAuth';
 import { FiveMArt, MinecraftArt, AssettoCorsaArt, BeamNGArt } from '../components/GameArt';
 import GameCard from '../components/GameCard';
+import { Panel } from '../components/ui';
 import toast from 'react-hot-toast';
 
 const containerVariants = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } };
@@ -79,7 +80,8 @@ export default function Home() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Latest News */}
-        <motion.div variants={itemVariants} className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5 flex flex-col">
+        <motion.div variants={itemVariants}>
+        <Panel className="flex flex-col h-full">
           <p className="text-sm font-bold text-surface-100 mb-3 flex items-center gap-2"><Rss size={15} className="text-primary-300" /> Latest News</p>
           {news.length === 0 ? (
             <p className="text-xs text-surface-500 py-6 text-center flex-1">No release notes available right now.</p>
@@ -106,10 +108,12 @@ export default function Home() {
             className="mt-3 w-full text-center text-xs font-semibold text-surface-400 hover:text-primary-300 py-2 rounded-lg hover:bg-overlay-4 transition-all flex items-center justify-center gap-1.5">
             View All News <ArrowRight size={12} />
           </button>
+        </Panel>
         </motion.div>
 
         {/* Quick Actions */}
-        <motion.div variants={itemVariants} className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+        <motion.div variants={itemVariants}>
+        <Panel>
           <p className="text-sm font-bold text-surface-100 mb-3 flex items-center gap-2"><Compass size={15} className="text-primary-300" /> Quick Actions</p>
           <div className="space-y-1">
             {quickActions.map((a) => (
@@ -125,6 +129,7 @@ export default function Home() {
               </button>
             ))}
           </div>
+        </Panel>
         </motion.div>
       </div>
     </motion.div>

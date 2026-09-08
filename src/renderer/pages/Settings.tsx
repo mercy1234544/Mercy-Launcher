@@ -13,6 +13,7 @@ import { useAppAuth } from '../stores/useAppAuth';
 import { useFavorites } from '../stores/useFavorites';
 import { isSupabaseConfigured } from '../lib/supabase';
 import MercyLogo from '../components/MercyLogo';
+import { Panel, Toggle, SectionHeading } from '../components/ui';
 import toast from 'react-hot-toast';
 
 interface SysInfo {
@@ -33,23 +34,9 @@ function UsageBar({ pct, color }: { pct: number; color: string }) {
   );
 }
 
-function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative w-10 h-6 rounded-full shrink-0 transition-colors ${checked ? 'bg-primary-600' : 'bg-overlay-10'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-    >
-      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0'}`} />
-    </button>
-  );
-}
-
 function Row({ icon: Icon, iconClass, title, sub, control }: { icon: React.ComponentType<{ size?: number | string; className?: string }>; iconClass: string; title: string; sub: string; control: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5 flex items-center gap-4">
+    <Panel className="flex items-center gap-4">
       <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${iconClass}`}>
         <Icon size={17} />
       </div>
@@ -58,7 +45,7 @@ function Row({ icon: Icon, iconClass, title, sub, control }: { icon: React.Compo
         <p className="text-xs text-surface-500 mt-0.5">{sub}</p>
       </div>
       {control}
-    </div>
+    </Panel>
   );
 }
 
@@ -163,25 +150,34 @@ export default function Settings() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 max-w-6xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-extrabold text-surface-100">Settings</h1>
-        <p className="text-sm text-surface-400 mt-1">Manage Mercy Launcher's behavior, games, and your account</p>
+        <SectionHeading icon={SlidersHorizontal} title="Settings" subtitle="Manage Mercy Launcher's behavior, games, and your account" />
       </div>
 
       <div className="flex gap-6 items-start">
         {/* Category rail */}
         <div className="w-48 shrink-0 space-y-1">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setTab(c.id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all text-left ${
-                tab === c.id ? 'bg-primary-600/15 text-primary-300 border border-primary-500/25' : 'text-surface-400 hover:text-surface-200 hover:bg-overlay-4 border border-transparent'
-              }`}
-            >
-              <c.icon size={15} />
-              {c.label}
-            </button>
-          ))}
+          {CATEGORIES.map((c) => {
+            const active = tab === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setTab(c.id)}
+                className={`relative w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors text-left ${
+                  active ? 'text-primary-300' : 'text-surface-400 hover:text-surface-200 hover:bg-overlay-4'
+                }`}
+              >
+                {active && (
+                  <motion.span
+                    layoutId="settings-tab-active"
+                    transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+                    className="absolute inset-0 rounded-xl bg-primary-600/15 border border-primary-500/25"
+                  />
+                )}
+                <c.icon size={15} className="relative" />
+                <span className="relative">{c.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Content */}
@@ -192,9 +188,9 @@ export default function Settings() {
               {tab === 'general' && (
                 <>
                   <Row icon={Power} iconClass="bg-primary-600/20 border-primary-500/20 text-primary-400" title="Start with Windows" sub="Launch Mercy Launcher automatically when you sign in"
-                    control={<ToggleSwitch checked={startWithWindows} onChange={handleStartWithWindows} />} />
+                    control={<Toggle checked={startWithWindows} onChange={handleStartWithWindows} />} />
                   <Row icon={PictureInPicture2} iconClass="bg-sky-600/20 border-sky-500/20 text-sky-400" title="Minimize to tray" sub="Keep running in the background when you close the window"
-                    control={<ToggleSwitch checked={minimizeToTray} onChange={handleMinimizeToTray} />} />
+                    control={<Toggle checked={minimizeToTray} onChange={handleMinimizeToTray} />} />
                   <Row icon={theme === 'dark' ? Moon : Sun} iconClass="bg-purple-600/20 border-purple-500/20 text-purple-400" title="Theme" sub="Switch between dark and light mode"
                     control={
                       <button onClick={toggleTheme} className="flex items-center gap-2 px-4 py-2 bg-overlay-6 rounded-xl hover:bg-overlay-10 border border-overlay-8 transition-colors">
@@ -227,8 +223,7 @@ export default function Settings() {
                   {GAME_ROWS.map((g) => {
                     const count = g.id === 'fivem' ? servers.length : null;
                     return (
-                      <button key={g.id} onClick={() => navigate(g.path)}
-                        className="w-full rounded-2xl border border-overlay-6 bg-surface-900/40 p-5 flex items-center gap-4 hover:border-primary-500/30 hover:bg-overlay-4 transition-all text-left">
+                      <Panel as="button" interactive key={g.id} onClick={() => navigate(g.path)} className="group w-full flex items-center gap-4">
                         <div className="w-10 h-10 rounded-xl bg-overlay-6 border border-overlay-10 flex items-center justify-center shrink-0"><Gamepad2 size={17} className="text-primary-300" /></div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-surface-100">{g.label}</p>
@@ -236,8 +231,8 @@ export default function Settings() {
                             {g.real ? `${count} server${count === 1 ? '' : 's'} configured` : 'Management hub coming soon'}
                           </p>
                         </div>
-                        <ChevronRight size={14} className="text-surface-600 shrink-0" />
-                      </button>
+                        <ChevronRight size={14} className="text-surface-600 shrink-0 transition-transform group-hover:translate-x-0.5" />
+                      </Panel>
                     );
                   })}
                 </div>
@@ -247,8 +242,8 @@ export default function Settings() {
               {tab === 'updates' && (
                 <>
                   <Row icon={RefreshCw} iconClass="bg-primary-600/20 border-primary-500/20 text-primary-400" title="Automatic updates" sub="Download updates in the background as soon as they're available"
-                    control={<ToggleSwitch checked={autoUpdate} onChange={handleAutoUpdate} />} />
-                  <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5 flex items-center gap-4">
+                    control={<Toggle checked={autoUpdate} onChange={handleAutoUpdate} />} />
+                  <Panel className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-xl bg-overlay-6 border border-overlay-10 flex items-center justify-center shrink-0">
                       {updateStatus === 'checking' || updateStatus === 'downloading' ? <Loader2 size={17} className="text-primary-400 animate-spin" /> :
                         updateStatus === 'ready' ? <CheckCircle2 size={17} className="text-emerald-400" /> :
@@ -272,7 +267,7 @@ export default function Settings() {
                         Check for Updates
                       </button>
                     )}
-                  </div>
+                  </Panel>
                 </>
               )}
 
@@ -280,7 +275,7 @@ export default function Settings() {
               {tab === 'account' && (
                 showAccount ? (
                   <>
-                    <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5 flex items-center gap-4">
+                    <Panel className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-xl bg-primary-600/20 border border-primary-500/25 flex items-center justify-center shrink-0">
                         <UserCircle2 size={17} className="text-primary-300" />
                       </div>
@@ -293,10 +288,10 @@ export default function Settings() {
                       <button onClick={handleSignOut} disabled={signingOut} className="flex items-center gap-1.5 btn-secondary text-xs py-2 shrink-0">
                         <LogOut size={13} /> {signingOut ? 'Signing out…' : 'Sign out'}
                       </button>
-                    </div>
+                    </Panel>
 
                     {/* Profile foundation — real counts only, no invented content */}
-                    <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+                    <Panel>
                       <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Profile</p>
                       <div className="grid grid-cols-3 gap-4">
                         <div>
@@ -322,13 +317,13 @@ export default function Settings() {
                           </div>
                         </div>
                       ) : null}
-                    </div>
+                    </Panel>
                   </>
                 ) : (
-                  <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-8 text-center">
+                  <Panel padding="lg" className="text-center">
                     <p className="text-sm font-semibold text-surface-200">Not signed in</p>
                     <p className="text-xs text-surface-500 mt-1">Sign in with Discord to see your Mercy account here.</p>
-                  </div>
+                  </Panel>
                 )
               )}
 
@@ -336,43 +331,43 @@ export default function Settings() {
               {tab === 'system' && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+                    <Panel>
                       <div className="flex items-center gap-3 mb-1">
                         <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/20 flex items-center justify-center"><HardDrive size={17} className="text-blue-400" /></div>
                         <div><p className="text-[11px] text-surface-500">Total Disk Usage</p><p className="text-xl font-extrabold text-surface-100">{sys?.disk ? `${gb(diskUsed)} GB` : '—'}</p></div>
                       </div>
                       <UsageBar pct={diskPct} color="bg-gradient-to-r from-blue-600 to-blue-400" />
                       <p className="text-[10px] text-surface-500 mt-2">{sys?.disk ? `${gb(diskUsed)} GB of ${gb(sys.disk.total)} GB used · ${gb(sys.disk.free)} GB free` : 'Reading disk…'}</p>
-                    </div>
-                    <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+                    </Panel>
+                    <Panel>
                       <div className="flex items-center gap-3 mb-1">
                         <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/20 flex items-center justify-center"><Database size={17} className="text-purple-400" /></div>
                         <div><p className="text-[11px] text-surface-500">Servers Registered</p><p className="text-xl font-extrabold text-surface-100">{servers.length}</p></div>
                       </div>
                       <UsageBar pct={servers.length > 0 ? 100 : 0} color="bg-gradient-to-r from-purple-600 to-purple-400" />
                       <p className="text-[10px] text-surface-500 mt-2">{servers.length} server{servers.length !== 1 ? 's' : ''} managed by this app</p>
-                    </div>
+                    </Panel>
                   </div>
 
                   <div className="grid grid-cols-3 gap-4">
-                    <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+                    <Panel>
                       <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/20 flex items-center justify-center"><Cpu size={17} className="text-emerald-400" /></div>
                         <div><p className="text-[11px] text-surface-500">CPU Usage</p><p className="text-xl font-extrabold text-surface-100">{sys ? `${sys.cpuUsage.toFixed(1)}%` : '—'}</p></div></div>
                       <UsageBar pct={sys?.cpuUsage ?? 0} color="bg-gradient-to-r from-emerald-600 to-emerald-400" />
-                    </div>
-                    <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+                    </Panel>
+                    <Panel>
                       <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/20 flex items-center justify-center"><MemoryStick size={17} className="text-amber-400" /></div>
                         <div><p className="text-[11px] text-surface-500">RAM Usage</p><p className="text-xl font-extrabold text-surface-100">{sys ? `${memUsedPct.toFixed(1)}%` : '—'}</p></div></div>
                       <UsageBar pct={memUsedPct} color="bg-gradient-to-r from-amber-600 to-orange-400" />
-                    </div>
-                    <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+                    </Panel>
+                    <Panel>
                       <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-sky-600/20 border border-sky-500/20 flex items-center justify-center"><Activity size={17} className="text-sky-400" /></div>
                         <div><p className="text-[11px] text-surface-500">Active Servers</p><p className="text-xl font-extrabold text-surface-100">{running}</p></div></div>
                       <UsageBar pct={servers.length ? (running / servers.length) * 100 : 0} color="bg-gradient-to-r from-sky-600 to-sky-400" />
-                    </div>
+                    </Panel>
                   </div>
 
-                  <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+                  <Panel>
                     <h3 className="text-sm font-bold text-surface-100 mb-4">System Specifications</h3>
                     <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                       {[
@@ -387,13 +382,13 @@ export default function Settings() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </Panel>
                 </>
               )}
 
               {/* ═══ About ═══ */}
               {tab === 'about' && (
-                <div className="rounded-2xl border border-overlay-6 bg-surface-900/40 p-5">
+                <Panel>
                   <div className="flex items-center gap-3 mb-4">
                     <MercyLogo size={40} />
                     <div><p className="text-sm font-bold text-surface-100">Mercy Launcher</p><p className="text-xs text-surface-500">Game Management Hub</p></div>
@@ -410,7 +405,7 @@ export default function Settings() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </Panel>
               )}
           </div>
         </div>

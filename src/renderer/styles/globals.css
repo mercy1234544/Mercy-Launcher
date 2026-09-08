@@ -102,6 +102,23 @@
     @apply bg-primary-500/30;
     color: var(--text-primary);
   }
+
+  /* Consistent keyboard-focus ring across every interactive element — mouse
+     clicks never show it (that's what :focus-visible is for). */
+  button:focus-visible, a:focus-visible, [role="button"]:focus-visible,
+  [role="switch"]:focus-visible, [tabindex]:focus-visible, input:focus-visible {
+    outline: 2px solid rgba(99, 102, 241, 0.6);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer components {

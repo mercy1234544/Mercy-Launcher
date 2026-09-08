@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Home, LayoutGrid, Download, Settings, Shield, UserCircle2, ChevronRight } from 'lucide-react';
 import MercyLogo from './MercyLogo';
@@ -49,38 +50,51 @@ export default function Sidebar() {
             <button
               key={item.path}
               onClick={() => navigate(item.path)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-semibold transition-all ${
-                active
-                  ? 'bg-primary-500/15 text-white shadow-glow-sm border border-primary-500/30'
-                  : 'text-surface-400 hover:text-surface-100 hover:bg-primary-500/5 border border-transparent'
+              className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-semibold transition-colors ${
+                active ? 'text-white' : 'text-surface-400 hover:text-surface-100 hover:bg-overlay-4'
               }`}
             >
-              <item.icon size={16} className={active ? 'text-primary-300' : 'text-surface-500'} />
-              <span className="flex-1 text-left">{item.label}</span>
+              {active && (
+                <motion.span
+                  layoutId="sidebar-active"
+                  transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+                  className="absolute inset-0 rounded-xl bg-primary-500/15 border border-primary-500/30 shadow-glow-sm"
+                />
+              )}
+              <item.icon size={16} className={`relative ${active ? 'text-primary-300' : 'text-surface-500'}`} />
+              <span className="relative flex-1 text-left">{item.label}</span>
             </button>
           );
         })}
 
-        {showAdmin && (
-          <button
-            onClick={() => navigate('/admin')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-semibold transition-all ${
-              location.pathname.startsWith('/admin')
-                ? 'bg-primary-500/15 text-white shadow-glow-sm border border-primary-500/30'
-                : 'text-surface-400 hover:text-surface-100 hover:bg-primary-500/5 border border-transparent'
-            }`}
-          >
-            <Shield size={16} className={location.pathname.startsWith('/admin') ? 'text-primary-300' : 'text-surface-500'} />
-            <span className="flex-1 text-left">Admin</span>
-          </button>
-        )}
+        {showAdmin && (() => {
+          const active = location.pathname.startsWith('/admin');
+          return (
+            <button
+              onClick={() => navigate('/admin')}
+              className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-semibold transition-colors ${
+                active ? 'text-white' : 'text-surface-400 hover:text-surface-100'
+              }`}
+            >
+              {active && (
+                <motion.span
+                  layoutId="sidebar-active"
+                  transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+                  className="absolute inset-0 rounded-xl bg-primary-500/15 border border-primary-500/30 shadow-glow-sm"
+                />
+              )}
+              <Shield size={16} className={`relative ${active ? 'text-primary-300' : 'text-surface-500'}`} />
+              <span className="relative flex-1 text-left">Admin</span>
+            </button>
+          );
+        })()}
       </nav>
 
       {/* Account — bottom-left, real Discord session, click opens Settings
           (where Sign Out already lives) rather than a new menu system. */}
       {showAccount && (
         <button onClick={() => navigate('/settings')}
-          className="shrink-0 m-3 flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-overlay-4 hover:bg-overlay-6 border border-overlay-6 transition-all text-left">
+          className="group shrink-0 m-3 flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-overlay-4 hover:bg-overlay-6 border border-overlay-6 hover:border-overlay-10 transition-all text-left">
           <div className="w-8 h-8 rounded-full bg-primary-500/20 border border-primary-500/25 flex items-center justify-center shrink-0">
             <UserCircle2 size={16} className="text-primary-300" />
           </div>
@@ -88,7 +102,7 @@ export default function Sidebar() {
             <p className="text-xs font-bold text-surface-100 truncate">{authStatus?.username || 'Verified'}</p>
             <p className="text-[10px] text-emerald-400 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> {authStatus?.stale ? 'Offline' : 'Online'}</p>
           </div>
-          <ChevronRight size={14} className="text-surface-500 shrink-0" />
+          <ChevronRight size={14} className="text-surface-500 shrink-0 transition-transform group-hover:translate-x-0.5" />
         </button>
       )}
     </aside>
