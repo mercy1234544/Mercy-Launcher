@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Globe2 } from 'lucide-react';
 import { getGameAssets } from './gameAssets';
 import { LOGO_STYLES } from './GameArt';
+import { setLastGame } from '../lib/recentGame';
 
 // The one place a Home game card is assembled. Real licensed art (see
 // gameAssets.ts for the exact file paths) always wins over the illustrated
@@ -46,11 +47,12 @@ export default function GameCard({ id, label, path, tagline, Art }: GameCardProp
   const assets = getGameAssets(id);
   const logo = LOGO_STYLES[id];
   const mercyServersPath = `/mercy-servers/${id}`;
+  const openPrimary = () => { setLastGame(id, label, path); navigate(path); };
 
   return (
     <div className="group relative rounded-2xl overflow-hidden border border-overlay-6 hover:border-primary-500/40 transition-all duration-300 shadow-lg hover:shadow-glow hover:-translate-y-1 flex flex-col">
       {/* Hero art — also a click shortcut to the primary action */}
-      <button onClick={() => navigate(path)} className="relative h-36 text-left shrink-0 overflow-hidden" aria-label={`Manage or create ${label} servers`}>
+      <button onClick={openPrimary} className="relative h-36 text-left shrink-0 overflow-hidden" aria-label={`Manage or create ${label} servers`}>
         <div className="absolute inset-0 transition-transform duration-500 ease-out group-hover:scale-[1.06] group-hover:brightness-110">
           {assets.background ? <img src={assets.background} alt="" className="w-full h-full object-cover" /> : <Art />}
         </div>
@@ -73,7 +75,7 @@ export default function GameCard({ id, label, path, tagline, Art }: GameCardProp
       {/* Actions — two distinct, separately-clickable rows */}
       <div className="bg-surface-900/60 p-3.5 space-y-2 flex-1 flex flex-col justify-center">
         <p className="text-[11px] text-surface-500 -mt-0.5 mb-0.5">{tagline}</p>
-        <button onClick={() => navigate(path)}
+        <button onClick={openPrimary}
           className="w-full flex items-center justify-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl bg-primary-600 text-white hover:bg-primary-500 active:scale-[0.98] transition-all duration-150">
           Manage / Create Servers <ArrowRight size={13} />
         </button>

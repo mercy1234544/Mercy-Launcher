@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Compass, Server, PlusCircle, MessageCircle, LifeBuoy, ArrowRight, ChevronRight, Rss } from 'lucide-react';
+import { Compass, Server, PlusCircle, MessageCircle, LifeBuoy, ArrowRight, ChevronRight, Rss, History, ArrowUpCircle, Star } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { useAppAuth } from '../stores/useAppAuth';
+import { useFavorites } from '../stores/useFavorites';
 import { FiveMArt, MinecraftArt, AssettoCorsaArt, BeamNGArt } from '../components/GameArt';
 import GameCard from '../components/GameCard';
 import { Panel } from '../components/ui';
+import { getLastGame, type RecentGame } from '../lib/recentGame';
 import toast from 'react-hot-toast';
 
 const containerVariants = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } };
@@ -30,11 +32,45 @@ export default function Home() {
   const navigate = useNavigate();
   const { setServers } = useAppStore();
   const username = useAppAuth((s) => s.status?.username);
+  const favoritesCount = useFavorites((s) => s.favorites.length);
 
   useEffect(() => {
     if (!window.electronAPI) return;
     window.electronAPI.server.getAll().then(setServers).catch(() => {});
   }, []);
+
+  // "Continue Where You Left Off" — real, local navigation history only
+  // (see lib/recentGame.ts). Never seeded; simply absent for a new user.
+  const [lastGame, setLastGame] = useState<RecentGame | null>(null);
+  useEffect(() => { setLastGame(getLastGame()); }, []);
+
+  // Real update-lifecycle state from electron-updater, mirrored here so a
+  // pending update is visible on Home too — not just in the notification
+  // panel. Same event the Notification Center already listens to.
+  const [updateInfo, setUpdateInfo] = useState<{ status: string; version?: string } | null>(null);
+  useEffect(() => {
+    const cleanup = window.electronAPI?.appUpdater?.onStatus((data) => {
+      if (data.status === 'available' || data.status === 'ready') setUpdateInfo({ status: data.status, version: data.version });
+      else if (data.status === 'current') setUpdateInfo(null);
+    });
+    return cleanup;
+  }, []);
+
+  const highlights = [
+    lastGame && {
+      key: 'continue', icon: History, tint: 'bg-primary-500/15 border-primary-500/25 text-primary-300',
+      title: 'Continue Where You Left Off', sub: lastGame.label, onClick: () => navigate(lastGame.path),
+    },
+    updateInfo && {
+      key: 'update', icon: ArrowUpCircle, tint: 'bg-emerald-500/15 border-emerald-500/25 text-emerald-300',
+      title: updateInfo.status === 'ready' ? 'Update ready to install' : 'Update available',
+      sub: updateInfo.version ? `v${updateInfo.version}` : 'A new version of Mercy Launcher', onClick: () => navigate('/settings'),
+    },
+    favoritesCount > 0 && {
+      key: 'favorites', icon: Star, tint: 'bg-amber-500/15 border-amber-500/25 text-amber-300',
+      title: 'Favorites', sub: `${favoritesCount} saved`, onClick: () => navigate('/settings'),
+    },
+  ].filter(Boolean) as { key: string; icon: any; tint: string; title: string; sub: string; onClick: () => void }[];
 
   // Real data — the app's own GitHub releases, same source that powers the updater.
   const [news, setNews] = useState<{ tag: string; name: string; date: string; body: string; url: string }[]>([]);
@@ -72,6 +108,24 @@ export default function Home() {
         </h1>
         <p className="text-sm text-surface-500 mt-1">Launch your favorite games and jump in.</p>
       </motion.div>
+
+      {/* Personalization — only ever real data (see hooks above); nothing
+          renders here until the user has actually done something. */}
+      {highlights.length > 0 && (
+        <motion.div variants={itemVariants} className="flex flex-wrap gap-3">
+          {highlights.map((h) => (
+            <button key={h.key} onClick={h.onClick}
+              className="group flex items-center gap-3 pl-2.5 pr-4 py-2 rounded-xl border border-overlay-6 bg-surface-900/40 hover:bg-overlay-4 hover:border-primary-500/30 transition-all duration-150">
+              <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${h.tint}`}><h.icon size={14} /></div>
+              <div className="text-left">
+                <p className="text-[10px] text-surface-500 leading-tight">{h.title}</p>
+                <p className="text-xs font-semibold text-surface-100 leading-tight">{h.sub}</p>
+              </div>
+              <ArrowRight size={12} className="text-surface-600 group-hover:text-primary-300 group-hover:translate-x-0.5 transition-all shrink-0 ml-1" />
+            </button>
+          ))}
+        </motion.div>
+      )}
 
       {/* Game hero cards */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">

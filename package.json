@@ -1,6 +1,6 @@
 {
   "name": "fivem-server-builder",
-  "version": "1.80.0",
+  "version": "1.81.0",
   "description": "Mercy Launcher — a centralized game-management hub, starting with a full FiveM server-management ecosystem",
   "main": "dist/main/main.js",
   "scripts": {
@@ -14,6 +14,9 @@
     "electron:dev": "npx concurrently -k \"npx vite\" \"npx tsc -p tsconfig.main.json -w\" \"npx wait-on http://localhost:5173 && npx electron .\""
   },
   "dependencies": {
+    "@radix-ui/react-popover": "^1.1.23",
+    "@radix-ui/react-tabs": "^1.1.21",
+    "@radix-ui/react-tooltip": "^1.2.16",
     "@supabase/supabase-js": "^2.110.2",
     "@tanstack/react-query": "^5.17.0",
     "archiver": "^6.0.1",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import * as Tabs from '@radix-ui/react-tabs';
 import { useNavigate } from 'react-router-dom';
 import {
   Moon, Sun, Monitor, HardDrive, Cpu, MemoryStick, Activity, Info, Database,
@@ -153,16 +154,16 @@ export default function Settings() {
         <SectionHeading icon={SlidersHorizontal} title="Settings" subtitle="Manage Mercy Launcher's behavior, games, and your account" />
       </div>
 
-      <div className="flex gap-6 items-start">
+      <Tabs.Root value={tab} onValueChange={(v) => setTab(v as CategoryId)} orientation="vertical" className="flex gap-6 items-start">
         {/* Category rail */}
-        <div className="w-48 shrink-0 space-y-1">
+        <Tabs.List className="w-48 shrink-0 space-y-1" aria-label="Settings categories">
           {CATEGORIES.map((c) => {
             const active = tab === c.id;
             return (
-              <button
+              <Tabs.Trigger
                 key={c.id}
-                onClick={() => setTab(c.id)}
-                className={`relative w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors text-left ${
+                value={c.id}
+                className={`relative w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors text-left outline-none ${
                   active ? 'text-primary-300' : 'text-surface-400 hover:text-surface-200 hover:bg-overlay-4'
                 }`}
               >
@@ -175,17 +176,15 @@ export default function Settings() {
                 )}
                 <c.icon size={15} className="relative" />
                 <span className="relative">{c.label}</span>
-              </button>
+              </Tabs.Trigger>
             );
           })}
-        </div>
+        </Tabs.List>
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <div key={tab} className="space-y-4">
-
               {/* ═══ General ═══ */}
-              {tab === 'general' && (
+              <Tabs.Content value="general" className="space-y-4 outline-none">
                 <>
                   <Row icon={Power} iconClass="bg-primary-600/20 border-primary-500/20 text-primary-400" title="Start with Windows" sub="Launch Mercy Launcher automatically when you sign in"
                     control={<Toggle checked={startWithWindows} onChange={handleStartWithWindows} />} />
@@ -209,16 +208,16 @@ export default function Settings() {
                       )} />
                   )}
                 </>
-              )}
+              </Tabs.Content>
 
               {/* ═══ Downloads ═══ */}
-              {tab === 'downloads' && (
+              <Tabs.Content value="downloads" className="space-y-4 outline-none">
                 <Row icon={FolderOpen} iconClass="bg-blue-600/20 border-blue-500/20 text-blue-400" title="Default download location" sub={downloadPath || 'Not set — using system default'}
                   control={<button onClick={pickDownloadPath} className="btn-secondary text-xs py-2 px-3 shrink-0">Choose Folder</button>} />
-              )}
+              </Tabs.Content>
 
               {/* ═══ Games ═══ */}
-              {tab === 'games' && (
+              <Tabs.Content value="games" className="space-y-4 outline-none">
                 <div className="space-y-3">
                   {GAME_ROWS.map((g) => {
                     const count = g.id === 'fivem' ? servers.length : null;
@@ -236,10 +235,10 @@ export default function Settings() {
                     );
                   })}
                 </div>
-              )}
+              </Tabs.Content>
 
               {/* ═══ Updates ═══ */}
-              {tab === 'updates' && (
+              <Tabs.Content value="updates" className="space-y-4 outline-none">
                 <>
                   <Row icon={RefreshCw} iconClass="bg-primary-600/20 border-primary-500/20 text-primary-400" title="Automatic updates" sub="Download updates in the background as soon as they're available"
                     control={<Toggle checked={autoUpdate} onChange={handleAutoUpdate} />} />
@@ -269,11 +268,11 @@ export default function Settings() {
                     )}
                   </Panel>
                 </>
-              )}
+              </Tabs.Content>
 
               {/* ═══ Account ═══ */}
-              {tab === 'account' && (
-                showAccount ? (
+              <Tabs.Content value="account" className="space-y-4 outline-none">
+                {showAccount ? (
                   <>
                     <Panel className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-xl bg-primary-600/20 border border-primary-500/25 flex items-center justify-center shrink-0">
@@ -324,11 +323,11 @@ export default function Settings() {
                     <p className="text-sm font-semibold text-surface-200">Not signed in</p>
                     <p className="text-xs text-surface-500 mt-1">Sign in with Discord to see your Mercy account here.</p>
                   </Panel>
-                )
-              )}
+                )}
+              </Tabs.Content>
 
               {/* ═══ System ═══ */}
-              {tab === 'system' && (
+              <Tabs.Content value="system" className="space-y-4 outline-none">
                 <>
                   <div className="grid grid-cols-2 gap-4">
                     <Panel>
@@ -384,10 +383,10 @@ export default function Settings() {
                     </div>
                   </Panel>
                 </>
-              )}
+              </Tabs.Content>
 
               {/* ═══ About ═══ */}
-              {tab === 'about' && (
+              <Tabs.Content value="about" className="space-y-4 outline-none">
                 <Panel>
                   <div className="flex items-center gap-3 mb-4">
                     <MercyLogo size={40} />
@@ -406,10 +405,9 @@ export default function Settings() {
                     ))}
                   </div>
                 </Panel>
-              )}
-          </div>
+              </Tabs.Content>
         </div>
-      </div>
+      </Tabs.Root>
     </motion.div>
   );
 }

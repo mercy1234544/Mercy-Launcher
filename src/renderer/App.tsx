@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AnimatePresence } from 'framer-motion';
+import { TooltipProvider } from './components/ui/Tooltip';
 import Layout from './components/Layout';
 import SplashScreen from './components/SplashScreen';
 import Home from './pages/Home';
@@ -47,7 +48,7 @@ export default function App() {
   }, []);
 
   return (
-    <>
+    <TooltipProvider delayDuration={400} skipDelayDuration={200}>
       <Toaster
         position="bottom-right"
         toastOptions={{
@@ -99,6 +100,6 @@ export default function App() {
           </AnimatePresence>
         </Layout>
       )}
-    </>
+    </TooltipProvider>
   );
 }

@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Minus, Square, X, Settings } from 'lucide-react';
 import NotificationBell from './NotificationBell';
+import { Tooltip } from './ui';
 
 // Slim top bar over the content column (Sidebar owns navigation + window-width
 // to its left, including the account card). This bar is just the current
@@ -62,24 +63,32 @@ export default function TitleBar() {
 
       <div className="flex items-center gap-1 shrink-0 mr-1" style={{ WebkitAppRegion: 'no-drag' } as any}>
         <NotificationBell />
-        <button onClick={() => navigate('/settings')} title="Settings"
-          className="w-9 h-9 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 rounded-lg transition-all">
-          <Settings size={15} />
-        </button>
+        <Tooltip content="Settings">
+          <button onClick={() => navigate('/settings')} aria-label="Settings"
+            className="w-9 h-9 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 rounded-lg transition-colors">
+            <Settings size={15} />
+          </button>
+        </Tooltip>
       </div>
 
       <div className="w-px h-6 bg-overlay-8 shrink-0" style={{ WebkitAppRegion: 'no-drag' } as any} />
 
       <div className="flex shrink-0" style={{ WebkitAppRegion: 'no-drag' } as any}>
-        <button onClick={handleMinimize} aria-label="Minimize" title="Minimize" className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 transition-colors duration-150">
-          <Minus size={14} />
-        </button>
-        <button onClick={handleMaximize} aria-label="Maximize" title="Maximize" className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 transition-colors duration-150">
-          <Square size={11} />
-        </button>
-        <button onClick={handleClose} aria-label="Close" title="Close" className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-100 hover:bg-red-600/90 transition-colors duration-150">
-          <X size={14} />
-        </button>
+        <Tooltip content="Minimize">
+          <button onClick={handleMinimize} aria-label="Minimize" className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 transition-colors duration-150">
+            <Minus size={14} />
+          </button>
+        </Tooltip>
+        <Tooltip content="Maximize">
+          <button onClick={handleMaximize} aria-label="Maximize" className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-200 hover:bg-overlay-6 transition-colors duration-150">
+            <Square size={11} />
+          </button>
+        </Tooltip>
+        <Tooltip content="Close">
+          <button onClick={handleClose} aria-label="Close" className="w-12 h-14 flex items-center justify-center text-surface-500 hover:text-surface-100 hover:bg-red-600/90 transition-colors duration-150">
+            <X size={14} />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );
