@@ -5,10 +5,10 @@ import { Compass, Server, PlusCircle, MessageCircle, LifeBuoy, ArrowRight, Chevr
 import { useAppStore } from '../stores/useAppStore';
 import { useAppAuth } from '../stores/useAppAuth';
 import { useFavorites } from '../stores/useFavorites';
-import { FiveMArt, MinecraftArt, AssettoCorsaArt, BeamNGArt } from '../components/GameArt';
 import GameCard from '../components/GameCard';
 import { Panel } from '../components/ui';
 import { getLastGame, type RecentGame } from '../lib/recentGame';
+import { GAMES } from '../config/games';
 import toast from 'react-hot-toast';
 
 const containerVariants = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } };
@@ -19,14 +19,7 @@ const itemVariants = { hidden: { opacity: 0, y: 14 }, show: { opacity: 1, y: 0, 
 // (real today for FiveM; an honest Coming Soon page for the others), and
 // "Mercy's Servers" opens a Coming Soon page for official servers MERCY
 // will eventually operate — a completely separate concept, never faked.
-// `id` matches the folder name under src/renderer/assets/games/ for the
-// drop-in asset system, and the game segment in /mercy-servers/:game.
-const GAMES = [
-  { id: 'fivem', label: 'FiveM', path: '/fivem', Art: FiveMArt, tagline: 'Manage your FiveM servers.' },
-  { id: 'minecraft', label: 'Minecraft', path: '/minecraft', Art: MinecraftArt, tagline: 'Manage your Minecraft servers.' },
-  { id: 'assettocorsa', label: 'Assetto Corsa', path: '/assetto-corsa', Art: AssettoCorsaArt, tagline: 'Manage your Assetto Corsa servers.' },
-  { id: 'beamng', label: 'BeamNG.drive', path: '/beamng', Art: BeamNGArt, tagline: 'Manage your BeamNG.drive servers.' },
-];
+// Game list itself lives in config/games.ts now — this page just renders it.
 
 export default function Home() {
   const navigate = useNavigate();

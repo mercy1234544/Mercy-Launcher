@@ -3,7 +3,8 @@
 // each game's hub. Defined now so a future server list can be dropped in
 // without redesigning MercyServers.tsx or the Home game cards; nothing here
 // is populated with fake data — see MercyServers.tsx.
-export type MercyGameId = 'fivem' | 'minecraft' | 'assettocorsa' | 'beamng';
+import type { GameId } from '../config/games';
+export type MercyGameId = GameId;
 
 export interface MercyServerRequiredContent {
   id: string;

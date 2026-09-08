@@ -1,8 +1,9 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Car, Blocks, FlagTriangleRight, Truck, Globe2, ArrowLeft, Users, Gauge, Package, LogIn } from 'lucide-react';
-import type { MercyServer, MercyGameId } from '../types/mercyServer';
+import { Globe2, ArrowLeft, Users, Gauge, Package, LogIn } from 'lucide-react';
+import type { MercyServer } from '../types/mercyServer';
 import { Panel } from '../components/ui';
+import { GAMES, getGame } from '../config/games';
 
 // Mercy's Servers — official/public servers Mercy will eventually operate,
 // separate from a user's own servers (managed via each game's hub). This is
@@ -16,13 +17,6 @@ import { Panel } from '../components/ui';
 // over automatically; nothing about the page structure needs to change.
 const SERVERS: MercyServer[] = [];
 
-const GAME_META: Record<MercyGameId, { label: string; icon: any; tint: string }> = {
-  fivem: { label: 'FiveM', icon: Car, tint: 'bg-orange-500/15 border-orange-500/25 text-orange-300' },
-  minecraft: { label: 'Minecraft', icon: Blocks, tint: 'bg-emerald-500/15 border-emerald-500/25 text-emerald-300' },
-  assettocorsa: { label: 'Assetto Corsa', icon: FlagTriangleRight, tint: 'bg-rose-500/15 border-rose-500/25 text-rose-300' },
-  beamng: { label: 'BeamNG.drive', icon: Truck, tint: 'bg-sky-500/15 border-sky-500/25 text-sky-300' },
-};
-
 const PLANNED = [
   'Server name & description', 'Live status & player count', 'Connect / address info',
   'Required content, checked automatically', 'Join Server', 'Download & Join, when content is missing',
@@ -31,14 +25,14 @@ const PLANNED = [
 export default function MercyServers() {
   const { game } = useParams<{ game: string }>();
   const navigate = useNavigate();
-  const meta = GAME_META[(game as MercyGameId)] || GAME_META.fivem;
+  const meta = getGame(game) || GAMES[0];
   const servers = SERVERS.filter((s) => s.game === game);
 
   return (
     <div className="h-full overflow-y-auto p-7">
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center gap-2 mb-6">
-          <div className={`w-8 h-8 rounded-lg border flex items-center justify-center ${meta.tint}`}><meta.icon size={15} /></div>
+          <div className={`w-8 h-8 rounded-lg border flex items-center justify-center ${meta.tintBadge}`}><meta.icon size={15} /></div>
           <p className="text-xs font-semibold text-surface-400">{meta.label}</p>
         </div>
 

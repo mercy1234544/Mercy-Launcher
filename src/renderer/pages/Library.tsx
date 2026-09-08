@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Car, Blocks, FlagTriangleRight, Truck, LayoutGrid, Package, ArrowRight } from 'lucide-react';
+import { Car, LayoutGrid, Package, ArrowRight } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { Panel, SectionHeading } from '../components/ui';
+import { GAMES } from '../config/games';
 
 // Unified Library shell across every game hub. FiveM shows REAL numbers pulled
 // from the servers already loaded by ServerManager; the other games show an
@@ -26,11 +27,10 @@ export default function Library() {
 
   const totalResources = servers.reduce((sum, s) => sum + s.resourceCount, 0);
   const showFivem = filter === 'all' || filter === 'fivem';
-  const comingSoonGames = [
-    { id: 'minecraft', label: 'Minecraft', icon: Blocks, tint: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/25' },
-    { id: 'assetto', label: 'Assetto Corsa', icon: FlagTriangleRight, tint: 'text-rose-300 bg-rose-500/15 border-rose-500/25' },
-    { id: 'beamng', label: 'BeamNG.drive', icon: Truck, tint: 'text-sky-300 bg-sky-500/15 border-sky-500/25' },
-  ].filter((g) => filter === 'all' || filter === (g.id as Filter));
+  // 'assettocorsa' in the shared game registry vs this page's own short
+  // 'assetto' filter id — only place the two need reconciling.
+  const filterIdFor = (gameId: string): Filter => (gameId === 'assettocorsa' ? 'assetto' : (gameId as Filter));
+  const comingSoonGames = GAMES.filter((g) => !g.hasRealHub && (filter === 'all' || filter === filterIdFor(g.id)));
 
   return (
     <div className="p-7 max-w-6xl mx-auto space-y-6">
@@ -67,7 +67,7 @@ export default function Library() {
       {comingSoonGames.map((g) => (
         <Panel key={g.id}>
           <div className="flex items-center gap-2 mb-2">
-            <g.icon size={16} className={g.tint.split(' ')[0]} /><p className="text-sm font-bold text-surface-100">{g.label}</p>
+            <g.icon size={16} className={g.tint} /><p className="text-sm font-bold text-surface-100">{g.label}</p>
             <span className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-overlay-6 text-surface-500 border border-overlay-10">Soon</span>
           </div>
           <p className="text-xs text-surface-500">No content yet — this hub isn't built yet.</p>

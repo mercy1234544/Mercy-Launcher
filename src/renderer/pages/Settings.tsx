@@ -15,6 +15,7 @@ import { useFavorites } from '../stores/useFavorites';
 import { isSupabaseConfigured } from '../lib/supabase';
 import MercyLogo from '../components/MercyLogo';
 import { Panel, Toggle, SectionHeading } from '../components/ui';
+import { GAMES } from '../config/games';
 import toast from 'react-hot-toast';
 
 interface SysInfo {
@@ -60,13 +61,6 @@ const CATEGORIES = [
   { id: 'about', label: 'About', icon: Info },
 ] as const;
 type CategoryId = typeof CATEGORIES[number]['id'];
-
-const GAME_ROWS = [
-  { id: 'fivem', label: 'FiveM', path: '/fivem', real: true },
-  { id: 'minecraft', label: 'Minecraft', path: '/minecraft', real: false },
-  { id: 'assettocorsa', label: 'Assetto Corsa', path: '/assetto-corsa', real: false },
-  { id: 'beamng', label: 'BeamNG.drive', path: '/beamng', real: false },
-];
 
 export default function Settings() {
   const { theme, toggleTheme, servers } = useAppStore();
@@ -219,15 +213,15 @@ export default function Settings() {
               {/* ═══ Games ═══ */}
               <Tabs.Content value="games" className="space-y-4 outline-none">
                 <div className="space-y-3">
-                  {GAME_ROWS.map((g) => {
+                  {GAMES.map((g) => {
                     const count = g.id === 'fivem' ? servers.length : null;
                     return (
                       <Panel as="button" interactive key={g.id} onClick={() => navigate(g.path)} className="group w-full flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-overlay-6 border border-overlay-10 flex items-center justify-center shrink-0"><Gamepad2 size={17} className="text-primary-300" /></div>
+                        <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${g.tintBadge}`}><g.icon size={17} /></div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-surface-100">{g.label}</p>
                           <p className="text-xs text-surface-500 mt-0.5">
-                            {g.real ? `${count} server${count === 1 ? '' : 's'} configured` : 'Management hub coming soon'}
+                            {g.hasRealHub ? `${count} server${count === 1 ? '' : 's'} configured` : 'Management hub coming soon'}
                           </p>
                         </div>
                         <ChevronRight size={14} className="text-surface-600 shrink-0 transition-transform group-hover:translate-x-0.5" />
