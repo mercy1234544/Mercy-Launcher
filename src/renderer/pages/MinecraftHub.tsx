@@ -31,13 +31,6 @@ export default function MinecraftHub() {
         iconClass="bg-emerald-500/15 border-emerald-500/25 text-emerald-300"
         title="Minecraft"
         subtitle="Create and manage your Minecraft servers"
-        action={
-          <div className="flex items-center gap-2">
-            <button onClick={() => navigate('/minecraft/marketplace')} className="btn-secondary text-xs py-2 flex items-center gap-1.5"><Puzzle size={13} /> Marketplace</button>
-            <button onClick={() => setShowImport(true)} className="btn-secondary text-xs py-2 flex items-center gap-1.5"><FolderInput size={13} /> Import Server</button>
-            <button onClick={() => navigate('/minecraft/create')} className="btn-primary text-xs py-2 flex items-center gap-1.5"><PlusCircle size={13} /> Create Server</button>
-          </div>
-        }
       />
 
       <div className="grid grid-cols-2 gap-4">
@@ -50,6 +43,37 @@ export default function MinecraftHub() {
           <div className="w-11 h-11 rounded-xl border flex items-center justify-center mb-4 bg-purple-600/20 text-purple-400 border-purple-500/20"><Zap size={19} /></div>
           <p className="text-3xl font-extrabold text-surface-100 tracking-tight">{running}</p>
           <p className="text-xs text-surface-500 mt-0.5">Running Now</p>
+        </Panel>
+      </div>
+
+      {/* Primary entry points — matching FiveM's hub layout. Create Server is
+          the main first action here (Minecraft has no separate "My Servers"
+          page to link to instead — the list is already inline below), paired
+          with Marketplace as FiveM's hub does. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {[
+          { icon: PlusCircle, title: 'Create Server', sub: 'Set up a new Vanilla or Paper server', tint: 'bg-purple-600/20 text-purple-400 border-purple-500/20', path: '/minecraft/create' },
+          { icon: Puzzle, title: 'Marketplace', sub: 'Mods, plugins & datapacks', tint: 'bg-blue-600/20 text-blue-400 border-blue-500/20', path: '/minecraft/marketplace' },
+        ].map((c) => (
+          <Panel as="button" interactive key={c.title} padding="lg" onClick={() => navigate(c.path)} className="group flex items-center gap-5">
+            <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.tint}`}><c.icon size={24} /></div>
+            <div className="flex-1 min-w-0 text-left">
+              <p className="text-base font-bold text-surface-100">{c.title}</p>
+              <p className="text-xs text-surface-500 mt-0.5">{c.sub}</p>
+            </div>
+            <ArrowRight size={17} className="text-surface-600 group-hover:text-primary-300 group-hover:translate-x-0.5 transition-all shrink-0" />
+          </Panel>
+        ))}
+      </div>
+
+      {/* Secondary shortcut */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Panel as="button" interactive padding="sm" onClick={() => setShowImport(true)} className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 bg-rose-600/20 text-rose-400 border-rose-500/20"><FolderInput size={17} /></div>
+          <div className="flex-1 min-w-0 text-left">
+            <p className="text-sm font-bold text-surface-100">Import Server</p>
+            <p className="text-xs text-surface-500 truncate">Bring in an existing folder</p>
+          </div>
         </Panel>
       </div>
 

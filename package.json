@@ -1,13 +1,13 @@
 {
   "name": "fivem-server-builder",
-  "version": "1.86.0",
+  "version": "1.87.0",
   "description": "Mercy Launcher — a centralized game-management hub, starting with a full FiveM server-management ecosystem",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "npx concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
-    "dev:main": "npx tsc -p tsconfig.main.json && npx electron .",
+    "dev:main": "npx tsc -p tsconfig.main.json && node scripts/copy-assets.js && npx electron .",
     "dev:renderer": "npx vite",
-    "build": "npx tsc -p tsconfig.main.json && npx vite build",
+    "build": "npx tsc -p tsconfig.main.json && npx vite build && node scripts/copy-assets.js",
     "test:vs": "npx tsc -p tsconfig.main.json && node test/vehicle-studio/meta.test.js && node test/vehicle-studio/service.test.js",
     "test:minecraft": "npx tsc -p tsconfig.main.json && node test/minecraft/service.test.js && node test/minecraft/java-runtime.test.js && node test/minecraft/marketplace.test.js && node test/minecraft/connection.test.js",
     "test:theme": "npx tsc -p tsconfig.main.json && node test/theme/manager.test.js",
@@ -15,7 +15,7 @@
     "test:all": "npm run test:vs && node test/minecraft/service.test.js && node test/minecraft/java-runtime.test.js && node test/minecraft/marketplace.test.js && node test/minecraft/connection.test.js && node test/theme/manager.test.js && node test/fivem/marketplace.test.js",
     "build:exe": "npm run build && npx electron-builder --win --dir --publish never && node scripts/patch-windows-exe.js && npx electron-builder --win --prepackaged releases/win-unpacked --publish never",
     "start": "npx electron .",
-    "electron:dev": "npx concurrently -k \"npx vite\" \"npx tsc -p tsconfig.main.json -w\" \"npx wait-on http://localhost:5173 && npx electron .\""
+    "electron:dev": "npx concurrently -k \"npx vite\" \"npx tsc -p tsconfig.main.json -w\" \"npx wait-on http://localhost:5173 && node scripts/copy-assets.js && npx electron .\""
   },
   "dependencies": {
     "@radix-ui/react-popover": "^1.1.23",

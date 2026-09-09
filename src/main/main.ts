@@ -56,7 +56,7 @@ const vehicleResourceScanner = new VehicleResourceScanner();
 // so nothing changes for anyone who doesn't opt in via Settings > General.
 function createTray() {
   if (tray) return;
-  tray = new Tray(path.join(__dirname, '../../src/assets/icon.ico'));
+  tray = new Tray(path.join(__dirname, '../assets/icon.ico'));
   tray.setToolTip('Mercy Launcher');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Mercy Launcher', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
@@ -84,7 +84,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    icon: path.join(__dirname, '../../src/assets/icon.ico'),
+    icon: path.join(__dirname, '../assets/icon.ico'),
   });
 
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
