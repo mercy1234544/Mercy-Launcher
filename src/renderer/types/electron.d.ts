@@ -64,18 +64,23 @@ interface ElectronAPI {
     getAll: () => Promise<MinecraftServer[]>;
     get: (id: string) => Promise<MinecraftServer | undefined>;
     consoleBuffer: (id: string) => Promise<string[]>;
-    delete: (id: string, deleteFiles: boolean) => Promise<boolean>;
+    delete: (id: string, deleteFiles: boolean, deleteBackups?: boolean) => Promise<{ success: boolean; error?: string }>;
     detectJava: () => Promise<{ found: boolean; version: string | null; major: number | null }>;
     detectAllJava: () => Promise<{ path: string; version: string; major: number; source: string }[]>;
     javaRequirement: (version: string) => Promise<number>;
     requiredJavaForVersion: (serverType: 'vanilla' | 'paper', version: string) => Promise<number>;
     resolveLaunchJava: (id: string) => Promise<{ ok: boolean; required: number; javaPath: string | null; major: number | null; error?: string } | null>;
     setJavaPath: (id: string, javaPath: string | null) => Promise<boolean>;
+    installJava: (major: number) => Promise<{ success: boolean; javaPath?: string; error?: string }>;
     fetchVanillaVersions: () => Promise<{ id: string; type: string; releaseTime: string }[]>;
     fetchPaperVersions: () => Promise<string[]>;
     create: (config: {
       name: string; installPath: string; version: string; serverType: 'vanilla' | 'paper';
       ramMB: number; port: number; acceptedEula: boolean; javaPath?: string | null;
+      seed?: string; gamemode?: 'survival' | 'creative' | 'adventure' | 'spectator';
+      difficulty?: 'peaceful' | 'easy' | 'normal' | 'hard'; hardcore?: boolean;
+      onlineMode?: boolean; maxPlayers?: number; motd?: string;
+      viewDistance?: number; simulationDistance?: number; pvp?: boolean; whitelist?: boolean;
     }) => Promise<{ success: boolean; server?: MinecraftServer; error?: string }>;
     detectExisting: (dirPath: string) => Promise<{
       valid: boolean; reason?: string; jarFile?: string; version?: string; serverType?: 'vanilla' | 'paper';
@@ -100,9 +105,22 @@ interface ElectronAPI {
     deleteBackup: (backupId: string) => Promise<boolean>;
   };
 
+  minecraftMarketplace: {
+    search: (opts: { query?: string; projectType?: string; minecraftVersion?: string; loader?: string; limit?: number; offset?: number }) => Promise<{ hits: MarketplaceHit[]; total: number }>;
+    getProject: (projectId: string) => Promise<MarketplaceProject>;
+    getVersions: (projectId: string, opts?: { minecraftVersion?: string; loader?: string }) => Promise<MarketplaceVersion[]>;
+    getVersion: (versionId: string) => Promise<MarketplaceVersion>;
+    install: (serverId: string, projectId: string, versionId: string) => Promise<{ success: boolean; error?: string; content?: InstalledContent }>;
+    listInstalled: (serverId: string) => Promise<(InstalledContent & { missingOnDisk: boolean })[]>;
+    removeContent: (serverId: string, contentId: string) => Promise<{ success: boolean; error?: string }>;
+    setContentEnabled: (serverId: string, contentId: string, enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+  };
+
   onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
   onMinecraftStatusChange: (callback: (data: { serverId: string; status: string }) => void) => () => void;
   onMinecraftCreateProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
+  onMinecraftMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
+  onMinecraftInstallJavaProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
 
   resource: {
     scan: (serverPath: string) => Promise<any[]>;
@@ -337,6 +355,7 @@ declare global {
     requiredJavaMajor: number | null;
     javaPath: string | null;
     lastError: string | null;
+    installedContent: InstalledContent[];
   }
   interface MinecraftBackup {
     id: string;
@@ -345,6 +364,40 @@ declare global {
     path: string;
     size: number;
     createdAt: string;
+  }
+  interface InstalledContent {
+    id: string;
+    kind: 'plugin' | 'datapack';
+    source: 'modrinth';
+    projectId: string;
+    projectName: string;
+    versionId: string;
+    versionNumber: string;
+    fileName: string;
+    relPath: string;
+    sha1: string;
+    size: number;
+    enabled: boolean;
+    installedAt: string;
+    dependencies: { projectId: string; projectName: string; dependencyType: string }[];
+  }
+  interface MarketplaceHit {
+    projectId: string; slug: string; title: string; description: string; author: string;
+    projectType: string; categories: string[]; loaders: string[]; gameVersions: string[];
+    downloads: number; iconUrl: string | null; license: string | null;
+  }
+  interface MarketplaceVersion {
+    id: string; versionNumber: string; name: string; gameVersions: string[]; loaders: string[];
+    datePublished: string;
+    files: { url: string; filename: string; primary: boolean; size: number; sha1: string | null }[];
+    dependencies: { projectId: string | null; versionId: string | null; dependencyType: string }[];
+  }
+  interface MarketplaceProject {
+    projectId: string; slug: string; title: string; description: string; body: string; author: string;
+    projectType: string; categories: string[];
+    license: { id: string; name: string; url: string | null } | null;
+    sourceUrl: string | null; websiteUrl: string | null; iconUrl: string | null; downloads: number;
+    gameVersions: string[]; loaders: string[];
   }
 
   // ── Vehicle Studio types (mirror src/main/services/VehicleStudio.ts) ────────

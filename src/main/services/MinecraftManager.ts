@@ -14,6 +14,7 @@
 // riskier flow; rather than fake it, they're simply not offered yet.
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { spawn, ChildProcess, execFile } from 'child_process';
 import { BrowserWindow } from 'electron';
 import axios from 'axios';
@@ -51,9 +52,27 @@ export interface MinecraftServer {
   /** Last friendly, human-readable failure reason (e.g. a translated
    *  UnsupportedClassVersionError). Cleared on the next successful start. */
   lastError: string | null;
+  /** Content Mercy itself installed from the Marketplace — plugins (Paper
+   *  only) and datapacks (both server types). Never includes mods, since
+   *  Mercy doesn't run a mod loader for any supported server type. */
+  installedContent: InstalledContent[];
 }
 
-export interface MinecraftCreateConfig {
+export interface MinecraftWorldOptions {
+  seed?: string;
+  gamemode?: 'survival' | 'creative' | 'adventure' | 'spectator';
+  difficulty?: 'peaceful' | 'easy' | 'normal' | 'hard';
+  hardcore?: boolean;
+  onlineMode?: boolean;
+  maxPlayers?: number;
+  motd?: string;
+  viewDistance?: number;
+  simulationDistance?: number;
+  pvp?: boolean;
+  whitelist?: boolean;
+}
+
+export interface MinecraftCreateConfig extends MinecraftWorldOptions {
   name: string;
   installPath: string;
   version: string;
@@ -64,6 +83,25 @@ export interface MinecraftCreateConfig {
   /** Optional explicit Java runtime to pin this server to (from the Create
    *  Server wizard's runtime picker). Omit to auto-select at start time. */
   javaPath?: string | null;
+}
+
+export interface InstalledContent {
+  id: string;
+  kind: 'plugin' | 'datapack';
+  source: 'modrinth';
+  projectId: string;
+  projectName: string;
+  versionId: string;
+  versionNumber: string;
+  fileName: string;
+  /** Relative to the server's install directory — where the file actually
+   *  lives right now (moves when enabled/disabled). */
+  relPath: string;
+  sha1: string;
+  size: number;
+  enabled: boolean;
+  installedAt: string;
+  dependencies: { projectId: string; projectName: string; dependencyType: string }[];
 }
 
 export interface JavaRuntime {
@@ -170,12 +208,16 @@ export class MinecraftManager {
   private intentionalStop: Set<string> = new Set();
   private restartTracker: Map<string, RestartTracker> = new Map();
 
+  private javaRuntimesDir: string;
+
   constructor(private userDataPath: string) {
     const dataDir = path.join(userDataPath, 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     this.dataFile = path.join(dataDir, 'minecraft-servers.json');
     this.backupsDir = path.join(userDataPath, 'minecraft-backups');
     if (!fs.existsSync(this.backupsDir)) fs.mkdirSync(this.backupsDir, { recursive: true });
+    this.javaRuntimesDir = path.join(userDataPath, 'java-runtimes');
+    if (!fs.existsSync(this.javaRuntimesDir)) fs.mkdirSync(this.javaRuntimesDir, { recursive: true });
     this.load();
   }
 
@@ -211,18 +253,93 @@ export class MinecraftManager {
   getServer(id: string): MinecraftServer | undefined { return this.servers.find((s) => s.id === id); }
   getConsoleBuffer(id: string): string[] { return this.consoleBuffers.get(id) || []; }
 
-  async deleteServer(id: string, deleteFiles: boolean): Promise<boolean> {
-    if (this.processes.has(id)) return false; // must stop first
-    const server = this.getServer(id);
-    if (!server) return false;
-    if (deleteFiles && fs.existsSync(server.installPath)) {
-      try { fs.rmSync(server.installPath, { recursive: true, force: true }); } catch {}
+  /** Defense-in-depth guard for the one genuinely destructive filesystem
+   *  operation Mercy performs: refuses to delete a server's own registered
+   *  directory if it's a drive root, suspiciously shallow, or overlaps with
+   *  Mercy's own app/userData directories or well-known Windows system
+   *  locations — independent of whatever the registry happens to say. */
+  private isSafeServerDirectory(installPath: string): { safe: boolean; reason?: string } {
+    let resolved: string;
+    try { resolved = fs.realpathSync.native ? fs.realpathSync.native(path.resolve(installPath)) : path.resolve(installPath); }
+    catch { resolved = path.resolve(installPath); }
+    const parsed = path.parse(resolved);
+    if (resolved === parsed.root) return { safe: false, reason: 'Refusing to delete a drive root.' };
+    const depth = resolved.slice(parsed.root.length).split(path.sep).filter(Boolean).length;
+    if (depth < 2) return { safe: false, reason: 'This directory looks too shallow to be a real server folder — refusing to delete it as a precaution.' };
+    // Mercy's OWN directories: block only if deleting `resolved` would
+    // engulf/destroy one of them (exact match, or resolved is an ANCESTOR
+    // of it) — a server directory merely NESTED INSIDE userData (unusual,
+    // but a legitimate choice, and exactly what a disposable temp-dir test
+    // setup looks like) is fine to delete, since that only removes that one
+    // subtree and leaves the rest of Mercy's own data untouched.
+    const ownDirs = [this.userDataPath, this.backupsDir, process.resourcesPath, process.execPath ? path.dirname(process.execPath) : '']
+      .filter(Boolean).map((p) => path.resolve(p as string));
+    for (const guarded of ownDirs) {
+      if (resolved === guarded || isPathInside(guarded, resolved)) {
+        return { safe: false, reason: 'Refusing to delete a directory that would remove Mercy\'s own application data.' };
+      }
     }
+    // OS-level system locations: nobody should ever have a real Minecraft
+    // server installed under these, so both directions are blocked —
+    // unlike Mercy's own directories, there's no legitimate "nested inside"
+    // case here worth allowing.
+    const systemDirs = ['C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'].map((p) => path.resolve(p));
+    for (const guarded of systemDirs) {
+      if (resolved === guarded || isPathInside(resolved, guarded) || isPathInside(guarded, resolved)) {
+        return { safe: false, reason: 'Refusing to delete a directory under a protected system location.' };
+      }
+    }
+    return { safe: true };
+  }
+
+  /** Real, deliberate deletion. Stops the process first if running, verifies
+   *  the directory is actually safe to remove, and only drops the server
+   *  from the registry after filesystem deletion genuinely succeeded — a
+   *  failed or partial deletion leaves the server registered so the user can
+   *  retry rather than silently losing track of orphaned files. Backups are
+   *  a separate, explicit opt-in (never deleted just because the server is). */
+  async deleteServer(id: string, deleteFiles: boolean, deleteBackups = false): Promise<{ success: boolean; error?: string }> {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+
+    if (this.processes.has(id)) {
+      const proc = this.processes.get(id)!;
+      this.intentionalStop.add(id);
+      try { proc.kill('SIGKILL'); } catch {}
+      const deadline = Date.now() + 10000;
+      while (this.processes.has(id) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (this.processes.has(id)) {
+        return { success: false, error: 'Could not stop the running server process — try Force Stop first, then delete.' };
+      }
+    }
+
+    if (deleteFiles && fs.existsSync(server.installPath)) {
+      const safety = this.isSafeServerDirectory(server.installPath);
+      if (!safety.safe) return { success: false, error: safety.reason };
+      try {
+        fs.rmSync(server.installPath, { recursive: true, force: true });
+      } catch (e: any) {
+        return { success: false, error: `Failed to delete server files: ${e?.message || 'unknown error'}. The server was left registered so you can retry.` };
+      }
+      if (fs.existsSync(server.installPath)) {
+        return { success: false, error: 'Server files could not be fully removed (a file may still be in use). The server was left registered so you can retry.' };
+      }
+    }
+
+    if (deleteBackups) {
+      for (const b of this.listBackups(id)) this.deleteBackup(b.id);
+    }
+
+    // Filesystem deletion (if requested) genuinely succeeded — now, and only
+    // now, drop it from the registry.
     this.servers = this.servers.filter((s) => s.id !== id);
     this.consoleBuffers.delete(id);
     this.players.delete(id);
+    this.restartTracker.delete(id);
     this.save();
-    return true;
+    return { success: true };
   }
 
   // ── Java detection ──────────────────────────────────────────────────────
@@ -263,6 +380,7 @@ export class MinecraftManager {
       'C:\\Program Files\\Microsoft',
       'C:\\Program Files\\Amazon Corretto',
       'C:\\Program Files (x86)\\Java',
+      this.javaRuntimesDir, // Mercy's own downloadAndInstallJava() extracts here
     ];
     for (const root of installRoots) {
       try {
@@ -321,6 +439,80 @@ export class MinecraftManager {
       }
     } catch { /* fall through to the heuristic below */ }
     return requiredJavaMajor(version);
+  }
+
+  /** Downloads a real Java runtime for the machine that doesn't have one,
+   *  from Eclipse Adoptium's real, public, official Temurin build API
+   *  (https://api.adoptium.net) — never a system-wide installer. This
+   *  extracts a portable JDK zip into Mercy's own userData directory only;
+   *  it never runs an .msi, never touches JAVA_HOME/PATH/the registry, and
+   *  never modifies system Java configuration. ALWAYS triggered by an
+   *  explicit user action (the "Install Java X" button) — never run on its
+   *  own, so nothing is ever installed without the user seeing and choosing it. */
+  async downloadAndInstallJava(major: number, onProgress?: (pct: number, message: string) => void): Promise<{ success: boolean; javaPath?: string; error?: string }> {
+    try {
+      onProgress?.(2, 'Finding a Java build…');
+      const res = await axios.get(`https://api.adoptium.net/v3/assets/latest/${major}/hotspot`, {
+        params: { os: 'windows', architecture: 'x64', image_type: 'jdk' }, timeout: 15000,
+      });
+      const asset = (res.data || [])[0];
+      const pkg = asset?.binary?.package;
+      if (!pkg?.link) return { success: false, error: `Could not find a Windows Java ${major} build from Adoptium.` };
+
+      const targetDir = path.join(this.javaRuntimesDir, `jdk-${major}`);
+      if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+      fs.mkdirSync(targetDir, { recursive: true });
+
+      const zipPath = path.join(this.javaRuntimesDir, pkg.name);
+      onProgress?.(5, `Downloading ${pkg.name}…`);
+      await this.downloadFile(pkg.link, zipPath, (pct) => onProgress?.(5 + Math.round(pct * 0.7), `Downloading ${pkg.name}…`));
+
+      if (pkg.checksum) {
+        onProgress?.(78, 'Verifying download…');
+        const actual = await new Promise<string>((resolve, reject) => {
+          const hash = crypto.createHash('sha256');
+          const stream = fs.createReadStream(zipPath);
+          stream.on('data', (c) => hash.update(c));
+          stream.on('end', () => resolve(hash.digest('hex')));
+          stream.on('error', reject);
+        });
+        if (actual !== pkg.checksum) {
+          fs.unlinkSync(zipPath);
+          return { success: false, error: 'Downloaded Java build failed checksum verification — the download may be corrupt. Try again.' };
+        }
+      }
+
+      onProgress?.(85, 'Extracting…');
+      await extractZip(zipPath, { dir: targetDir });
+      fs.unlinkSync(zipPath);
+
+      // Adoptium's zip contains one top-level folder (e.g. "jdk-25.0.4.1+1")
+      // — flatten it so targetDir/bin/java.exe matches the same one-level
+      // layout detectAllJavaRuntimes() already scans for every other vendor.
+      const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+      const inner = entries.find((e) => e.isDirectory());
+      if (inner && !fs.existsSync(path.join(targetDir, 'bin'))) {
+        const innerPath = path.join(targetDir, inner.name);
+        for (const child of fs.readdirSync(innerPath)) {
+          fs.renameSync(path.join(innerPath, child), path.join(targetDir, child));
+        }
+        fs.rmdirSync(innerPath);
+      }
+
+      const javaExe = path.join(targetDir, 'bin', 'java.exe');
+      if (!fs.existsSync(javaExe)) return { success: false, error: 'Extraction completed but java.exe was not found in the expected location.' };
+
+      onProgress?.(95, 'Verifying installed runtime…');
+      const info = await this.probeJava(javaExe);
+      if (!info.found || info.major !== major) {
+        return { success: false, error: `Installed runtime reported Java ${info.major ?? 'unknown'}, expected ${major}.` };
+      }
+
+      onProgress?.(100, 'Done');
+      return { success: true, javaPath: javaExe };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Java installation failed.' };
+    }
   }
 
   // ── Version catalogs (real, live) ───────────────────────────────────────
@@ -407,7 +599,7 @@ export class MinecraftManager {
       fs.writeFileSync(path.join(config.installPath, 'eula.txt'), `# Accepted via Mercy Launcher\neula=true\n`, 'utf-8');
 
       onProgress?.(92, 'Writing server.properties…');
-      const props = this.defaultProperties(config.port);
+      const props = this.defaultProperties(config.port, config);
       fs.writeFileSync(path.join(config.installPath, 'server.properties'), props, 'utf-8');
 
       const now = new Date().toISOString();
@@ -416,7 +608,7 @@ export class MinecraftManager {
         version: config.version, serverType: config.serverType, jarFile: jarName,
         ramMB: config.ramMB, port: config.port, status: 'stopped', pid: null, startedAt: null,
         autoRestart: false, lastBackup: null, createdAt: now, updatedAt: now,
-        requiredJavaMajor: requiredJava, javaPath: config.javaPath || null, lastError: null,
+        requiredJavaMajor: requiredJava, javaPath: config.javaPath || null, lastError: null, installedContent: [],
       };
       this.servers.push(server);
       this.save();
@@ -427,25 +619,28 @@ export class MinecraftManager {
     }
   }
 
-  private defaultProperties(port: number): string {
-    return [
+  private defaultProperties(port: number, opts: MinecraftWorldOptions = {}): string {
+    const lines = [
       '#Minecraft server properties — generated by Mercy Launcher',
       `server-port=${port}`,
-      'motd=A Mercy Launcher Server',
-      'gamemode=survival',
-      'difficulty=easy',
-      'max-players=20',
-      'online-mode=true',
-      'pvp=true',
-      'view-distance=10',
-      'simulation-distance=10',
+      `motd=${opts.motd ?? 'A Mercy Launcher Server'}`,
+      `gamemode=${opts.gamemode ?? 'survival'}`,
+      `difficulty=${opts.difficulty ?? 'easy'}`,
+      `hardcore=${opts.hardcore ?? false}`,
+      `max-players=${opts.maxPlayers ?? 20}`,
+      `online-mode=${opts.onlineMode ?? true}`,
+      `pvp=${opts.pvp ?? true}`,
+      `view-distance=${opts.viewDistance ?? 10}`,
+      `simulation-distance=${opts.simulationDistance ?? 10}`,
       'spawn-protection=16',
       'allow-flight=false',
-      'white-list=false',
+      `white-list=${opts.whitelist ?? false}`,
       'enable-command-block=false',
       'level-name=world',
-      '',
-    ].join('\n');
+    ];
+    if (opts.seed) lines.push(`level-seed=${opts.seed}`);
+    lines.push('');
+    return lines.join('\n');
   }
 
   // ── Import existing server ──────────────────────────────────────────────
@@ -493,7 +688,7 @@ export class MinecraftManager {
       // requirement can't be looked up from Mojang/PaperMC metadata — start()
       // falls back to the historical-boundaries heuristic in that case, and
       // the panel lets the user pin a specific runtime manually if needed.
-      requiredJavaMajor: null, javaPath: null, lastError: null,
+      requiredJavaMajor: null, javaPath: null, lastError: null, installedContent: [],
     };
     this.servers.push(server);
     this.save();
@@ -812,6 +1007,60 @@ export class MinecraftManager {
     const target = this.resolveServerRelative(server, relPath);
     if (!target) return false;
     try { fs.writeFileSync(target, content, 'utf-8'); return true; } catch { return false; }
+  }
+
+  /** Resolves a path relative to a server's install directory, refusing any
+   *  traversal outside it — the same guarantee listFiles/readServerFile/
+   *  writeServerFile rely on, exposed so MinecraftMarketplace's content
+   *  installer can place files safely without duplicating the logic. */
+  resolveWithinServer(id: string, relPath: string): string | null {
+    const server = this.getServer(id);
+    if (!server) return null;
+    return this.resolveServerRelative(server, relPath);
+  }
+
+  getServerType(id: string): MinecraftServerType | null { return this.getServer(id)?.serverType ?? null; }
+  getInstallPath(id: string): string | null { return this.getServer(id)?.installPath ?? null; }
+
+  /** The world/level directory name from server.properties (defaults to "world"). */
+  getLevelName(id: string): string {
+    const entry = this.readProperties(id).find((p) => p.key === 'level-name');
+    return entry?.value?.trim() || 'world';
+  }
+
+  // ── Installed content (Marketplace installs — plugins & datapacks only;
+  // Mercy never installs mods, since it doesn't run a mod loader) ─────────
+  getInstalledContent(id: string): InstalledContent[] { return this.getServer(id)?.installedContent || []; }
+
+  addInstalledContent(id: string, content: InstalledContent): boolean {
+    const server = this.getServer(id);
+    if (!server) return false;
+    server.installedContent.push(content);
+    server.updatedAt = new Date().toISOString();
+    this.save();
+    return true;
+  }
+
+  updateInstalledContent(id: string, contentId: string, patch: Partial<InstalledContent>): boolean {
+    const server = this.getServer(id);
+    if (!server) return false;
+    const item = server.installedContent.find((c) => c.id === contentId);
+    if (!item) return false;
+    Object.assign(item, patch);
+    server.updatedAt = new Date().toISOString();
+    this.save();
+    return true;
+  }
+
+  removeInstalledContent(id: string, contentId: string): InstalledContent | null {
+    const server = this.getServer(id);
+    if (!server) return null;
+    const idx = server.installedContent.findIndex((c) => c.id === contentId);
+    if (idx === -1) return null;
+    const [removed] = server.installedContent.splice(idx, 1);
+    server.updatedAt = new Date().toISOString();
+    this.save();
+    return removed;
   }
 
   // ── Backups ──────────────────────────────────────────────────────────────

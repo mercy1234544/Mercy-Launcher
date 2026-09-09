@@ -33,6 +33,7 @@ const SECTION_TITLES: { test: (p: string) => boolean; title: string; subtitle: s
   { test: (p) => p === '/minecraft', title: 'Minecraft', subtitle: 'Server Management' },
   { test: (p) => p === '/minecraft/create', title: 'Minecraft', subtitle: 'Create Server' },
   { test: (p) => p.startsWith('/minecraft/server/'), title: 'Minecraft', subtitle: 'Manage Server' },
+  { test: (p) => p === '/minecraft/marketplace', title: 'Minecraft', subtitle: 'Marketplace' },
   { test: (p) => p.startsWith('/assetto-corsa'), title: 'Assetto Corsa', subtitle: 'Coming soon' },
   { test: (p) => p.startsWith('/beamng'), title: 'BeamNG.drive', subtitle: 'Coming soon' },
   { test: (p) => p.startsWith('/library'), title: 'Library', subtitle: 'All your installed content' },

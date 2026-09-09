@@ -54,13 +54,14 @@ const electronAPI = {
     getAll: () => ipcRenderer.invoke('minecraft:getAll'),
     get: (id: string) => ipcRenderer.invoke('minecraft:get', id),
     consoleBuffer: (id: string) => ipcRenderer.invoke('minecraft:consoleBuffer', id),
-    delete: (id: string, deleteFiles: boolean) => ipcRenderer.invoke('minecraft:delete', id, deleteFiles),
+    delete: (id: string, deleteFiles: boolean, deleteBackups?: boolean) => ipcRenderer.invoke('minecraft:delete', id, deleteFiles, deleteBackups),
     detectJava: () => ipcRenderer.invoke('minecraft:detectJava'),
     detectAllJava: () => ipcRenderer.invoke('minecraft:detectAllJava'),
     javaRequirement: (version: string) => ipcRenderer.invoke('minecraft:javaRequirement', version),
     requiredJavaForVersion: (serverType: 'vanilla' | 'paper', version: string) => ipcRenderer.invoke('minecraft:requiredJavaForVersion', serverType, version),
     resolveLaunchJava: (id: string) => ipcRenderer.invoke('minecraft:resolveLaunchJava', id),
     setJavaPath: (id: string, javaPath: string | null) => ipcRenderer.invoke('minecraft:setJavaPath', id, javaPath),
+    installJava: (major: number) => ipcRenderer.invoke('minecraft:installJava', major),
     fetchVanillaVersions: () => ipcRenderer.invoke('minecraft:fetchVanillaVersions'),
     fetchPaperVersions: () => ipcRenderer.invoke('minecraft:fetchPaperVersions'),
     create: (config: any) => ipcRenderer.invoke('minecraft:create', config),
@@ -82,6 +83,29 @@ const electronAPI = {
     listBackups: (id: string) => ipcRenderer.invoke('minecraft:listBackups', id),
     restoreBackup: (backupId: string) => ipcRenderer.invoke('minecraft:restoreBackup', backupId),
     deleteBackup: (backupId: string) => ipcRenderer.invoke('minecraft:deleteBackup', backupId),
+  },
+
+  minecraftMarketplace: {
+    search: (opts: { query?: string; projectType?: string; minecraftVersion?: string; loader?: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('minecraft:marketplace:search', opts),
+    getProject: (projectId: string) => ipcRenderer.invoke('minecraft:marketplace:getProject', projectId),
+    getVersions: (projectId: string, opts?: { minecraftVersion?: string; loader?: string }) => ipcRenderer.invoke('minecraft:marketplace:getVersions', projectId, opts),
+    getVersion: (versionId: string) => ipcRenderer.invoke('minecraft:marketplace:getVersion', versionId),
+    install: (serverId: string, projectId: string, versionId: string) => ipcRenderer.invoke('minecraft:marketplace:install', serverId, projectId, versionId),
+    listInstalled: (serverId: string) => ipcRenderer.invoke('minecraft:marketplace:listInstalled', serverId),
+    removeContent: (serverId: string, contentId: string) => ipcRenderer.invoke('minecraft:marketplace:removeContent', serverId, contentId),
+    setContentEnabled: (serverId: string, contentId: string, enabled: boolean) => ipcRenderer.invoke('minecraft:marketplace:setContentEnabled', serverId, contentId, enabled),
+  },
+
+  onMinecraftMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('minecraft:marketplace:installProgress', handler);
+    return () => { ipcRenderer.removeListener('minecraft:marketplace:installProgress', handler); };
+  },
+  onMinecraftInstallJavaProgress: (callback: (data: { pct: number; message: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('minecraft:installJavaProgress', handler);
+    return () => { ipcRenderer.removeListener('minecraft:installJavaProgress', handler); };
   },
 
   onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => {

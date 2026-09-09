@@ -16,6 +16,7 @@ import { VehicleStudio } from './services/VehicleStudio';
 import { VehicleStudioAuth } from './services/VehicleStudioAuth';
 import { SettingsManager } from './services/SettingsManager';
 import { MinecraftManager } from './services/MinecraftManager';
+import { MinecraftMarketplace } from './services/MinecraftMarketplace';
 import { ThemeManager } from './services/ThemeManager';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
@@ -45,6 +46,7 @@ let vehicleStudio: VehicleStudio;
 let vehicleStudioAuth: VehicleStudioAuth;
 let settingsManager: SettingsManager;
 let minecraftManager: MinecraftManager;
+let minecraftMarketplace: MinecraftMarketplace;
 let themeManager: ThemeManager;
 const vehicleResourceScanner = new VehicleResourceScanner();
 
@@ -135,6 +137,7 @@ function initializeServices() {
   vehicleStudioAuth = new VehicleStudioAuth(userDataPath);
   settingsManager = new SettingsManager();
   minecraftManager = new MinecraftManager(userDataPath);
+  minecraftMarketplace = new MinecraftMarketplace();
   themeManager = new ThemeManager(userDataPath);
   serverManager.setDatabaseManager(databaseManager);
   healthScanner.setDatabaseManager(databaseManager);
@@ -262,7 +265,7 @@ function registerIpcHandlers() {
   ipcMain.handle('minecraft:getAll', () => minecraftManager.getAllServers());
   ipcMain.handle('minecraft:get', (_, id: string) => minecraftManager.getServer(id));
   ipcMain.handle('minecraft:consoleBuffer', (_, id: string) => minecraftManager.getConsoleBuffer(id));
-  ipcMain.handle('minecraft:delete', (_, id: string, deleteFiles: boolean) => minecraftManager.deleteServer(id, deleteFiles));
+  ipcMain.handle('minecraft:delete', (_, id: string, deleteFiles: boolean, deleteBackups?: boolean) => minecraftManager.deleteServer(id, deleteFiles, !!deleteBackups));
   ipcMain.handle('minecraft:detectJava', () => minecraftManager.detectJava());
   ipcMain.handle('minecraft:detectAllJava', () => minecraftManager.detectAllJavaRuntimes());
   ipcMain.handle('minecraft:javaRequirement', (_, version: string) => minecraftManager.javaRequirementFor(version));
@@ -272,6 +275,8 @@ function registerIpcHandlers() {
     return server ? minecraftManager.resolveLaunchJava(server) : null;
   });
   ipcMain.handle('minecraft:setJavaPath', (_, id: string, javaPath: string | null) => minecraftManager.setServerJavaPath(id, javaPath));
+  ipcMain.handle('minecraft:installJava', (event, major: number) =>
+    minecraftManager.downloadAndInstallJava(major, (pct, message) => event.sender.send('minecraft:installJavaProgress', { pct, message })));
   ipcMain.handle('minecraft:fetchVanillaVersions', () => minecraftManager.fetchVanillaVersions());
   ipcMain.handle('minecraft:fetchPaperVersions', () => minecraftManager.fetchPaperVersions());
   ipcMain.handle('minecraft:create', (event, config) =>
@@ -294,6 +299,17 @@ function registerIpcHandlers() {
   ipcMain.handle('minecraft:listBackups', (_, id: string) => minecraftManager.listBackups(id));
   ipcMain.handle('minecraft:restoreBackup', (_, backupId: string) => minecraftManager.restoreBackup(backupId));
   ipcMain.handle('minecraft:deleteBackup', (_, backupId: string) => minecraftManager.deleteBackup(backupId));
+
+  // Marketplace (Modrinth) — mod/plugin/datapack browsing and real install.
+  ipcMain.handle('minecraft:marketplace:search', (_, opts) => minecraftMarketplace.search(opts));
+  ipcMain.handle('minecraft:marketplace:getProject', (_, projectId: string) => minecraftMarketplace.getProject(projectId));
+  ipcMain.handle('minecraft:marketplace:getVersions', (_, projectId: string, opts) => minecraftMarketplace.getVersions(projectId, opts));
+  ipcMain.handle('minecraft:marketplace:getVersion', (_, versionId: string) => minecraftMarketplace.getVersion(versionId));
+  ipcMain.handle('minecraft:marketplace:install', (event, serverId: string, projectId: string, versionId: string) =>
+    minecraftMarketplace.installContent(minecraftManager, serverId, projectId, versionId, (pct, message) => event.sender.send('minecraft:marketplace:installProgress', { pct, message })));
+  ipcMain.handle('minecraft:marketplace:listInstalled', (_, serverId: string) => minecraftMarketplace.listInstalled(minecraftManager, serverId));
+  ipcMain.handle('minecraft:marketplace:removeContent', (_, serverId: string, contentId: string) => minecraftMarketplace.removeContent(minecraftManager, serverId, contentId));
+  ipcMain.handle('minecraft:marketplace:setContentEnabled', (_, serverId: string, contentId: string, enabled: boolean) => minecraftMarketplace.setContentEnabled(minecraftManager, serverId, contentId, enabled));
 
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());

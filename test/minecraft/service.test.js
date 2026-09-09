@@ -154,8 +154,8 @@ function mkFakeServer(dir, opts = {}) {
   // 10. deleteServer — removes from registry; with deleteFiles=false, leaves real files untouched
   //     (this is the "never delete the user's real Minecraft world" guarantee, exercised for real).
   const beforeDeleteFilesExist = fs.existsSync(vanillaDir);
-  const delOk = await mgr.deleteServer(registeredId, false);
-  ok('deleteServer (registry only) succeeds', delOk === true);
+  const delResult = await mgr.deleteServer(registeredId, false);
+  ok('deleteServer (registry only) succeeds', delResult.success === true);
   ok('deleteServer(deleteFiles=false) did NOT touch the real directory', beforeDeleteFilesExist && fs.existsSync(vanillaDir));
   ok('server is gone from the registry', mgr.getServer(registeredId) === undefined);
 

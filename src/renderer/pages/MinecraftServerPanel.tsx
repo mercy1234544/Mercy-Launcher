@@ -6,6 +6,7 @@ import {
   Blocks, ArrowLeft, Play, Square, RotateCcw, Loader2, Terminal, Settings2, Users,
   Archive, FolderOpen, LayoutDashboard, Cpu, MemoryStick, Clock, Hash, Save, Trash2,
   Download, RefreshCw, AlertTriangle, File as FileIcon, Folder, ChevronRight, Copy, Trash,
+  Puzzle, ExternalLink, ShieldAlert, Power,
 } from 'lucide-react';
 import { Panel, SectionHeading, Toggle, EmptyState } from '../components/ui';
 import { useMinecraftStore } from '../stores/useMinecraftStore';
@@ -100,12 +101,17 @@ export default function MinecraftServerPanel() {
             { id: 'players', label: 'Players', icon: Users },
             { id: 'backups', label: 'Backups', icon: Archive },
             { id: 'files', label: 'Files', icon: FolderOpen },
+            { id: 'content', label: server.serverType === 'paper' ? 'Mods & Plugins' : 'Datapacks', icon: Puzzle },
           ].map((t) => (
             <Tabs.Trigger key={t.id} value={t.id}
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors outline-none ${tab === t.id ? 'bg-primary-600/15 text-primary-300 border border-primary-500/25' : 'text-surface-400 hover:text-surface-200 hover:bg-overlay-4 border border-transparent'}`}>
               <t.icon size={13} /> {t.label}
             </Tabs.Trigger>
           ))}
+          <Tabs.Trigger value="danger"
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors outline-none ml-auto ${tab === 'danger' ? 'bg-error-bg text-error border border-error/25' : 'text-surface-500 hover:text-error hover:bg-error-bg border border-transparent'}`}>
+            <ShieldAlert size={13} /> Delete
+          </Tabs.Trigger>
         </Tabs.List>
 
         <Tabs.Content value="overview" className="outline-none"><OverviewTab server={server} onChange={load} /></Tabs.Content>
@@ -114,6 +120,8 @@ export default function MinecraftServerPanel() {
         <Tabs.Content value="players" className="outline-none"><PlayersTab server={server} isRunning={isRunning} /></Tabs.Content>
         <Tabs.Content value="backups" className="outline-none"><BackupsTab server={server} /></Tabs.Content>
         <Tabs.Content value="files" className="outline-none"><FilesTab server={server} /></Tabs.Content>
+        <Tabs.Content value="content" className="outline-none"><ContentTab server={server} /></Tabs.Content>
+        <Tabs.Content value="danger" className="outline-none"><DangerZoneTab server={server} /></Tabs.Content>
       </Tabs.Root>
     </motion.div>
   );
@@ -141,6 +149,22 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
   useEffect(refreshJava, [server.id, server.javaPath, server.status]);
   const compatibleRuntimes = javaCheck ? allRuntimes.filter((r) => r.major >= javaCheck.required).sort((a, b) => a.major - b.major) : [];
   const pinRuntime = async (p: string) => { await window.electronAPI.minecraft.setJavaPath(server.id, p || null); refreshJava(); onChange(); };
+
+  const [installingJava, setInstallingJava] = useState(false);
+  const [javaInstallProgress, setJavaInstallProgress] = useState<{ pct: number; message: string } | null>(null);
+  const installJava = async (major: number) => {
+    setInstallingJava(true);
+    const cleanup = window.electronAPI.onMinecraftInstallJavaProgress(setJavaInstallProgress);
+    try {
+      const result = await window.electronAPI.minecraft.installJava(major);
+      if (result.success) { toast.success(`Java ${major} installed`); refreshJava(); }
+      else toast.error(result.error || `Failed to install Java ${major}`);
+    } catch (e: any) {
+      toast.error(e?.message || `Failed to install Java ${major}`);
+    } finally {
+      cleanup?.(); setInstallingJava(false); setJavaInstallProgress(null);
+    }
+  };
 
   const cards = [
     { icon: Hash, label: 'PID', value: stats?.pid ?? server.pid ?? 'Not available' },
@@ -186,7 +210,19 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
               </span>
             </div>
             {!javaCheck.ok && javaCheck.error && (
-              <p className="text-xs text-error mt-2 flex items-start gap-1.5"><AlertTriangle size={12} className="shrink-0 mt-0.5" /> {javaCheck.error}</p>
+              <div className="mt-2 space-y-2">
+                <p className="text-xs text-error flex items-start gap-1.5"><AlertTriangle size={12} className="shrink-0 mt-0.5" /> {javaCheck.error}</p>
+                {javaInstallProgress ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-1 text-[11px] text-surface-400"><span>{javaInstallProgress.message}</span><span>{javaInstallProgress.pct}%</span></div>
+                    <div className="w-full h-1.5 bg-overlay-6 rounded-full overflow-hidden"><div className="h-full bg-primary-500 transition-all" style={{ width: `${javaInstallProgress.pct}%` }} /></div>
+                  </div>
+                ) : (
+                  <button onClick={() => installJava(javaCheck.required)} disabled={installingJava} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-50">
+                    {installingJava ? <Loader2 size={12} className="animate-spin" /> : null} Install Java {javaCheck.required}
+                  </button>
+                )}
+              </div>
             )}
             {compatibleRuntimes.length > 1 && (
               <div className="mt-3">
@@ -521,5 +557,161 @@ function FilesTab({ server }: { server: MinecraftServer }) {
         </div>
       )}
     </Panel>
+  );
+}
+
+// ── Content: Mods & Plugins (Paper) / Datapacks (both) ──────────────────────
+function ContentTab({ server }: { server: MinecraftServer }) {
+  const navigate = useNavigate();
+  const [items, setItems] = useState<(InstalledContent & { missingOnDisk: boolean })[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = () => { setLoading(true); window.electronAPI.minecraftMarketplace.listInstalled(server.id).then(setItems).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, [server.id]);
+
+  const remove = async (id: string) => {
+    setBusyId(id);
+    const result = await window.electronAPI.minecraftMarketplace.removeContent(server.id, id);
+    setBusyId(null);
+    if (result.success) { toast.success('Removed'); load(); } else toast.error(result.error || 'Failed to remove');
+  };
+  const toggleEnabled = async (id: string, enabled: boolean) => {
+    setBusyId(id);
+    const result = await window.electronAPI.minecraftMarketplace.setContentEnabled(server.id, id, enabled);
+    setBusyId(null);
+    if (result.success) { toast.success(enabled ? 'Enabled' : 'Disabled — restart or /reload to apply'); load(); } else toast.error(result.error || 'Failed to update');
+  };
+
+  const plugins = items.filter((i) => i.kind === 'plugin');
+  const datapacks = items.filter((i) => i.kind === 'datapack');
+
+  const Row = ({ item }: { item: InstalledContent & { missingOnDisk: boolean } }) => (
+    <Panel padding="sm" className="flex items-center gap-3">
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.enabled ? 'bg-primary-500/15 text-primary-300' : 'bg-overlay-6 text-surface-500'}`}><Puzzle size={14} /></div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-surface-100 truncate">{item.projectName} <span className="text-surface-500 font-normal">v{item.versionNumber}</span></p>
+        <p className="text-[11px] text-surface-500 truncate">
+          {item.fileName} · Modrinth · Installed {new Date(item.installedAt).toLocaleDateString()}
+          {item.missingOnDisk && <span className="text-error"> · file missing from disk</span>}
+          {item.dependencies.length > 0 && <> · {item.dependencies.length} dependenc{item.dependencies.length === 1 ? 'y' : 'ies'}</>}
+        </p>
+      </div>
+      {!item.enabled && <span className="text-[10px] font-semibold text-surface-500 px-2 py-0.5 rounded-full bg-overlay-6 shrink-0">Disabled</span>}
+      <button onClick={() => window.electronAPI?.openExternal(`https://modrinth.com/project/${item.projectId}`)} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0" title="View on Modrinth"><ExternalLink size={13} /></button>
+      <button onClick={() => toggleEnabled(item.id, !item.enabled)} disabled={busyId === item.id || item.missingOnDisk} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0 disabled:opacity-40" title={item.enabled ? 'Disable' : 'Enable'}>
+        {busyId === item.id ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
+      </button>
+      <button onClick={() => remove(item.id)} disabled={busyId === item.id} className="p-1.5 rounded-lg text-surface-500 hover:text-error hover:bg-overlay-6 transition-colors shrink-0"><Trash2 size={13} /></button>
+    </Panel>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={() => navigate(`/minecraft/marketplace?server=${server.id}`)} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5"><Puzzle size={13} /> Browse Marketplace</button>
+      </div>
+      {loading ? (
+        <Panel className="flex items-center justify-center py-10"><Loader2 size={18} className="animate-spin text-primary-400" /></Panel>
+      ) : (
+        <>
+          {server.serverType === 'paper' && (
+            <div>
+              <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">Plugins</p>
+              {plugins.length === 0 ? (
+                <Panel><EmptyState icon={Puzzle} title="No plugins installed" description="Paper plugins from the Marketplace will appear here." /></Panel>
+              ) : (
+                <div className="space-y-2">{plugins.map((i) => <Row key={i.id} item={i} />)}</div>
+              )}
+            </div>
+          )}
+          {server.serverType === 'vanilla' && (
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-overlay-4 border border-overlay-8 text-xs text-surface-400">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" /> Vanilla servers can't run plugins or mods — only datapacks, shown below.
+            </div>
+          )}
+          <div>
+            <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">Datapacks</p>
+            {datapacks.length === 0 ? (
+              <Panel><EmptyState icon={Puzzle} title="No datapacks installed" description="Datapacks work on both Vanilla and Paper — no mod loader needed." /></Panel>
+            ) : (
+              <div className="space-y-2">{datapacks.map((i) => <Row key={i.id} item={i} />)}</div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Danger Zone: permanent, deliberate server deletion ───────────────────────
+function DangerZoneTab({ server }: { server: MinecraftServer }) {
+  const navigate = useNavigate();
+  const [confirmText, setConfirmText] = useState('');
+  const [deleteBackups, setDeleteBackups] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const canDelete = confirmText.trim() === server.name && !deleting;
+
+  const doDelete = async () => {
+    if (!canDelete) return;
+    setDeleting(true);
+    try {
+      const result = await window.electronAPI.minecraft.delete(server.id, true, deleteBackups);
+      if (result.success) {
+        toast.success(`"${server.name}" was deleted`);
+        navigate('/minecraft');
+      } else {
+        toast.error(result.error || 'Delete failed');
+        setDeleting(false);
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Delete failed');
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Panel className="border-error/30">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-error-bg border border-error/25 flex items-center justify-center shrink-0"><ShieldAlert size={18} className="text-error" /></div>
+          <div>
+            <p className="text-sm font-bold text-error">Danger Zone</p>
+            <p className="text-xs text-surface-400 mt-1">Deleting "{server.name}" is permanent and cannot be undone. This will:</p>
+            <ul className="text-xs text-surface-400 mt-2 space-y-1 list-disc list-inside">
+              <li>Stop the server if it's running</li>
+              <li>Remove all server files, including the world</li>
+              <li>Remove all installed mods, plugins, and datapacks</li>
+              <li>Remove the server from Mercy Launcher</li>
+            </ul>
+            <p className="text-xs text-surface-500 mt-2">Backups are kept by default — they're stored separately and won't be touched unless you choose to delete them below.</p>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel>
+        <label className="flex items-center justify-between gap-4 cursor-pointer">
+          <div>
+            <p className="text-sm font-semibold text-surface-100">Also delete backups for this server</p>
+            <p className="text-xs text-surface-500 mt-0.5">Off by default — backups are kept separately unless you explicitly choose this.</p>
+          </div>
+          <Toggle checked={deleteBackups} onChange={setDeleteBackups} />
+        </label>
+      </Panel>
+
+      <Panel>
+        <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">
+          Type <span className="font-mono text-surface-200">{server.name}</span> to confirm
+        </label>
+        <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} className="input-field font-mono" placeholder={server.name} />
+      </Panel>
+
+      <div className="flex justify-end gap-2">
+        <button onClick={() => setConfirmText('')} className="btn-secondary">Cancel</button>
+        <button onClick={doDelete} disabled={!canDelete} className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-error text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2">
+          {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete Server Permanently
+        </button>
+      </div>
+    </div>
   );
 }

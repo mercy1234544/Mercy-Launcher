@@ -30,6 +30,7 @@ import LiveryEditor from './pages/LiveryEditor';
 import MinecraftHub from './pages/MinecraftHub';
 import MinecraftServerWizard from './pages/MinecraftServerWizard';
 import MinecraftServerPanel from './pages/MinecraftServerPanel';
+import MinecraftMarketplace from './pages/MinecraftMarketplace';
 import Settings from './pages/Settings';
 import AdminPanel from './pages/AdminPanel';
 import VehicleStudio from './pages/VehicleStudio';
@@ -83,6 +84,7 @@ export default function App() {
               <Route path="/minecraft" element={<MinecraftHub />} />
               <Route path="/minecraft/create" element={<MinecraftServerWizard />} />
               <Route path="/minecraft/server/:id" element={<MinecraftServerPanel />} />
+              <Route path="/minecraft/marketplace" element={<MinecraftMarketplace />} />
               <Route path="/assetto-corsa" element={<ComingSoon />} />
               <Route path="/beamng" element={<ComingSoon />} />
               <Route path="/library" element={<Library />} />

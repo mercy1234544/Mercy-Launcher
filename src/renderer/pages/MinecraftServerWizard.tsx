@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Blocks, FolderOpen, ArrowLeft, Loader2, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { Blocks, FolderOpen, ArrowLeft, Loader2, CheckCircle2, AlertTriangle, XCircle, ChevronDown } from 'lucide-react';
 import { Panel, SectionHeading, Toggle } from '../components/ui';
 import toast from 'react-hot-toast';
 
@@ -28,9 +28,38 @@ export default function MinecraftServerWizard() {
   const [selectedJavaPath, setSelectedJavaPath] = useState<string | null>(null); // null = auto-select the closest compatible runtime
 
   const refreshRuntimes = () => window.electronAPI.minecraft.detectAllJava().then(setAllRuntimes).catch(() => setAllRuntimes([]));
+  const [installingJava, setInstallingJava] = useState(false);
+  const [javaInstallProgress, setJavaInstallProgress] = useState<{ pct: number; message: string } | null>(null);
+
+  const installJava = async (major: number) => {
+    setInstallingJava(true);
+    const cleanup = window.electronAPI.onMinecraftInstallJavaProgress(setJavaInstallProgress);
+    try {
+      const result = await window.electronAPI.minecraft.installJava(major);
+      if (result.success) { toast.success(`Java ${major} installed`); refreshRuntimes(); }
+      else toast.error(result.error || `Failed to install Java ${major}`);
+    } catch (e: any) {
+      toast.error(e?.message || `Failed to install Java ${major}`);
+    } finally {
+      cleanup?.(); setInstallingJava(false); setJavaInstallProgress(null);
+    }
+  };
 
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [seed, setSeed] = useState('');
+  const [gamemode, setGamemode] = useState<'survival' | 'creative' | 'adventure' | 'spectator'>('survival');
+  const [difficulty, setDifficulty] = useState<'peaceful' | 'easy' | 'normal' | 'hard'>('easy');
+  const [hardcore, setHardcore] = useState(false);
+  const [onlineMode, setOnlineMode] = useState(true);
+  const [maxPlayers, setMaxPlayers] = useState(20);
+  const [motd, setMotd] = useState('A Mercy Launcher Server');
+  const [viewDistance, setViewDistance] = useState(10);
+  const [simulationDistance, setSimulationDistance] = useState(10);
+  const [pvp, setPvp] = useState(true);
+  const [whitelist, setWhitelist] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -90,7 +119,11 @@ export default function MinecraftServerWizard() {
     setProgress({ pct: 0, message: 'Starting…' });
     const cleanup = window.electronAPI.onMinecraftCreateProgress((data) => setProgress(data));
     try {
-      const result = await window.electronAPI.minecraft.create({ name: name.trim(), installPath, version, serverType, ramMB: ram, port, acceptedEula, javaPath: selectedJavaPath });
+      const result = await window.electronAPI.minecraft.create({
+        name: name.trim(), installPath, version, serverType, ramMB: ram, port, acceptedEula, javaPath: selectedJavaPath,
+        seed: seed.trim() || undefined, gamemode, difficulty, hardcore, onlineMode, maxPlayers, motd: motd.trim() || undefined,
+        viewDistance, simulationDistance, pvp, whitelist,
+      });
       if (result.success && result.server) {
         toast.success('Server created');
         navigate(`/minecraft/server/${result.server.id}`);
@@ -175,12 +208,28 @@ export default function MinecraftServerWizard() {
         </div>
 
         {requiredJava != null && !javaCompatible && (
-          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-error-bg border border-error/20 text-xs text-error">
-            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-            <span>
-              Java {requiredJava} is required for Minecraft {version}, but {selectedRuntime ? `Java ${selectedRuntime.major} is currently selected` : 'no compatible Java runtime was found'} on this PC.
-              Install a compatible JDK, then <button onClick={refreshRuntimes} className="underline hover:no-underline">re-check</button>.
-            </span>
+          <div className="mt-3 p-2.5 rounded-lg bg-error-bg border border-error/20 text-xs text-error space-y-2">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+              <span>
+                Java {requiredJava} is required for Minecraft {version}, but {selectedRuntime ? `Java ${selectedRuntime.major} is currently selected` : 'no compatible Java runtime was found'} on this PC.
+              </span>
+            </div>
+            {javaInstallProgress ? (
+              <div>
+                <div className="flex items-center justify-between mb-1 text-[11px] text-surface-300"><span>{javaInstallProgress.message}</span><span>{javaInstallProgress.pct}%</span></div>
+                <div className="w-full h-1.5 bg-overlay-6 rounded-full overflow-hidden"><div className="h-full bg-primary-500 transition-all" style={{ width: `${javaInstallProgress.pct}%` }} /></div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button onClick={() => installJava(requiredJava)} disabled={installingJava} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-50">
+                  {installingJava ? <Loader2 size={12} className="animate-spin" /> : null} Install Java {requiredJava}
+                </button>
+                <span className="text-surface-500">or</span>
+                <button onClick={refreshRuntimes} className="underline hover:no-underline">re-check if you already installed one</button>
+              </div>
+            )}
+            <p className="text-[10px] text-surface-500">Downloads the real, official Eclipse Temurin (OpenJDK) build for Java {requiredJava} and installs it inside Mercy only — no system-wide changes.</p>
           </div>
         )}
 
@@ -206,6 +255,56 @@ export default function MinecraftServerWizard() {
           <input type="number" min={1} max={65535} value={port} onChange={(e) => setPort(parseInt(e.target.value) || 25565)} className="input-field" />
         </Panel>
       </div>
+
+      <Panel>
+        <button onClick={() => setShowAdvanced((v) => !v)} className="w-full flex items-center justify-between text-left">
+          <div>
+            <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider block">World & Gameplay Settings</label>
+            <p className="text-[11px] text-surface-600 mt-0.5">Seed, difficulty, game mode, and more — all editable later too.</p>
+          </div>
+          <ChevronDown size={16} className={`text-surface-500 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+        </button>
+        {showAdvanced && (
+          <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="col-span-2">
+              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">World Seed (optional)</label>
+              <input value={seed} onChange={(e) => setSeed(e.target.value)} className="input-field text-sm" placeholder="Leave blank for a random world" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">Game Mode</label>
+              <select value={gamemode} onChange={(e) => setGamemode(e.target.value as any)} className="input-field text-sm py-2">
+                {['survival', 'creative', 'adventure', 'spectator'].map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">Difficulty</label>
+              <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as any)} className="input-field text-sm py-2">
+                {['peaceful', 'easy', 'normal', 'hard'].map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">MOTD</label>
+              <input value={motd} onChange={(e) => setMotd(e.target.value)} className="input-field text-sm" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">Max Players</label>
+              <input type="number" min={1} value={maxPlayers} onChange={(e) => setMaxPlayers(parseInt(e.target.value) || 20)} className="input-field text-sm" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">View Distance</label>
+              <input type="number" min={3} max={32} value={viewDistance} onChange={(e) => setViewDistance(parseInt(e.target.value) || 10)} className="input-field text-sm" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">Simulation Distance</label>
+              <input type="number" min={3} max={32} value={simulationDistance} onChange={(e) => setSimulationDistance(parseInt(e.target.value) || 10)} className="input-field text-sm" />
+            </div>
+            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">PvP</span><Toggle checked={pvp} onChange={setPvp} /></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">Online Mode (verify accounts)</span><Toggle checked={onlineMode} onChange={setOnlineMode} /></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">Hardcore</span><Toggle checked={hardcore} onChange={setHardcore} /></div>
+            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">Whitelist</span><Toggle checked={whitelist} onChange={setWhitelist} /></div>
+          </div>
+        )}
+      </Panel>
 
       <Panel className="flex items-center gap-4">
         <div className="flex-1">

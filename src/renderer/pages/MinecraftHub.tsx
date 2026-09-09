@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Blocks, PlusCircle, FolderInput, Server, Zap, ArrowRight, Loader2, X, FolderOpen, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Blocks, PlusCircle, FolderInput, Server, Zap, ArrowRight, Loader2, X, FolderOpen, CheckCircle2, AlertTriangle, Puzzle } from 'lucide-react';
 import { useMinecraftStore } from '../stores/useMinecraftStore';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -33,6 +33,7 @@ export default function MinecraftHub() {
         subtitle="Create and manage your Minecraft servers"
         action={
           <div className="flex items-center gap-2">
+            <button onClick={() => navigate('/minecraft/marketplace')} className="btn-secondary text-xs py-2 flex items-center gap-1.5"><Puzzle size={13} /> Marketplace</button>
             <button onClick={() => setShowImport(true)} className="btn-secondary text-xs py-2 flex items-center gap-1.5"><FolderInput size={13} /> Import Server</button>
             <button onClick={() => navigate('/minecraft/create')} className="btn-primary text-xs py-2 flex items-center gap-1.5"><PlusCircle size={13} /> Create Server</button>
           </div>

@@ -165,6 +165,15 @@ function mkFakeServer(dir, jarName = 'server.jar') {
   const pinnedMissing = await mgr.resolveLaunchJava(pinnedServer);
   ok('a pinned runtime pointing at a nonexistent executable fails cleanly, not by throwing', pinnedMissing.ok === false && /moved or uninstalled/.test(pinnedMissing.error || ''));
 
+  // 8. downloadAndInstallJava — a real (but fast/small, no actual JDK
+  // download) call against Adoptium's real API for an impossible Java
+  // major, proving the failure path is handled cleanly rather than by
+  // throwing or hanging. The real success path (a genuine ~140MB JDK
+  // download, checksum, extract, and boot) is proven separately in
+  // java25-live-e2e.js, where it's the main point of the test.
+  const badJavaInstall = await mgr.downloadAndInstallJava(99999);
+  ok('installing a nonexistent Java major fails cleanly with a clear error', badJavaInstall.success === false && /could not find/i.test(badJavaInstall.error || ''));
+
   // Cleanup.
   try { fs.rmSync(userDataRoot, { recursive: true, force: true }); } catch {}
   try { fs.rmSync(base, { recursive: true, force: true }); } catch {}
