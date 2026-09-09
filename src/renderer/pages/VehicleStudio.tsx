@@ -5,6 +5,7 @@
 // editor, fixer, build/export, server install) arrive in later phases and are
 // clearly marked "coming next" — no faked controls.
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -32,6 +33,7 @@ type Tab = 'overview' | 'tune' | 'presets' | 'changes' | 'performance' | 'transm
 // Access control is enforced app-wide by AppAccessGate (in Layout), so Vehicle
 // Studio no longer gates itself — it renders directly.
 export default function VehicleStudio() {
+  const navigate = useNavigate();
   const [scan, setScan] = useState<VSScan | null>(null);
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -74,6 +76,7 @@ export default function VehicleStudio() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-6 max-w-6xl mx-auto">
       <div className="flex items-center gap-3">
+        <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
         <div className="w-11 h-11 rounded-xl bg-primary-500/15 border border-primary-500/25 flex items-center justify-center"><Car size={22} className="text-primary-300" /></div>
         <div>
           <h1 className="text-2xl font-bold text-surface-100">Vehicle Studio</h1>

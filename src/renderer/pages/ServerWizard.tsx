@@ -435,7 +435,7 @@ export default function ServerWizard() {
       {/* Nav Buttons */}
       <div className="flex justify-between">
         <button
-          onClick={step === 0 ? () => navigate('/') : handleBack}
+          onClick={step === 0 ? () => navigate(-1) : handleBack}
           disabled={building}
           className="btn-secondary flex items-center gap-2 disabled:opacity-50"
         >

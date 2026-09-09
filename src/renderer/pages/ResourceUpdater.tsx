@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  ArrowLeft,
   RefreshCw,
   Download,
   Check,
@@ -45,6 +47,7 @@ interface ArtifactInfo {
 type FilterMode = 'all' | 'updates' | 'current';
 
 export default function ResourceUpdater() {
+  const navigate = useNavigate();
   const { servers, activeServerId, updateServer } = useAppStore();
   const activeServer = servers.find((s) => s.id === activeServerId);
 
@@ -249,6 +252,7 @@ export default function ResourceUpdater() {
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-3 mb-2">
+              <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/20 flex items-center justify-center">
                 <RefreshCw size={20} className="text-emerald-400" />
               </div>

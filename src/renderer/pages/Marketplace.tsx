@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Loader2,
   Star,
+  ArrowLeft,
   ArrowLeftRight,
   Trash2,
   ExternalLink,
@@ -1166,11 +1167,14 @@ export default function Marketplace() {
       className="space-y-6 p-6 max-w-7xl mx-auto"
     >
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-100">FiveM Marketplace</h1>
-          <p className="text-sm text-surface-400 mt-1">
-            {filtered.length} scripts &amp; resources · {installedCount} installed{targetServer ? ` on ${targetServer.name}` : ''}
-          </p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
+          <div>
+            <h1 className="text-2xl font-bold text-surface-100">FiveM Marketplace</h1>
+            <p className="text-sm text-surface-400 mt-1">
+              {filtered.length} scripts &amp; resources · {installedCount} installed{targetServer ? ` on ${targetServer.name}` : ''}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {/* Account controls — only shown once accounts are configured */}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -8,6 +9,7 @@ import {
   Loader2,
   Wand2,
   Info,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 
@@ -18,6 +20,7 @@ interface CategoryGroup {
 }
 
 export default function ResourceOrganizer() {
+  const navigate = useNavigate();
   const { activeServerId, servers } = useAppStore();
   const [categories, setCategories] = useState<CategoryGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -63,9 +66,12 @@ export default function ResourceOrganizer() {
       className="space-y-6"
     >
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-100">Resource Organizer</h1>
-          <p className="text-sm text-surface-400 mt-1">Analyze and categorize your resources</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
+          <div>
+            <h1 className="text-2xl font-bold text-surface-100">Resource Organizer</h1>
+            <p className="text-sm text-surface-400 mt-1">Analyze and categorize your resources</p>
+          </div>
         </div>
         <button
           onClick={analyze}

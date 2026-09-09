@@ -10,7 +10,7 @@ import toast from 'react-hot-toast';
 import {
   Server, Play, Square, RotateCw, FolderOpen, Trash2, Settings as SettingsIcon,
   Terminal, Folder, FolderPlus, FilePlus, File as FileIcon, ChevronRight, ChevronDown,
-  Package, Archive, Loader2, Search, Save, Upload, RefreshCw, ArrowDown,
+  Package, Archive, Loader2, Search, Save, Upload, RefreshCw, ArrowDown, ArrowLeft,
   ToggleLeft, ToggleRight, AlertTriangle, Globe, X, Download, HardDrive,
   Wrench, HeartPulse, FileCode, Import as ImportIcon, Car, Palette, FolderTree, ListOrdered,
   CornerDownLeft, Lightbulb,
@@ -274,6 +274,7 @@ export default function ServerPanel() {
         <div className="shrink-0 px-6 pt-5 pb-0 border-b border-overlay-6">
           <div className="flex items-start justify-between gap-4 pb-4">
             <div className="flex items-center gap-4 min-w-0">
+              <button onClick={() => navigate('/fivem')} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500/25 to-purple-600/10 border border-primary-500/20 flex items-center justify-center shrink-0">
                 <Server size={24} className="text-primary-400" />
               </div>

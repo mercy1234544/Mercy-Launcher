@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
   Eye, EyeOff, Trash2, ChevronUp, ChevronDown, Download, Palette, ZoomIn, ZoomOut,
   Plus, Car, Grid3x3, Type, Brush, MousePointer, Layers as LayersIcon,
-  FolderOpen, Box, Loader2, ChevronLeft, Wand2, Square, Stethoscope, X,
+  FolderOpen, Box, Loader2, ChevronLeft, ArrowLeft, Wand2, Square, Stethoscope, X,
   CheckCircle2, XCircle, FileText, Image as ImageIcon,
   RotateCcw, Scan, BoxSelect, TriangleRight, Circle, Minus, Droplets,
   Undo2, Redo2, PaintBucket, Slash, Lock, Unlock, Save,
@@ -80,6 +81,7 @@ function Row({ k, v, ok }: { k: string; v?: string; ok?: boolean }) {
 }
 
 export default function LiveryEditor() {
+  const navigate = useNavigate();
   const [phase, setPhase] = useState<Phase>('empty');
   const [vehicles, setVehicles] = useState<DetectedVehicle[]>([]);
   const [folderName, setFolderName] = useState('');
@@ -781,6 +783,7 @@ export default function LiveryEditor() {
       {/* Top bar */}
       <div className="shrink-0 flex items-center gap-3 px-5 py-2.5 border-b border-overlay-6 bg-surface-950/60 backdrop-blur-sm">
         <div className="flex items-center gap-2">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
           <div className="w-8 h-8 rounded-lg bg-pink-500/15 border border-pink-500/25 flex items-center justify-center"><Palette size={16} className="text-pink-400" /></div>
           <div>
             <h1 className="text-sm font-bold text-surface-100">Livery Editor</h1>

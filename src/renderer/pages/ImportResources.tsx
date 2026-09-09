@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -8,6 +9,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertTriangle,
+  ArrowLeft,
   ArrowLeftRight,
   Trash2,
   Plus,
@@ -78,6 +80,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 export default function ImportResources() {
+  const navigate = useNavigate();
   const { activeServerId, servers } = useAppStore();
   const activeServer = servers.find(s => s.id === activeServerId);
 
@@ -226,6 +229,7 @@ export default function ImportResources() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
           <div className="p-2 bg-primary-600/20 rounded-lg">
             <Import size={24} className="text-primary-400" />
           </div>

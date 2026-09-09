@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -6,6 +7,7 @@ import {
   AlertTriangle,
   ArrowUp,
   ArrowDown,
+  ArrowLeft,
   Trash2,
   Plus,
   Save,
@@ -22,6 +24,7 @@ interface StartupEntry {
 }
 
 export default function StartupManager() {
+  const navigate = useNavigate();
   const { activeServerId, servers } = useAppStore();
   const [entries, setEntries] = useState<StartupEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -129,9 +132,12 @@ export default function StartupManager() {
       className="space-y-4"
     >
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-100">Startup Order</h1>
-          <p className="text-sm text-surface-400 mt-1">Manage resource load order in server.cfg</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
+          <div>
+            <h1 className="text-2xl font-bold text-surface-100">Startup Order</h1>
+            <p className="text-sm text-surface-400 mt-1">Manage resource load order in server.cfg</p>
+          </div>
         </div>
         <div className="flex gap-2">
           <button onClick={loadStartupOrder} className="btn-secondary flex items-center gap-2">

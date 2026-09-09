@@ -8,6 +8,7 @@ import SplashScreen from './components/SplashScreen';
 import Home from './pages/Home';
 import FiveMHub from './pages/FiveMHub';
 import BrowseServers from './pages/BrowseServers';
+import AllServers from './pages/AllServers';
 import MercyServers from './pages/MercyServers';
 import ComingSoon from './pages/ComingSoon';
 import Library from './pages/Library';
@@ -80,6 +81,7 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/fivem" element={<FiveMHub />} />
               <Route path="/browse-servers" element={<BrowseServers />} />
+              <Route path="/my-servers" element={<AllServers />} />
               <Route path="/mercy-servers/:game" element={<MercyServers />} />
               <Route path="/minecraft" element={<MinecraftHub />} />
               <Route path="/minecraft/create" element={<MinecraftServerWizard />} />

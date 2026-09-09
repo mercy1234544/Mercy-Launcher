@@ -1,6 +1,8 @@
 import React, { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
+  ArrowLeft,
   Car,
   Upload,
   FolderOpen,
@@ -43,6 +45,7 @@ interface ImportResult {
 }
 
 export default function VehiclePackManager() {
+  const navigate = useNavigate();
   const { servers, activeServerId } = useAppStore();
   const activeServer = servers.find((s) => s.id === activeServerId);
 
@@ -173,6 +176,7 @@ export default function VehiclePackManager() {
       <div className="px-8 pt-8 pb-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-600/10 border border-amber-500/20 flex items-center justify-center">
               <Car size={20} className="text-amber-400" />
             </div>

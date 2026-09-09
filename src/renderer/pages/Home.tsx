@@ -86,8 +86,8 @@ export default function Home() {
   const DISCORD_INVITE_URL = 'https://discord.gg/FkwnmdZx6m';
 
   const quickActions = [
-    { icon: Compass, label: 'Browse Servers', sub: 'Find and join FiveM servers.', onClick: () => navigate('/fivem') },
-    { icon: Server, label: 'My Servers', sub: 'Manage your configured servers.', onClick: () => navigate('/servers') },
+    { icon: Compass, label: 'Browse Servers', sub: 'Find and join servers by game.', onClick: () => navigate('/browse-servers') },
+    { icon: Server, label: 'My Servers', sub: 'All your configured servers, every game.', onClick: () => navigate('/my-servers') },
     { icon: PlusCircle, label: 'Create Server', sub: 'Set up a new FiveM server.', onClick: () => navigate('/create') },
     { icon: MessageCircle, label: 'Join Discord', sub: 'Join the Mercy community.', onClick: () => window.electronAPI?.openExternal(DISCORD_INVITE_URL) },
     { icon: LifeBuoy, label: 'Support', sub: 'Get help and view documentation.', onClick: () => notConfigured('Support') },

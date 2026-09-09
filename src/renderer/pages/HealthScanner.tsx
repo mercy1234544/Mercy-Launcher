@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -11,6 +12,7 @@ import {
   Wrench,
   RefreshCw,
   Shield,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 
@@ -52,6 +54,7 @@ const DEMO_REPORT: HealthReport = {
 };
 
 export default function HealthScanner() {
+  const navigate = useNavigate();
   const { activeServerId, servers, logAction } = useAppStore();
   const [report, setReport] = useState<HealthReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -199,9 +202,12 @@ export default function HealthScanner() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-100">Health Scanner</h1>
-          <p className="text-sm text-surface-400 mt-1">Diagnose issues with {activeServer.name}</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
+          <div>
+            <h1 className="text-2xl font-bold text-surface-100">Health Scanner</h1>
+            <p className="text-sm text-surface-400 mt-1">Diagnose issues with {activeServer.name}</p>
+          </div>
         </div>
         <button onClick={runScan} disabled={loading} className="btn-primary flex items-center gap-2">
           {loading ? <Loader2 size={16} className="animate-spin" /> : <HeartPulse size={16} />}

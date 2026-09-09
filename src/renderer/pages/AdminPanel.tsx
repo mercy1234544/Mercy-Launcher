@@ -1,9 +1,10 @@
 // In-app Admin Panel: search accounts by username and grant/revoke Exclusive
 // scripts; owners can also promote/demote admins. Visible only to admins/owners.
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Shield, Search, Loader2, Check, Crown, User as UserIcon, ShieldCheck, Lock, KeyRound, LogOut, Copy } from 'lucide-react';
+import { Shield, Search, Loader2, Check, Crown, User as UserIcon, ShieldCheck, Lock, KeyRound, LogOut, Copy, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../stores/useAuth';
 import { useLocalAccess, codeForItem } from '../stores/useLocalAccess';
 import { isSupabaseConfigured, Profile, Role } from '../lib/supabase';
@@ -16,6 +17,7 @@ const roleBadge: Record<Role, { label: string; cls: string; icon: any }> = {
 };
 
 export default function AdminPanel() {
+  const navigate = useNavigate();
   const { profile, searchUsers, getUserEntitlements, grant, revoke, setRole } = useAuth();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Profile[]>([]);
@@ -78,11 +80,14 @@ export default function AdminPanel() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-5 max-w-6xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold text-surface-100 flex items-center gap-2"><Shield size={22} className="text-primary-400" /> Admin Panel</h1>
-        <p className="text-sm text-surface-400 mt-1">
-          Search an account and grant Exclusive scripts. {isOwner ? 'As owner, you can also promote admins.' : 'Ask the owner to change roles.'}
-        </p>
+      <div className="flex items-center gap-3">
+        <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
+        <div>
+          <h1 className="text-2xl font-bold text-surface-100 flex items-center gap-2"><Shield size={22} className="text-primary-400" /> Admin Panel</h1>
+          <p className="text-sm text-surface-400 mt-1">
+            Search an account and grant Exclusive scripts. {isOwner ? 'As owner, you can also promote admins.' : 'Ask the owner to change roles.'}
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -203,6 +208,7 @@ function Gate({ icon, title, text }: { icon: React.ReactNode; title: string; tex
 
 // ── Local (no-database) admin: 4-digit code gate + local Exclusive unlocks ────
 function LocalAdmin() {
+  const navigate = useNavigate();
   const { hasPin, unlocked, granted, setPin, tryPin, grant, revoke, lock, changePin } = useLocalAccess();
   const [code, setCode] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -257,9 +263,12 @@ function LocalAdmin() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-5 max-w-3xl mx-auto">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-surface-100 flex items-center gap-2"><Shield size={22} className="text-primary-400" /> Admin Panel</h1>
-          <p className="text-sm text-surface-400 mt-1">Local mode — unlock Exclusive scripts on this machine.</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
+          <div>
+            <h1 className="text-2xl font-bold text-surface-100 flex items-center gap-2"><Shield size={22} className="text-primary-400" /> Admin Panel</h1>
+            <p className="text-sm text-surface-400 mt-1">Local mode — unlock Exclusive scripts on this machine.</p>
+          </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={() => setChanging((v) => !v)} className="btn-secondary text-xs py-2">Change code</button>

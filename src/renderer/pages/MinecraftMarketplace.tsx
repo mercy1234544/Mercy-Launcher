@@ -69,7 +69,7 @@ export default function MinecraftMarketplace() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-5 max-w-6xl mx-auto pb-16">
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate('/minecraft')} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors"><ArrowLeft size={16} /></button>
+        <button onClick={() => navigate(preselectServerId ? `/minecraft/server/${preselectServerId}` : '/minecraft')} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors"><ArrowLeft size={16} /></button>
         <SectionHeading icon={Puzzle} iconClass="bg-emerald-500/15 border-emerald-500/25 text-emerald-300" title="Minecraft Marketplace" subtitle="Real mods, plugins, and datapacks from Modrinth" />
       </div>
 
