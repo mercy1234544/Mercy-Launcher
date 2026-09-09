@@ -69,7 +69,7 @@ export default function AdminPanel() {
   if (!isSupabaseConfigured()) return <LocalAdmin />;
   if (!profile) {
     return <Gate icon={<Lock size={40} className="text-surface-600" />} title="Log in required"
-      text="Log in from the Store to use the Admin Panel." />;
+      text="Log in from the Marketplace to use the Admin Panel." />;
   }
   if (!isAdmin) {
     return <Gate icon={<Shield size={40} className="text-surface-600" />} title="Admins only"
@@ -270,7 +270,7 @@ function LocalAdmin() {
       {changing && <ChangeCode onDone={() => setChanging(false)} changePin={changePin} />}
 
       <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs text-amber-200 leading-relaxed">
-        Give a customer the code for their script and they redeem it in the Store (locked item → “Have a code?”).
+        Give a customer the code for their script and they redeem it in the Marketplace (locked item → “Have a code?”).
         Codes change weekly, so an old shared code stops working — anyone who already redeemed keeps access.
         When the account system is connected, this becomes real one-time codes per person.
       </div>

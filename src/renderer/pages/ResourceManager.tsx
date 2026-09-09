@@ -15,6 +15,10 @@ import {
   Info,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
+  FolderOpen,
+  Trash2,
+  GitBranch,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 
@@ -54,12 +58,44 @@ export default function ResourceManager() {
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [expandedResource, setExpandedResource] = useState<string | null>(null);
+  const [marketplaceContent, setMarketplaceContent] = useState<FiveMInstalledContent[]>([]);
 
   const activeServer = servers.find(s => s.id === activeServerId);
 
+  const refreshMarketplaceContent = () => {
+    if (!activeServer) { setMarketplaceContent([]); return; }
+    window.electronAPI.fivemMarketplace.listInstalled(activeServer.id).then(setMarketplaceContent).catch(() => setMarketplaceContent([]));
+  };
+
   useEffect(() => {
-    if (activeServer) scanResources();
+    if (activeServer) { scanResources(); refreshMarketplaceContent(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeServerId]);
+
+  const marketplaceRecordFor = (resourceName: string) => marketplaceContent.find((c) => c.resourceName === resourceName);
+
+  const removeMarketplaceResource = async (resourceName: string) => {
+    if (!activeServer) return;
+    const record = marketplaceRecordFor(resourceName);
+    if (!record) return;
+    const result = await window.electronAPI.fivemMarketplace.removeResource(activeServer.id, record.id);
+    if (result.success) {
+      toast.success(`${resourceName} removed`);
+      logAction('Resource Removed', resourceName, 'info');
+      refreshMarketplaceContent();
+      scanResources();
+    } else {
+      toast.error(result.error || 'Failed to remove resource');
+    }
+  };
+
+  const openMarketplaceResourceFolder = async (resourceName: string) => {
+    if (!activeServer) return;
+    const record = marketplaceRecordFor(resourceName);
+    if (!record) return;
+    const ok = await window.electronAPI.fivemMarketplace.openResourceFolder(activeServer.id, record.id);
+    if (!ok) toast.error('Could not open this resource\'s folder — it may have been moved.');
+  };
 
   const scanResources = async () => {
     if (!activeServer) return;
@@ -83,7 +119,15 @@ export default function ResourceManager() {
   const toggleResource = async (resource: Resource) => {
     if (window.electronAPI && activeServer) {
       try {
-        await window.electronAPI.resource.toggle(activeServer.installPath, resource.name, !resource.enabled);
+        const record = marketplaceRecordFor(resource.name);
+        if (record) {
+          // Keep Mercy's own installation record in sync — same real
+          // server.cfg ensure-line toggle, just also remembered.
+          await window.electronAPI.fivemMarketplace.setResourceEnabled(activeServer.id, record.id, !resource.enabled);
+          refreshMarketplaceContent();
+        } else {
+          await window.electronAPI.resource.toggle(activeServer.installPath, resource.name, !resource.enabled);
+        }
       } catch {}
     }
     setResources(resources.map(r =>
@@ -164,6 +208,9 @@ export default function ResourceManager() {
                   onToggle={() => toggleResource(resource)}
                   expanded={expandedResource === resource.name}
                   onExpand={() => setExpandedResource(expandedResource === resource.name ? null : resource.name)}
+                  marketplaceRecord={marketplaceRecordFor(resource.name)}
+                  onRemoveMarketplace={() => removeMarketplaceResource(resource.name)}
+                  onOpenFolder={() => openMarketplaceResourceFolder(resource.name)}
                 />
               </motion.div>
             ))}
@@ -179,8 +226,9 @@ export default function ResourceManager() {
   );
 }
 
-function ResourceRow({ resource, onToggle, expanded, onExpand }: {
+function ResourceRow({ resource, onToggle, expanded, onExpand, marketplaceRecord, onRemoveMarketplace, onOpenFolder }: {
   resource: Resource; onToggle: () => void; expanded: boolean; onExpand: () => void;
+  marketplaceRecord?: FiveMInstalledContent; onRemoveMarketplace: () => void; onOpenFolder: () => void;
 }) {
   const hasIssues = resource.issues.length > 0;
 
@@ -207,6 +255,11 @@ function ResourceRow({ resource, onToggle, expanded, onExpand }: {
             )}
             <span className="text-[10px] px-1.5 py-0.5 bg-surface-800 rounded text-surface-500">{resource.category}</span>
             {hasIssues && <AlertTriangle size={13} className="text-amber-400 shrink-0" />}
+            {marketplaceRecord && (
+              <span className="text-[10px] px-1.5 py-0.5 bg-primary-500/15 text-primary-300 border border-primary-500/25 rounded flex items-center gap-1" title={`Installed by Mercy from ${marketplaceRecord.repo}`}>
+                <GitBranch size={9} /> Marketplace
+              </span>
+            )}
           </div>
           {resource.author && (
             <span className="text-xs text-surface-500">{resource.author}</span>
@@ -251,6 +304,14 @@ function ResourceRow({ resource, onToggle, expanded, onExpand }: {
                       {issue}
                     </div>
                   ))}
+                </div>
+              )}
+              {marketplaceRecord && (
+                <div className="flex items-center gap-3 pt-2 border-t border-overlay-6">
+                  <span className="text-[11px] text-surface-500">Source: {marketplaceRecord.repo}</span>
+                  <button onClick={() => window.electronAPI?.openExternal(`https://github.com/${marketplaceRecord.repo}`)} className="text-[11px] text-primary-400 hover:underline flex items-center gap-1"><ExternalLink size={10} /> View source</button>
+                  <button onClick={onOpenFolder} className="text-[11px] text-surface-400 hover:text-surface-200 flex items-center gap-1"><FolderOpen size={10} /> Open folder</button>
+                  <button onClick={onRemoveMarketplace} className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 ml-auto"><Trash2 size={10} /> Remove</button>
                 </div>
               )}
             </div>

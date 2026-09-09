@@ -35,6 +35,27 @@ export interface Server {
   lastBackup: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Content FiveMMarketplace.ts itself installed — optional and defaulted
+   *  to [] wherever read, so existing servers saved before this field
+   *  existed load exactly as before (no migration, no forced re-save). */
+  installedMarketplaceContent?: FiveMInstalledContent[];
+}
+
+export interface FiveMInstalledContent {
+  id: string;
+  source: 'github';
+  /** e.g. "overextended/ox_lib" */
+  repo: string;
+  resourceName: string;
+  /** Bracket-style category folder the resource was placed under, e.g. "[core]". */
+  category: string;
+  /** Relative to the server's install directory, e.g. "resources/[core]/ox_lib". */
+  relPath: string;
+  version: string | null;
+  sha: string | null;
+  enabled: boolean;
+  installedAt: string;
+  dependencies: string[];
 }
 
 interface ResourceToClone {
@@ -203,6 +224,57 @@ export class ServerManager {
 
   getServer(id: string): Server | null {
     return this.servers.get(id) || null;
+  }
+
+  /** Resolves a path relative to a server's install directory, refusing any
+   *  traversal outside it — the same guarantee MinecraftManager's own
+   *  resolveWithinServer() provides, reused here for FiveMMarketplace's
+   *  resource placement/removal so a malicious or malformed resource name
+   *  (e.g. containing "..") can never write outside the server's own folder. */
+  resolveWithinServer(id: string, relPath: string): string | null {
+    const server = this.getServer(id);
+    if (!server) return null;
+    const root = path.resolve(server.installPath);
+    const resolved = path.resolve(root, relPath || '.');
+    const rel = path.relative(root, resolved);
+    if (resolved !== root && (rel.startsWith('..') || path.isAbsolute(rel))) return null;
+    return resolved;
+  }
+
+  // ── Marketplace-installed content tracking ──────────────────────────────
+  getInstalledMarketplaceContent(id: string): FiveMInstalledContent[] {
+    return this.getServer(id)?.installedMarketplaceContent || [];
+  }
+
+  addInstalledMarketplaceContent(id: string, content: FiveMInstalledContent): boolean {
+    const server = this.servers.get(id);
+    if (!server) return false;
+    if (!server.installedMarketplaceContent) server.installedMarketplaceContent = [];
+    server.installedMarketplaceContent.push(content);
+    server.updatedAt = new Date().toISOString();
+    this.saveServers();
+    return true;
+  }
+
+  updateInstalledMarketplaceContent(id: string, contentId: string, patch: Partial<FiveMInstalledContent>): boolean {
+    const server = this.servers.get(id);
+    const item = server?.installedMarketplaceContent?.find((c) => c.id === contentId);
+    if (!server || !item) return false;
+    Object.assign(item, patch);
+    server.updatedAt = new Date().toISOString();
+    this.saveServers();
+    return true;
+  }
+
+  removeInstalledMarketplaceContent(id: string, contentId: string): FiveMInstalledContent | null {
+    const server = this.servers.get(id);
+    if (!server?.installedMarketplaceContent) return null;
+    const idx = server.installedMarketplaceContent.findIndex((c) => c.id === contentId);
+    if (idx === -1) return null;
+    const [removed] = server.installedMarketplaceContent.splice(idx, 1);
+    server.updatedAt = new Date().toISOString();
+    this.saveServers();
+    return removed;
   }
 
   async createServer(config: ServerConfig): Promise<Server> {

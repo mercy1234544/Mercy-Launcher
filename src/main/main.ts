@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import extractZip from 'extract-zip';
 import { ServerManager } from './services/ServerManager';
+import { FiveMMarketplace } from './services/FiveMMarketplace';
 import { ResourceScanner } from './services/ResourceScanner';
 import { BackupManager } from './services/BackupManager';
 import { HealthScanner } from './services/HealthScanner';
@@ -34,6 +35,7 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let serverManager: ServerManager;
+let fiveMMarketplace: FiveMMarketplace;
 let resourceScanner: ResourceScanner;
 let backupManager: BackupManager;
 let healthScanner: HealthScanner;
@@ -125,6 +127,7 @@ function createWindow() {
 function initializeServices() {
   const userDataPath = app.getPath('userData');
   serverManager = new ServerManager(userDataPath);
+  fiveMMarketplace = new FiveMMarketplace();
   resourceScanner = new ResourceScanner();
   backupManager = new BackupManager(userDataPath);
   healthScanner = new HealthScanner();
@@ -152,7 +155,7 @@ function initializeServices() {
 const PROTECTED_IPC_PREFIXES = [
   'server:', 'resource:', 'health:', 'backup:', 'file:', 'import:',
   'artifact:', 'vehicle:', 'vehicleStudio:', 'livery:', 'git:', 'bridge:',
-  'minecraft:',
+  'minecraft:', 'fivem:',
 ];
 let ipcGuardInstalled = false;
 function installIpcAuthGuard() {
@@ -258,6 +261,19 @@ function registerIpcHandlers() {
   ipcMain.handle('server:command', (_, id: string, command: string) => serverManager.sendCommand(id, command));
   // Apply known config fixes shipped with app updates to an existing server
   ipcMain.handle('server:maintenance', (_, id: string) => serverManager.applyMaintenanceFixes(id));
+
+  // FiveM Marketplace — real GitHub-backed resource installs.
+  ipcMain.handle('fivem:marketplace:repoDetails', (_, repoUrl: string) => fiveMMarketplace.getRepoDetails(repoUrl));
+  ipcMain.handle('fivem:marketplace:install', (event, serverId: string, opts: any) =>
+    fiveMMarketplace.installResource(serverManager, serverId, opts, (pct, message) => event.sender.send('fivem:marketplace:installProgress', { pct, message })));
+  ipcMain.handle('fivem:marketplace:listInstalled', (_, serverId: string) => fiveMMarketplace.listInstalled(serverManager, serverId));
+  ipcMain.handle('fivem:marketplace:removeResource', (_, serverId: string, contentId: string) => fiveMMarketplace.removeResource(serverManager, serverId, contentId));
+  ipcMain.handle('fivem:marketplace:setResourceEnabled', (_, serverId: string, contentId: string, enabled: boolean) => fiveMMarketplace.setResourceEnabled(serverManager, serverId, contentId, enabled));
+  ipcMain.handle('fivem:marketplace:openResourceFolder', (_, serverId: string, contentId: string) => {
+    const folder = fiveMMarketplace.openResourceFolder(serverManager, serverId, contentId);
+    if (folder && fs.existsSync(folder)) { shell.showItemInFolder(folder); return true; }
+    return false;
+  });
 
   // Minecraft server management — the second real game backend (see
   // MinecraftManager.ts for why this stays its own service instead of a

@@ -60,6 +60,16 @@ interface ElectronAPI {
     }>;
   };
 
+  fivemMarketplace: {
+    repoDetails: (repoUrl: string) => Promise<GitHubRepoDetails>;
+    install: (serverId: string, opts: { repoUrl: string; resourceName: string; category: string; dependencies?: string[]; preferReleaseAsset?: boolean }) => Promise<{ success: boolean; error?: string; content?: FiveMInstalledContent }>;
+    listInstalled: (serverId: string) => Promise<(FiveMInstalledContent & { missingOnDisk: boolean })[]>;
+    removeResource: (serverId: string, contentId: string) => Promise<{ success: boolean; error?: string }>;
+    setResourceEnabled: (serverId: string, contentId: string, enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+    openResourceFolder: (serverId: string, contentId: string) => Promise<boolean>;
+  };
+  onFiveMMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
+
   minecraft: {
     getAll: () => Promise<MinecraftServer[]>;
     get: (id: string) => Promise<MinecraftServer | undefined>;
@@ -377,6 +387,32 @@ declare global {
     lanAddress: string | null;
     portListening: boolean | null;
     bedrock: { possible: boolean; detectedPlugin: string | null; note: string };
+  }
+  interface GitHubRepoDetails {
+    owner: string;
+    repo: string;
+    description: string | null;
+    stars: number;
+    license: { name: string; spdxId: string | null } | null;
+    pushedAt: string;
+    defaultBranch: string;
+    ownerAvatarUrl: string;
+    htmlUrl: string;
+    openIssues: number;
+    latestReleaseAsset: { name: string; url: string; tag: string } | null;
+  }
+  interface FiveMInstalledContent {
+    id: string;
+    source: 'github';
+    repo: string;
+    resourceName: string;
+    category: string;
+    relPath: string;
+    version: string | null;
+    sha: string | null;
+    enabled: boolean;
+    installedAt: string;
+    dependencies: string[];
   }
   interface InstalledContent {
     id: string;

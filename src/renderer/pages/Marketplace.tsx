@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -20,6 +20,14 @@ import {
   Wrench,
   Sparkles,
   ArrowRight,
+  Server as ServerIcon,
+  ShieldCheck,
+  X,
+  GitBranch,
+  RefreshCw,
+  FolderOpen,
+  Package,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { useAuth } from '../stores/useAuth';
@@ -993,15 +1001,55 @@ const categoryColors: Record<string, string> = {
   Exclusive: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
 };
 
+/** Matches FiveMMarketplace.ts's own parseRepoUrl() — kept in sync manually
+ *  since main/renderer are separate TS projects that can't share this tiny
+ *  helper directly. Used only to compare a catalog item's repo URL against
+ *  an installed-content record's "owner/repo" for "is this installed?". */
+function repoSlug(repoUrl: string): string | null {
+  const m = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+?)\/?$/i);
+  return m ? `${m[1]}/${m[2].replace(/\.git$/, '')}` : null;
+}
+function githubPreviewImage(repoUrl: string): string | null {
+  const slug = repoSlug(repoUrl);
+  return slug ? `https://opengraph.githubassets.com/1/${slug}` : null;
+}
+
 export default function Marketplace() {
   const navigate = useNavigate();
   const { activeServerId, servers, logAction } = useAppStore();
-  const [items, setItems] = useState(AVAILABLE_ITEMS);
+  const [items] = useState(AVAILABLE_ITEMS);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [installing, setInstalling] = useState<string | null>(null);
+  const [installProgress, setInstallProgress] = useState<{ pct: number; message: string } | null>(null);
   // Exclusive item the user is requesting access to (ticket-style modal).
   const [accessItem, setAccessItem] = useState<MarketplaceItem | null>(null);
+  // Real detail view — live GitHub data fetched only when opened.
+  const [detailItem, setDetailItem] = useState<MarketplaceItem | null>(null);
+  const [detailData, setDetailData] = useState<any>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  // Which server Marketplace installs are targeting — defaults to whatever
+  // is already "active" elsewhere in Mercy, but is always an explicit,
+  // visible choice here so a resource is never installed into the wrong
+  // server by accident.
+  const [targetServerId, setTargetServerId] = useState(activeServerId || '');
+  const targetServer = servers.find((s) => s.id === targetServerId) || null;
+
+  // Real installed-state for the CURRENT target server — never a local
+  // "installed: true" flag that resets on reload. Re-fetched whenever the
+  // target server changes or an install/remove completes.
+  const [installedContent, setInstalledContent] = useState<FiveMInstalledContent[]>([]);
+  const refreshInstalled = () => {
+    if (!targetServerId) { setInstalledContent([]); return; }
+    window.electronAPI.fivemMarketplace.listInstalled(targetServerId).then(setInstalledContent).catch(() => setInstalledContent([]));
+  };
+  useEffect(refreshInstalled, [targetServerId]);
+
+  const installedRecordFor = (item: MarketplaceItem) => {
+    const slug = item.repo ? repoSlug(item.repo) : null;
+    return slug ? installedContent.find((c) => c.repo === slug) : undefined;
+  };
 
   // Account system — per-script access via Supabase. The login UI only appears
   // once accounts are configured; pre-setup the store behaves as before.
@@ -1031,66 +1079,34 @@ export default function Marketplace() {
     toast.success('Request message copied — paste it in your ticket');
   };
 
-  const activeServer = servers.find(s => s.id === activeServerId);
   const sortedCategories = [...new Set(items.map(i => i.category))].sort();
   const categories = ['all', ...sortedCategories];
 
   const installItem = async (item: MarketplaceItem) => {
-    if (!activeServer) {
-      toast.error('Select a server first');
-      return;
-    }
+    if (!targetServer) { toast.error('Select a server first'); return; }
+    if (!item.repo) { toast.error('This item has no installable source yet.'); return; }
 
-    // Check if this resource replaces an existing one
-    const replacedItems = item.replaces
-      ? items.filter(i => item.replaces!.includes(i.id) && i.installed)
-      : [];
+    // A resource this item replaces gets removed first, for real, if it's
+    // genuinely installed on this target server (not just assumed).
+    const replacedRecords = (item.replaces || [])
+      .map((id) => { const catalogItem = items.find((i) => i.id === id); return catalogItem ? installedRecordFor(catalogItem) : undefined; })
+      .filter((r): r is FiveMInstalledContent => !!r);
 
     setInstalling(item.id);
+    const cleanup = window.electronAPI.onFiveMMarketplaceInstallProgress(setInstallProgress);
     try {
-      const folder = item.installFolder || '[standalone]';
-      if (window.electronAPI) {
-        // Remove replaced resources first
-        for (const replaced of replacedItems) {
-          const oldFolder = replaced.installFolder || '[standalone]';
-          const oldPath = `${activeServer.installPath}\\resources\\${oldFolder}\\${replaced.name}`;
-          try { await window.electronAPI.file.delete(oldPath); } catch {}
-        }
-
-        const dest = `${activeServer.installPath}\\resources\\${folder}\\${item.name}`;
-        // Create folder if needed
-        try { await window.electronAPI.file.createDir(`${activeServer.installPath}\\resources\\${folder}`); } catch {}
-        const result = await window.electronAPI.git.clone(item.repo, dest);
-        if (!result.success) throw new Error(result.error);
-
-        // Update server.cfg â€” remove old ensures, add new one
-        try {
-          const cfgPath = `${activeServer.installPath}\\server.cfg`;
-          const cfgData = await window.electronAPI.file.readFile(cfgPath);
-          if (cfgData) {
-            let cfgText = cfgData.content;
-            for (const replaced of replacedItems) {
-              cfgText = cfgText.replace(new RegExp(`^\\s*ensure\\s+${replaced.name}\\s*$`, 'gm'), '');
-            }
-            if (!cfgText.includes(`ensure ${item.name}`)) {
-              cfgText = cfgText.trimEnd() + `\nensure ${item.name}\n`;
-            }
-            await window.electronAPI.file.writeFile(cfgPath, cfgText);
-          }
-        } catch {}
-      } else {
-        await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
+      for (const replaced of replacedRecords) {
+        await window.electronAPI.fivemMarketplace.removeResource(targetServer.id, replaced.id);
       }
+      const result = await window.electronAPI.fivemMarketplace.install(targetServer.id, {
+        repoUrl: item.repo, resourceName: item.name, category: item.installFolder || '[standalone]', dependencies: item.dependencies,
+      });
+      if (!result.success) throw new Error(result.error || 'Installation failed');
 
-      setItems(prev => prev.map(i => {
-        if (i.id === item.id) return { ...i, installed: true };
-        if (replacedItems.find(r => r.id === i.id)) return { ...i, installed: false };
-        return i;
-      }));
-
-      if (replacedItems.length > 0) {
-        logAction('Resource Replaced', `${replacedItems.map(r => r.name).join(', ')} â†’ ${item.name}`, 'success');
-        toast.success(`${item.name} installed, replaced ${replacedItems.map(r => r.name).join(', ')}`);
+      refreshInstalled();
+      if (replacedRecords.length > 0) {
+        logAction('Resource Replaced', `${replacedRecords.map((r) => r.resourceName).join(', ')} → ${item.name}`, 'success');
+        toast.success(`${item.name} installed, replaced ${replacedRecords.map((r) => r.resourceName).join(', ')}`);
       } else {
         logAction('Resource Installed', `${item.name} from marketplace`, 'success');
         toast.success(`${item.name} installed successfully`);
@@ -1099,38 +1115,38 @@ export default function Marketplace() {
       toast.error(e.message || 'Installation failed');
       logAction('Install Failed', `${item.name}: ${e.message}`, 'error');
     } finally {
+      cleanup?.();
       setInstalling(null);
+      setInstallProgress(null);
     }
   };
 
   const uninstallItem = async (item: MarketplaceItem) => {
-    if (!activeServer) return;
+    if (!targetServer) return;
+    const record = installedRecordFor(item);
+    if (!record) return;
     setInstalling(item.id);
     try {
-      if (window.electronAPI) {
-        const folder = item.installFolder || '[standalone]';
-        const dest = `${activeServer.installPath}\\resources\\${folder}\\${item.name}`;
-        await window.electronAPI.file.delete(dest);
-        // Remove from server.cfg
-        try {
-          const cfgPath = `${activeServer.installPath}\\server.cfg`;
-          const cfgData = await window.electronAPI.file.readFile(cfgPath);
-          if (cfgData) {
-            const cfgText = cfgData.content.replace(new RegExp(`^\\s*ensure\\s+${item.name}\\s*$`, 'gm'), '');
-            await window.electronAPI.file.writeFile(cfgPath, cfgText);
-          }
-        } catch {}
-      } else {
-        await new Promise(r => setTimeout(r, 600));
-      }
-      setItems(prev => prev.map(i => i.id === item.id ? { ...i, installed: false } : i));
+      const result = await window.electronAPI.fivemMarketplace.removeResource(targetServer.id, record.id);
+      if (!result.success) throw new Error(result.error);
+      refreshInstalled();
       logAction('Resource Removed', item.name, 'info');
       toast.success(`${item.name} removed`);
-    } catch {
-      toast.error('Failed to remove resource');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to remove resource');
     } finally {
       setInstalling(null);
     }
+  };
+
+  const openDetail = async (item: MarketplaceItem) => {
+    setDetailItem(item);
+    setDetailData(null);
+    if (!item.repo) return;
+    setDetailLoading(true);
+    try { setDetailData(await window.electronAPI.fivemMarketplace.repoDetails(item.repo)); }
+    catch { /* keep the catalog's own description/author as a fallback below */ }
+    finally { setDetailLoading(false); }
   };
 
   const filtered = items.filter(item => {
@@ -1141,7 +1157,7 @@ export default function Marketplace() {
     return matchesSearch && matchesCategory;
   });
 
-  const installedCount = items.filter(i => i.installed).length;
+  const installedCount = installedContent.length;
 
   return (
     <motion.div
@@ -1151,9 +1167,9 @@ export default function Marketplace() {
     >
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-surface-100">FiveM Store</h1>
+          <h1 className="text-2xl font-bold text-surface-100">FiveM Marketplace</h1>
           <p className="text-sm text-surface-400 mt-1">
-            {filtered.length} scripts &amp; resources Â· {installedCount} installed
+            {filtered.length} scripts &amp; resources · {installedCount} installed{targetServer ? ` on ${targetServer.name}` : ''}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1191,15 +1207,29 @@ export default function Marketplace() {
               </button>
             )
           )}
-          {!activeServer && (
-            <span className="text-xs px-3 py-1.5 bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded-lg">
-              Select a server to install resources
-            </span>
-          )}
         </div>
       </div>
 
       <AccountAuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+
+      {/* Explicit install target — never assumed, so a resource can't land
+          on the wrong server. Shows the same at-a-glance info Minecraft's
+          Marketplace does: name, status, framework, location. */}
+      <div className="flex items-center gap-3 p-3 rounded-2xl border border-overlay-6 bg-overlay-3">
+        <ServerIcon size={16} className="text-surface-500 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-surface-500">Installing for</p>
+          <select value={targetServerId} onChange={(e) => setTargetServerId(e.target.value)} className="input-field text-sm py-1.5 mt-0.5">
+            <option value="">Browse only (choose a server to enable installing)</option>
+            {servers.map((s) => (
+              <option key={s.id} value={s.id}>{s.name} — {s.framework === 'qbcore' ? 'QBCore' : s.framework === 'esx' ? 'ESX' : s.framework} · {s.status} · {s.installPath}</option>
+            ))}
+          </select>
+        </div>
+        {targetServer && (
+          <span className="text-[11px] text-surface-500 flex items-center gap-1.5 shrink-0"><ShieldCheck size={13} className="text-success" /> Installs go into this server only</span>
+        )}
+      </div>
 
       {/* ═══ UY Framework — Coming Soon banner ═══ */}
       <div className="relative overflow-hidden rounded-2xl border border-primary-500/30 bg-gradient-to-br from-primary-600/20 via-[#0c0f1c] to-surface-950 p-6">
@@ -1266,14 +1296,23 @@ export default function Marketplace() {
 
       {/* Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filtered.map((item, i) => (
+        {filtered.map((item, i) => {
+          const installedRecord = installedRecordFor(item);
+          const previewImg = item.repo ? githubPreviewImage(item.repo) : null;
+          return (
           <motion.div
             key={item.id}
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: Math.min(i * 0.02, 0.5) }}
-            className={`card flex flex-col group ${item.premium ? 'border-amber-500/30 hover:border-amber-400/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.1)]' : 'hover:border-surface-500/50'}`}
+            className={`card flex flex-col group cursor-pointer ${item.premium ? 'border-amber-500/30 hover:border-amber-400/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.1)]' : 'hover:border-surface-500/50'}`}
+            onClick={() => openDetail(item)}
           >
+            {previewImg && (
+              <div className="-mx-4 -mt-4 mb-3 h-28 rounded-t-xl overflow-hidden bg-overlay-4">
+                <img src={previewImg} alt="" className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              </div>
+            )}
             <div className="flex items-start justify-between mb-2">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -1331,10 +1370,10 @@ export default function Marketplace() {
               {item.locked && hasAccessTo(item) ? (
                 item.repo ? (
                   <button
-                    onClick={() => installItem(item)}
-                    disabled={installing === item.id || !activeServer}
+                    onClick={(e) => { e.stopPropagation(); installItem(item); }}
+                    disabled={installing === item.id || !targetServer}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-medium text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                    title={!activeServer ? 'Select a server first' : 'Access granted to your account — install'}
+                    title={!targetServer ? 'Select a server first' : 'Access granted to your account — install'}
                   >
                     {installing === item.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
                     Install
@@ -1347,7 +1386,7 @@ export default function Marketplace() {
                 )
               ) : item.locked ? (
                 <button
-                  onClick={() => setAccessItem(item)}
+                  onClick={(e) => { e.stopPropagation(); setAccessItem(item); }}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 rounded-lg text-xs font-medium text-amber-300 transition-all cursor-pointer"
                   title="Open an access request"
                 >
@@ -1355,14 +1394,14 @@ export default function Marketplace() {
                   Request Access
                   <ExternalLink size={10} className="opacity-60" />
                 </button>
-              ) : item.installed ? (
+              ) : installedRecord ? (
                 <div className="flex items-center gap-2">
                   <span className="flex items-center gap-1 text-xs text-green-400 font-medium">
                     <CheckCircle2 size={14} />
                     Installed
                   </span>
                   <button
-                    onClick={() => uninstallItem(item)}
+                    onClick={(e) => { e.stopPropagation(); uninstallItem(item); }}
                     disabled={installing === item.id}
                     className="flex items-center gap-1 px-2 py-1 text-[10px] text-red-400 bg-red-500/10 rounded hover:bg-red-500/20 transition-colors"
                   >
@@ -1372,8 +1411,9 @@ export default function Marketplace() {
                 </div>
               ) : (
                 <button
-                  onClick={() => installItem(item)}
-                  disabled={installing === item.id || !activeServer}
+                  onClick={(e) => { e.stopPropagation(); installItem(item); }}
+                  disabled={installing === item.id || !targetServer || !item.repo}
+                  title={!targetServer ? 'Select a server first' : !item.repo ? 'No installable source for this item yet' : undefined}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 hover:bg-primary-500 rounded-lg text-xs font-medium text-surface-100 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {installing === item.id ? (
@@ -1386,7 +1426,8 @@ export default function Marketplace() {
               )}
             </div>
           </motion.div>
-        ))}
+          );
+        })}
       </div>
 
       {filtered.length === 0 && (
@@ -1395,6 +1436,90 @@ export default function Marketplace() {
           <p className="text-surface-400">No resources match your search</p>
         </div>
       )}
+
+      {installing && installProgress && (
+        <div className="fixed bottom-6 right-6 z-40 w-80 rounded-2xl border border-overlay-10 bg-surface-900 p-4 shadow-2xl">
+          <div className="flex items-center justify-between mb-2 text-xs"><span className="text-surface-300 truncate">{installProgress.message}</span><span className="text-surface-500 shrink-0 ml-2">{installProgress.pct}%</span></div>
+          <div className="w-full h-1.5 bg-overlay-6 rounded-full overflow-hidden"><div className="h-full bg-primary-500 transition-all" style={{ width: `${installProgress.pct}%` }} /></div>
+        </div>
+      )}
+
+      {/* ═══ Content Details modal — real, live GitHub data + real image ═══ */}
+      <AnimatePresence>
+        {detailItem && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6" onClick={() => setDetailItem(null)}>
+            <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl bg-surface-900 border border-overlay-10">
+              {detailItem.repo && githubPreviewImage(detailItem.repo) && (
+                <div className="h-40 w-full overflow-hidden rounded-t-2xl bg-overlay-4">
+                  <img src={githubPreviewImage(detailItem.repo)!} alt="" className="w-full h-full object-cover" />
+                </div>
+              )}
+              <div className="p-6 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-base font-bold text-surface-100">{detailItem.name}</p>
+                      {detailItem.version && <span className="text-[11px] px-1.5 py-0.5 bg-surface-700 rounded text-surface-400">v{detailItem.version}</span>}
+                    </div>
+                    <p className="text-xs text-surface-500">by {detailItem.author} · <span className={`px-1.5 py-0.5 rounded-full border ${categoryColors[detailItem.category] || ''}`}>{detailItem.category}</span></p>
+                  </div>
+                  <button onClick={() => setDetailItem(null)} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6"><X size={16} /></button>
+                </div>
+
+                {detailLoading ? (
+                  <div className="flex items-center justify-center py-8"><Loader2 size={18} className="animate-spin text-primary-400" /></div>
+                ) : (
+                  <>
+                    <p className="text-sm text-surface-300">{detailData?.description || detailItem.description}</p>
+                    {detailData && (
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div className="flex items-center gap-1.5 text-surface-400"><Star size={12} className="text-amber-400" /> {detailData.stars.toLocaleString()} stars</div>
+                        <div className="flex items-center gap-1.5 text-surface-400"><GitBranch size={12} /> {detailData.defaultBranch}</div>
+                        {detailData.license && <div className="flex items-center gap-1.5 text-surface-400 col-span-2">License: {detailData.license.name}</div>}
+                        <div className="flex items-center gap-1.5 text-surface-400 col-span-2">Last updated: {new Date(detailData.pushedAt).toLocaleDateString()}</div>
+                      </div>
+                    )}
+                    {!detailItem.repo && (
+                      <p className="text-xs text-surface-500 flex items-center gap-1.5"><Lock size={12} /> No public source — this is an exclusive item.</p>
+                    )}
+                    {detailItem.repo && (
+                      <button onClick={() => window.electronAPI?.openExternal(detailItem.repo)} className="text-xs text-primary-400 hover:underline flex items-center gap-1.5"><ExternalLink size={12} /> View source on GitHub</button>
+                    )}
+                    {detailItem.dependencies && detailItem.dependencies.length > 0 && (
+                      <div>
+                        <p className="text-[11px] font-semibold text-surface-400 mb-1.5">Dependencies</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {detailItem.dependencies.map((dep) => {
+                            const depItem = items.find((i) => i.id === dep || i.name === dep);
+                            const depInstalled = depItem ? !!installedRecordFor(depItem) : false;
+                            return (
+                              <span key={dep} className={`text-[11px] px-2 py-1 rounded-lg border flex items-center gap-1.5 ${depInstalled ? 'border-success/30 bg-success-bg text-success' : 'border-overlay-8 bg-overlay-4 text-surface-400'}`}>
+                                {depInstalled ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />} {dep} {depItem ? (depInstalled ? '(installed)' : '(missing)') : '(not in catalog)'}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-2">
+                      {!targetServer ? (
+                        <p className="text-xs text-surface-500 flex items-center gap-1.5"><ServerIcon size={13} /> Select a server above to install this.</p>
+                      ) : installedRecordFor(detailItem) ? (
+                        <button onClick={() => { uninstallItem(detailItem); setDetailItem(null); }} className="btn-secondary text-xs py-2 px-4 flex items-center gap-1.5"><Trash2 size={13} /> Remove from {targetServer.name}</button>
+                      ) : detailItem.repo ? (
+                        <button onClick={() => { installItem(detailItem); setDetailItem(null); }} disabled={!!installing} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5 disabled:opacity-50"><Download size={13} /> Install to {targetServer.name}</button>
+                      ) : null}
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ═══ Request Access modal — ticket-style flow via Discord ═══ */}
       <AnimatePresence>

@@ -49,6 +49,23 @@ const electronAPI = {
     scan: (serverPath: string) => ipcRenderer.invoke('server:scan', serverPath),
   },
 
+  // FiveM Marketplace — real GitHub-backed resource installs.
+  fivemMarketplace: {
+    repoDetails: (repoUrl: string) => ipcRenderer.invoke('fivem:marketplace:repoDetails', repoUrl),
+    install: (serverId: string, opts: { repoUrl: string; resourceName: string; category: string; dependencies?: string[]; preferReleaseAsset?: boolean }) =>
+      ipcRenderer.invoke('fivem:marketplace:install', serverId, opts),
+    listInstalled: (serverId: string) => ipcRenderer.invoke('fivem:marketplace:listInstalled', serverId),
+    removeResource: (serverId: string, contentId: string) => ipcRenderer.invoke('fivem:marketplace:removeResource', serverId, contentId),
+    setResourceEnabled: (serverId: string, contentId: string, enabled: boolean) => ipcRenderer.invoke('fivem:marketplace:setResourceEnabled', serverId, contentId, enabled),
+    openResourceFolder: (serverId: string, contentId: string) => ipcRenderer.invoke('fivem:marketplace:openResourceFolder', serverId, contentId),
+  },
+
+  onFiveMMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('fivem:marketplace:installProgress', handler);
+    return () => { ipcRenderer.removeListener('fivem:marketplace:installProgress', handler); };
+  },
+
   // Minecraft server management
   minecraft: {
     getAll: () => ipcRenderer.invoke('minecraft:getAll'),

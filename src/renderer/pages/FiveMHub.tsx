@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
   Server, Package, Download, HardDrive, Search, FileText, Cpu,
-  ArrowRight, Zap, Loader2, X, AlertTriangle, Sparkles, Compass, Car, RefreshCw,
+  ArrowRight, Zap, Loader2, X, AlertTriangle, Sparkles, Car, RefreshCw,
   Settings as SettingsIcon, FolderOpen,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
@@ -111,12 +111,14 @@ export default function FiveMHub() {
         ))}
       </motion.div>
 
-      {/* Primary entry points — Browse Servers and My Servers are the two
-          obvious first choices when entering the FiveM hub. */}
+      {/* Primary entry points. Browse Servers deliberately isn't repeated
+          here — it's already a global entry point (Home's Quick Actions) —
+          so My Servers and Marketplace are FiveM's own two obvious first
+          choices instead. */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {[
-          { icon: Compass, title: 'Browse Servers', sub: 'Find and join FiveM servers', tint: 'bg-orange-600/20 text-orange-400 border-orange-500/20', path: '/browse-servers' },
           { icon: Server, title: 'My Servers', sub: `${servers.length} server${servers.length !== 1 ? 's' : ''} configured`, tint: 'bg-emerald-600/20 text-emerald-400 border-emerald-500/20', path: '/servers' },
+          { icon: Package, title: 'Marketplace', sub: 'Vehicles, scripts, MLOs & more', tint: 'bg-blue-600/20 text-blue-400 border-blue-500/20', path: '/marketplace' },
         ].map((c) => (
           <Panel as="button" interactive key={c.title} padding="lg" onClick={() => navigate(c.path)} className="group flex items-center gap-5">
             <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.tint}`}><c.icon size={24} /></div>
@@ -130,11 +132,10 @@ export default function FiveMHub() {
       </motion.div>
 
       {/* Secondary shortcuts */}
-      <motion.div variants={itemVariants} className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
           { icon: Sparkles, title: 'Create Server', sub: 'Set up a new server', tint: 'bg-purple-600/20 text-purple-400 border-purple-500/20', path: '/create' },
           { icon: Car, title: 'Vehicle Studio', sub: 'Tune & diagnose vehicles', tint: 'bg-sky-600/20 text-sky-400 border-sky-500/20', path: '/vehicle-studio' },
-          { icon: Package, title: 'Store', sub: 'Scripts & resources', tint: 'bg-blue-600/20 text-blue-400 border-blue-500/20', path: '/marketplace' },
           { icon: Download, title: 'Import Server', sub: 'Bring in an existing folder', tint: 'bg-rose-600/20 text-rose-400 border-rose-500/20', onClick: () => setShowImportModal(true) },
         ].map((c: any) => (
           <Panel as="button" interactive key={c.title} padding="sm" onClick={() => (c.onClick ? c.onClick() : navigate(c.path))} className="flex items-center gap-3">

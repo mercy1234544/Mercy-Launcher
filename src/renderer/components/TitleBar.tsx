@@ -23,7 +23,7 @@ const SECTION_TITLES: { test: (p: string) => boolean; title: string; subtitle: s
   { test: (p) => p === '/backups', title: 'FiveM', subtitle: 'Backups' },
   { test: (p) => p === '/files', title: 'FiveM', subtitle: 'File Explorer' },
   { test: (p) => p === '/editor', title: 'FiveM', subtitle: 'server.cfg Editor' },
-  { test: (p) => p === '/marketplace', title: 'FiveM', subtitle: 'Store' },
+  { test: (p) => p === '/marketplace', title: 'FiveM', subtitle: 'Marketplace' },
   { test: (p) => p === '/import', title: 'FiveM', subtitle: 'Import Resources' },
   { test: (p) => p === '/updater', title: 'FiveM', subtitle: 'Resource Updater' },
   { test: (p) => p === '/vehicles', title: 'FiveM', subtitle: 'Vehicle Packs' },
