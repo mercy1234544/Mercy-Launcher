@@ -39,6 +39,18 @@ export interface MinecraftServer {
   lastBackup: string | null;
   createdAt: string;
   updatedAt: string;
+  /** The Java major version this server's jar actually requires. Populated
+   *  from the distributor's own real metadata at create/import time (see
+   *  resolveVanillaJarUrl/resolvePaperJavaRequirement); falls back to the
+   *  heuristic table below only when that lookup wasn't possible (e.g. an
+   *  imported server, or offline). Null means "never determined". */
+  requiredJavaMajor: number | null;
+  /** Explicit user-picked Java runtime executable path. Null means "auto-
+   *  select the closest compatible installed runtime at start time". */
+  javaPath: string | null;
+  /** Last friendly, human-readable failure reason (e.g. a translated
+   *  UnsupportedClassVersionError). Cleared on the next successful start. */
+  lastError: string | null;
 }
 
 export interface MinecraftCreateConfig {
@@ -49,6 +61,17 @@ export interface MinecraftCreateConfig {
   ramMB: number;
   port: number;
   acceptedEula: boolean;
+  /** Optional explicit Java runtime to pin this server to (from the Create
+   *  Server wizard's runtime picker). Omit to auto-select at start time. */
+  javaPath?: string | null;
+}
+
+export interface JavaRuntime {
+  path: string;
+  version: string;
+  major: number;
+  /** Where this runtime was found — 'PATH', 'JAVA_HOME', or the install root it was scanned from. */
+  source: string;
 }
 
 export interface MinecraftBackup {
@@ -68,23 +91,73 @@ const MAX_CONSOLE_LINES = 2000;
 const MAX_AUTO_RESTART_ATTEMPTS = 3;
 const AUTO_RESTART_WINDOW_MS = 5 * 60 * 1000;
 
-// Rough, well-known Java-major requirement per Minecraft release line. Not
-// exhaustive to every patch, but correct for the boundaries that matter —
-// used as a warning, not a hard block, since a newer JDK usually still runs
-// older servers fine.
-function requiredJavaMajor(mcVersion: string): number {
-  const parts = mcVersion.split('.').map((n) => parseInt(n, 10));
-  const maj = parts[0], min = parts[1] ?? 0, patch = parts[2] ?? 0;
-  if (maj !== 1) return 21;
-  if (min > 20 || (min === 20 && patch >= 5)) return 21; // 1.20.5+
-  if (min >= 18) return 17; // 1.18 – 1.20.4
-  if (min === 17) return 16; // 1.17.x
-  return 8; // pre-1.17
+// FALLBACK ONLY. The real, authoritative Java requirement always comes from
+// the server distributor's own metadata — Mojang's per-version manifest
+// (`javaVersion.majorVersion`) for Vanilla, PaperMC's Fill API
+// (`version.java.version.minimum`) for Paper — fetched live in
+// getRequiredJavaForVersion() below and cached on the server record at
+// create/import time. This table only kicks in when that lookup fails
+// (offline, an imported server with no matching online version, etc.), so it
+// only needs to get the well-known HISTORICAL boundaries right; it is
+// deliberately NOT the source of truth for "what does the newest Minecraft
+// version need", since that changes over time and a hardcoded ceiling here
+// would just reproduce the exact bug this table exists to avoid repeating.
+// Ordered oldest-first; each entry's `major` applies from `from` (inclusive)
+// up to the next entry's `from`.
+const JAVA_REQUIREMENT_BOUNDARIES: { from: [number, number, number]; major: number }[] = [
+  { from: [1, 0, 0], major: 8 },
+  { from: [1, 17, 0], major: 16 },
+  { from: [1, 18, 0], major: 17 },
+  { from: [1, 20, 5], major: 21 },
+];
+
+function compareVersionTuples(a: [number, number, number], b: [number, number, number]): number {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+export function requiredJavaMajor(mcVersion: string): number {
+  const parts = mcVersion.split('.').map((n) => parseInt(n, 10) || 0);
+  const tuple: [number, number, number] = [parts[0] ?? 1, parts[1] ?? 0, parts[2] ?? 0];
+  let result = JAVA_REQUIREMENT_BOUNDARIES[0].major;
+  for (const boundary of JAVA_REQUIREMENT_BOUNDARIES) {
+    if (compareVersionTuples(tuple, boundary.from) >= 0) result = boundary.major;
+  }
+  return result;
 }
 
 function isPathInside(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+// Class file major version → Java major version. Stable arithmetic Oracle
+// has used since Java 8 (class file 52), so this works for any future Java
+// release without needing a lookup table: Java 8=52, 11=55, 17=61, 21=65,
+// 25=69, and so on (+1 class-file major per +1 Java major).
+export function javaMajorFromClassFileVersion(classFileMajor: number): number {
+  return classFileMajor - 44;
+}
+
+/** Parses a real UnsupportedClassVersionError line into a friendly, version-
+ *  agnostic explanation. Returns null if the line doesn't match. */
+export function translateClassVersionError(line: string): string | null {
+  const m = line.match(/class file version (\d+)\.\d+[\s\S]*?up to (\d+)\.\d+/);
+  if (!m) return null;
+  const requiredJava = javaMajorFromClassFileVersion(parseInt(m[1], 10));
+  const availableJava = javaMajorFromClassFileVersion(parseInt(m[2], 10));
+  return `This Minecraft server requires Java ${requiredJava}, but Mercy is currently using Java ${availableJava}. Select a compatible Java runtime for this server (Settings tab) and start it again.`;
+}
+
+/** Any installed runtime with major >= required can run the jar (the JVM
+ *  runs bytecode compiled for its own version or older, never newer) — pick
+ *  the closest match rather than the newest available, so we don't jump to
+ *  an unnecessarily newer JVM than what the distributor tested against. */
+export function selectCompatibleRuntime(runtimes: JavaRuntime[], requiredMajor: number): JavaRuntime | null {
+  const compatible = runtimes.filter((r) => r.major >= requiredMajor);
+  if (compatible.length === 0) return null;
+  compatible.sort((a, b) => a.major - b.major);
+  return compatible[0];
 }
 
 export class MinecraftManager {
@@ -153,9 +226,10 @@ export class MinecraftManager {
   }
 
   // ── Java detection ──────────────────────────────────────────────────────
-  async detectJava(): Promise<{ found: boolean; version: string | null; major: number | null }> {
+  /** Probes a single `java` executable (PATH-resolved name, or an absolute path). */
+  private probeJava(javaExe: string): Promise<{ found: boolean; version: string | null; major: number | null }> {
     return new Promise((resolve) => {
-      execFile('java', ['-version'], (err, _stdout, stderr) => {
+      execFile(javaExe, ['-version'], (err, _stdout, stderr) => {
         if (err) return resolve({ found: false, version: null, major: null });
         // java -version prints to stderr: e.g. `openjdk version "21.0.12" 2026-...`
         const m = stderr.match(/version "(\d+)(?:\.(\d+))?/);
@@ -167,7 +241,87 @@ export class MinecraftManager {
     });
   }
 
+  /** Back-compat single-runtime check: whatever `java` resolves to on PATH. */
+  async detectJava(): Promise<{ found: boolean; version: string | null; major: number | null }> {
+    return this.probeJava('java');
+  }
+
+  /** Enumerates EVERY Java runtime Mercy can find on this machine — PATH,
+   *  JAVA_HOME, and the well-known Windows install roots used by the major
+   *  JDK distributors — so a server can be matched against a compatible one
+   *  even when it isn't the PATH default. Each candidate's version is
+   *  determined by actually executing it, never guessed from a folder name. */
+  async detectAllJavaRuntimes(): Promise<JavaRuntime[]> {
+    const candidates: { exe: string; source: string }[] = [];
+    if (process.env.JAVA_HOME) {
+      candidates.push({ exe: path.join(process.env.JAVA_HOME, 'bin', 'java.exe'), source: 'JAVA_HOME' });
+    }
+    const installRoots = [
+      'C:\\Program Files\\Java',
+      'C:\\Program Files\\Eclipse Adoptium',
+      'C:\\Program Files\\Zulu',
+      'C:\\Program Files\\Microsoft',
+      'C:\\Program Files\\Amazon Corretto',
+      'C:\\Program Files (x86)\\Java',
+    ];
+    for (const root of installRoots) {
+      try {
+        if (!fs.existsSync(root)) continue;
+        for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const exe = path.join(root, entry.name, 'bin', 'java.exe');
+          if (fs.existsSync(exe)) candidates.push({ exe, source: root });
+        }
+      } catch { /* inaccessible install root — skip it, not fatal */ }
+    }
+    candidates.push({ exe: 'java', source: 'PATH' });
+
+    const seen = new Set<string>();
+    const runtimes: JavaRuntime[] = [];
+    for (const { exe, source } of candidates) {
+      const key = exe.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const info = await this.probeJava(exe);
+      if (!info.found || info.major === null) continue;
+      // Resolve PATH's `java` to its real absolute location so a Program
+      // Files scan hit and the PATH entry pointing at the same install don't
+      // show up twice.
+      let resolvedPath = exe;
+      if (exe === 'java') {
+        try {
+          const where = await new Promise<string>((resolve) => {
+            execFile('where', ['java'], (err, stdout) => resolve(err ? '' : stdout.split(/\r?\n/)[0].trim()));
+          });
+          if (where) resolvedPath = where;
+        } catch { /* keep bare 'java' if resolution fails */ }
+      }
+      if (seen.has(resolvedPath.toLowerCase()) && resolvedPath !== exe) continue;
+      seen.add(resolvedPath.toLowerCase());
+      runtimes.push({ path: resolvedPath, version: info.version || '', major: info.major, source });
+    }
+    return runtimes;
+  }
+
   javaRequirementFor(mcVersion: string): number { return requiredJavaMajor(mcVersion); }
+
+  /** The REAL Java requirement for a specific version/server-type, straight
+   *  from the distributor's own metadata (Mojang for Vanilla, PaperMC's Fill
+   *  API for Paper). Falls back to the historical-boundaries heuristic only
+   *  if that lookup fails — e.g. offline, or an unpublished/unknown version. */
+  async getRequiredJavaForVersion(serverType: MinecraftServerType, version: string): Promise<number> {
+    try {
+      if (serverType === 'vanilla') {
+        const resolved = await this.resolveVanillaJarUrl(version);
+        if (resolved.javaMajor) return resolved.javaMajor;
+      } else {
+        const res = await axios.get(`https://fill.papermc.io/v3/projects/paper/versions/${version}`, { timeout: 10000 });
+        const min = res.data?.version?.java?.version?.minimum;
+        if (typeof min === 'number') return min;
+      }
+    } catch { /* fall through to the heuristic below */ }
+    return requiredJavaMajor(version);
+  }
 
   // ── Version catalogs (real, live) ───────────────────────────────────────
   async fetchVanillaVersions(): Promise<{ id: string; type: string; releaseTime: string }[]> {
@@ -233,14 +387,17 @@ export class MinecraftManager {
 
       onProgress?.(5, 'Resolving download…');
       let jarUrl: string; let jarName = 'server.jar';
+      let requiredJava: number | null = null;
       if (config.serverType === 'vanilla') {
         const resolved = await this.resolveVanillaJarUrl(config.version);
         jarUrl = resolved.url;
+        requiredJava = resolved.javaMajor;
       } else {
         const resolved = await this.resolvePaperJarUrl(config.version);
         jarUrl = resolved.url;
         jarName = resolved.name;
       }
+      if (requiredJava === null) requiredJava = await this.getRequiredJavaForVersion(config.serverType, config.version);
 
       const jarPath = path.join(config.installPath, jarName);
       onProgress?.(10, 'Downloading server jar…');
@@ -259,6 +416,7 @@ export class MinecraftManager {
         version: config.version, serverType: config.serverType, jarFile: jarName,
         ramMB: config.ramMB, port: config.port, status: 'stopped', pid: null, startedAt: null,
         autoRestart: false, lastBackup: null, createdAt: now, updatedAt: now,
+        requiredJavaMajor: requiredJava, javaPath: config.javaPath || null, lastError: null,
       };
       this.servers.push(server);
       this.save();
@@ -331,6 +489,11 @@ export class MinecraftManager {
       version: 'unknown', serverType: detected.serverType || 'vanilla', jarFile: detected.jarFile,
       ramMB, port: detected.port ?? 25565, status: 'stopped', pid: null, startedAt: null,
       autoRestart: false, lastBackup: null, createdAt: now, updatedAt: now,
+      // Version is unknown for an imported server, so the real Java
+      // requirement can't be looked up from Mojang/PaperMC metadata — start()
+      // falls back to the historical-boundaries heuristic in that case, and
+      // the panel lets the user pin a specific runtime manually if needed.
+      requiredJavaMajor: null, javaPath: null, lastError: null,
     };
     this.servers.push(server);
     this.save();
@@ -338,6 +501,54 @@ export class MinecraftManager {
   }
 
   // ── Process control ─────────────────────────────────────────────────────
+  /** Resolves which Java runtime a server would actually launch with, and
+   *  whether it's compatible — used by both startServer() (as a hard gate)
+   *  and the UI (to show the ✓/❌ next to "Selected Runtime" live). Never
+   *  spawns anything itself. */
+  async resolveLaunchJava(server: MinecraftServer): Promise<{
+    ok: boolean; required: number; javaPath: string | null; major: number | null; error?: string;
+  }> {
+    const required = server.requiredJavaMajor ?? requiredJavaMajor(server.version);
+    if (server.javaPath) {
+      const info = await this.probeJava(server.javaPath);
+      if (!info.found || info.major === null) {
+        return { ok: false, required, javaPath: server.javaPath, major: null, error: `Could not run the selected Java runtime at "${server.javaPath}". It may have been moved or uninstalled.` };
+      }
+      if (info.major < required) {
+        return { ok: false, required, javaPath: server.javaPath, major: info.major, error: `Java ${required} is required for Minecraft ${server.version}, but Java ${info.major} is currently selected.` };
+      }
+      return { ok: true, required, javaPath: server.javaPath, major: info.major };
+    }
+    // No explicit pin — auto-select the closest installed compatible runtime.
+    const runtimes = await this.detectAllJavaRuntimes();
+    const chosen = selectCompatibleRuntime(runtimes, required);
+    if (!chosen) {
+      if (runtimes.length === 0) {
+        return { ok: false, required, javaPath: null, major: null, error: `Java ${required} is required for Minecraft ${server.version}, but no Java runtime was found on this machine at all. Install Java ${required}+ and try again.` };
+      }
+      // At least one runtime exists but none qualify — report it the same
+      // way a pinned-but-wrong selection is reported (this IS "what would
+      // have launched by default" before this check existed): the PATH
+      // default if it's among what was found, else the closest-but-still-
+      // incompatible one, so the message names a concrete, currently-
+      // selected version exactly like the spec's example.
+      const wouldHaveUsed = runtimes.find((r) => r.source === 'PATH') || [...runtimes].sort((a, b) => b.major - a.major)[0];
+      const others = runtimes.filter((r) => r !== wouldHaveUsed).map((r) => `Java ${r.major}`);
+      const otherNote = others.length ? ` (also installed: ${others.join(', ')}, also incompatible)` : '';
+      return { ok: false, required, javaPath: wouldHaveUsed.path, major: wouldHaveUsed.major, error: `Java ${required} is required for Minecraft ${server.version}, but Java ${wouldHaveUsed.major} is currently selected${otherNote}.` };
+    }
+    return { ok: true, required, javaPath: chosen.path, major: chosen.major };
+  }
+
+  setServerJavaPath(id: string, javaPath: string | null): boolean {
+    const server = this.getServer(id);
+    if (!server) return false;
+    server.javaPath = javaPath;
+    server.updatedAt = new Date().toISOString();
+    this.save();
+    return true;
+  }
+
   async startServer(id: string): Promise<{ success: boolean; error?: string }> {
     const server = this.getServer(id);
     if (!server) return { success: false, error: 'Server not found.' };
@@ -345,13 +556,26 @@ export class MinecraftManager {
     const jarPath = path.join(server.installPath, server.jarFile);
     if (!fs.existsSync(jarPath)) return { success: false, error: `Server jar not found: ${server.jarFile}` };
 
+    // Never spawn an incompatible JVM — this is the hard gate that replaces
+    // the raw UnsupportedClassVersionError crash with a clear, actionable
+    // error before any process is started.
+    const javaCheck = await this.resolveLaunchJava(server);
+    if (!javaCheck.ok || !javaCheck.javaPath) {
+      server.lastError = javaCheck.error || 'No compatible Java runtime available.';
+      server.updatedAt = new Date().toISOString();
+      this.save();
+      return { success: false, error: javaCheck.error || 'No compatible Java runtime available.' };
+    }
+    const javaExe = javaCheck.javaPath;
+
     this.intentionalStop.delete(id);
     server.status = 'starting';
+    server.lastError = null;
     server.updatedAt = new Date().toISOString();
     this.save();
     this.broadcast('minecraft:statusChange', { serverId: id, status: 'starting' });
 
-    const proc = spawn('java', [`-Xmx${server.ramMB}M`, `-Xms${Math.min(server.ramMB, 1024)}M`, '-jar', server.jarFile, 'nogui'], {
+    const proc = spawn(javaExe, [`-Xmx${server.ramMB}M`, `-Xms${Math.min(server.ramMB, 1024)}M`, '-jar', server.jarFile, 'nogui'], {
       cwd: server.installPath,
     });
     this.processes.set(id, proc);
@@ -372,7 +596,16 @@ export class MinecraftManager {
       }
     });
     proc.stderr?.on('data', (chunk: Buffer) => {
-      for (const line of chunk.toString().split(/\r?\n/)) if (line) this.appendConsole(id, `[ERROR] ${line}`);
+      for (const line of chunk.toString().split(/\r?\n/)) {
+        if (!line) continue;
+        this.appendConsole(id, `[ERROR] ${line}`);
+        const friendly = translateClassVersionError(line);
+        if (friendly) {
+          this.appendConsole(id, `[Mercy] ${friendly}`);
+          server.lastError = friendly;
+          this.save();
+        }
+      }
     });
 
     proc.on('exit', (code, signal) => {
@@ -393,8 +626,13 @@ export class MinecraftManager {
       }
 
       // Unexpected termination — a real crash, not a user-requested stop.
+      // If we already identified a specific, friendly cause (e.g. a Java
+      // version mismatch) from the process's own output, surface that
+      // instead of the generic "exited unexpectedly" message.
       current.status = 'error';
-      this.appendConsole(id, `[Mercy] Server process exited unexpectedly (code ${code}, signal ${signal}).`);
+      this.appendConsole(id, current.lastError
+        ? `[Mercy] ${current.lastError}`
+        : `[Mercy] Server process exited unexpectedly (code ${code}, signal ${signal}).`);
       this.save();
       this.broadcast('minecraft:statusChange', { serverId: id, status: 'error' });
 

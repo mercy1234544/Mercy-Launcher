@@ -264,7 +264,14 @@ function registerIpcHandlers() {
   ipcMain.handle('minecraft:consoleBuffer', (_, id: string) => minecraftManager.getConsoleBuffer(id));
   ipcMain.handle('minecraft:delete', (_, id: string, deleteFiles: boolean) => minecraftManager.deleteServer(id, deleteFiles));
   ipcMain.handle('minecraft:detectJava', () => minecraftManager.detectJava());
+  ipcMain.handle('minecraft:detectAllJava', () => minecraftManager.detectAllJavaRuntimes());
   ipcMain.handle('minecraft:javaRequirement', (_, version: string) => minecraftManager.javaRequirementFor(version));
+  ipcMain.handle('minecraft:requiredJavaForVersion', (_, serverType: 'vanilla' | 'paper', version: string) => minecraftManager.getRequiredJavaForVersion(serverType, version));
+  ipcMain.handle('minecraft:resolveLaunchJava', (_, id: string) => {
+    const server = minecraftManager.getServer(id);
+    return server ? minecraftManager.resolveLaunchJava(server) : null;
+  });
+  ipcMain.handle('minecraft:setJavaPath', (_, id: string, javaPath: string | null) => minecraftManager.setServerJavaPath(id, javaPath));
   ipcMain.handle('minecraft:fetchVanillaVersions', () => minecraftManager.fetchVanillaVersions());
   ipcMain.handle('minecraft:fetchPaperVersions', () => minecraftManager.fetchPaperVersions());
   ipcMain.handle('minecraft:create', (event, config) =>

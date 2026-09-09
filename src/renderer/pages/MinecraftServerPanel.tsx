@@ -132,6 +132,16 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
 
   const toggleAutoRestart = async (v: boolean) => { await window.electronAPI.minecraft.setAutoRestart(server.id, v); onChange(); };
 
+  const [javaCheck, setJavaCheck] = useState<{ ok: boolean; required: number; javaPath: string | null; major: number | null; error?: string } | null>(null);
+  const [allRuntimes, setAllRuntimes] = useState<{ path: string; version: string; major: number; source: string }[]>([]);
+  const refreshJava = () => {
+    window.electronAPI.minecraft.resolveLaunchJava(server.id).then(setJavaCheck).catch(() => setJavaCheck(null));
+    window.electronAPI.minecraft.detectAllJava().then(setAllRuntimes).catch(() => setAllRuntimes([]));
+  };
+  useEffect(refreshJava, [server.id, server.javaPath, server.status]);
+  const compatibleRuntimes = javaCheck ? allRuntimes.filter((r) => r.major >= javaCheck.required).sort((a, b) => a.major - b.major) : [];
+  const pinRuntime = async (p: string) => { await window.electronAPI.minecraft.setJavaPath(server.id, p || null); refreshJava(); onChange(); };
+
   const cards = [
     { icon: Hash, label: 'PID', value: stats?.pid ?? server.pid ?? 'Not available' },
     { icon: Clock, label: 'Uptime', value: fmtUptime(stats?.uptimeMs ?? null) },
@@ -141,6 +151,17 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
 
   return (
     <div className="space-y-4">
+      {server.status === 'error' && server.lastError && (
+        <Panel className="border-error/30 bg-error-bg">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle size={16} className="text-error shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-error">Server stopped unexpectedly</p>
+              <p className="text-xs text-surface-300 mt-1">{server.lastError}</p>
+            </div>
+          </div>
+        </Panel>
+      )}
       <div className="grid grid-cols-4 gap-4">
         {cards.map((c) => (
           <Panel key={c.label} padding="sm">
@@ -150,6 +171,35 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
           </Panel>
         ))}
       </div>
+      <Panel>
+        <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Java Runtime</p>
+        {javaCheck && (
+          <>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-surface-400">Required Java</span>
+              <span className="font-mono font-semibold text-surface-100">Java {javaCheck.required}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm mt-2">
+              <span className="text-surface-400">Selected Runtime</span>
+              <span className={`font-mono font-semibold ${javaCheck.ok ? 'text-success' : 'text-error'}`}>
+                {javaCheck.major != null ? `Java ${javaCheck.major}` : 'None found'} {javaCheck.ok ? '✓' : '❌'}
+              </span>
+            </div>
+            {!javaCheck.ok && javaCheck.error && (
+              <p className="text-xs text-error mt-2 flex items-start gap-1.5"><AlertTriangle size={12} className="shrink-0 mt-0.5" /> {javaCheck.error}</p>
+            )}
+            {compatibleRuntimes.length > 1 && (
+              <div className="mt-3">
+                <label className="text-[11px] text-surface-500 mb-1.5 block">Pin a specific runtime (multiple compatible ones found):</label>
+                <select value={server.javaPath || ''} onChange={(e) => pinRuntime(e.target.value)} className="input-field text-sm py-2">
+                  <option value="">Auto-select ({compatibleRuntimes[0].major})</option>
+                  {compatibleRuntimes.map((r) => <option key={r.path} value={r.path}>Java {r.major} — {r.source}</option>)}
+                </select>
+              </div>
+            )}
+          </>
+        )}
+      </Panel>
       <Panel>
         <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Server Details</p>
         <div className="grid grid-cols-2 gap-x-8 gap-y-4">

@@ -66,12 +66,16 @@ interface ElectronAPI {
     consoleBuffer: (id: string) => Promise<string[]>;
     delete: (id: string, deleteFiles: boolean) => Promise<boolean>;
     detectJava: () => Promise<{ found: boolean; version: string | null; major: number | null }>;
+    detectAllJava: () => Promise<{ path: string; version: string; major: number; source: string }[]>;
     javaRequirement: (version: string) => Promise<number>;
+    requiredJavaForVersion: (serverType: 'vanilla' | 'paper', version: string) => Promise<number>;
+    resolveLaunchJava: (id: string) => Promise<{ ok: boolean; required: number; javaPath: string | null; major: number | null; error?: string } | null>;
+    setJavaPath: (id: string, javaPath: string | null) => Promise<boolean>;
     fetchVanillaVersions: () => Promise<{ id: string; type: string; releaseTime: string }[]>;
     fetchPaperVersions: () => Promise<string[]>;
     create: (config: {
       name: string; installPath: string; version: string; serverType: 'vanilla' | 'paper';
-      ramMB: number; port: number; acceptedEula: boolean;
+      ramMB: number; port: number; acceptedEula: boolean; javaPath?: string | null;
     }) => Promise<{ success: boolean; server?: MinecraftServer; error?: string }>;
     detectExisting: (dirPath: string) => Promise<{
       valid: boolean; reason?: string; jarFile?: string; version?: string; serverType?: 'vanilla' | 'paper';
@@ -330,6 +334,9 @@ declare global {
     lastBackup: string | null;
     createdAt: string;
     updatedAt: string;
+    requiredJavaMajor: number | null;
+    javaPath: string | null;
+    lastError: string | null;
   }
   interface MinecraftBackup {
     id: string;

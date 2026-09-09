@@ -22,8 +22,12 @@ export default function MinecraftServerWizard() {
   const [loadingVersions, setLoadingVersions] = useState(true);
   const [versionsError, setVersionsError] = useState<string | null>(null);
 
-  const [java, setJava] = useState<{ found: boolean; version: string | null; major: number | null } | null>(null);
+  const [allRuntimes, setAllRuntimes] = useState<{ path: string; version: string; major: number; source: string }[]>([]);
   const [requiredJava, setRequiredJava] = useState<number | null>(null);
+  const [checkingJava, setCheckingJava] = useState(false);
+  const [selectedJavaPath, setSelectedJavaPath] = useState<string | null>(null); // null = auto-select the closest compatible runtime
+
+  const refreshRuntimes = () => window.electronAPI.minecraft.detectAllJava().then(setAllRuntimes).catch(() => setAllRuntimes([]));
 
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
@@ -31,26 +35,36 @@ export default function MinecraftServerWizard() {
   useEffect(() => {
     (async () => {
       try {
-        const [vanilla, paper, javaInfo] = await Promise.all([
+        const [vanilla, paper] = await Promise.all([
           window.electronAPI.minecraft.fetchVanillaVersions(),
           window.electronAPI.minecraft.fetchPaperVersions(),
-          window.electronAPI.minecraft.detectJava(),
         ]);
+        refreshRuntimes();
         const releases = vanilla.filter((v) => v.type === 'release');
         setVanillaVersions(releases);
         setPaperVersions(paper.slice().reverse()); // newest-looking first
-        setJava(javaInfo);
         if (releases[0]) setVersion(releases[0].id);
       } catch (e: any) {
         setVersionsError('Could not reach Mojang/PaperMC to load versions — check your internet connection.');
       } finally { setLoadingVersions(false); }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Live, per-version/type requirement — straight from Mojang/PaperMC's own
+  // metadata (not a local guess), so a brand-new Minecraft release that
+  // needs a newer Java than anything seen before is still reported correctly.
   useEffect(() => {
-    if (!version) return;
-    window.electronAPI.minecraft.javaRequirement(version).then(setRequiredJava).catch(() => setRequiredJava(null));
-  }, [version]);
+    if (!version) { setRequiredJava(null); return; }
+    let cancelled = false;
+    setCheckingJava(true);
+    window.electronAPI.minecraft.requiredJavaForVersion(serverType, version)
+      .then((v) => { if (!cancelled) setRequiredJava(v); })
+      .catch(() => { if (!cancelled) setRequiredJava(null); })
+      .finally(() => { if (!cancelled) setCheckingJava(false); });
+    setSelectedJavaPath(null); // a version change resets manual picks back to auto
+    return () => { cancelled = true; };
+  }, [serverType, version]);
 
   useEffect(() => {
     // Switching type resets to that type's first available version.
@@ -64,8 +78,11 @@ export default function MinecraftServerWizard() {
     if (dir) setInstallPath(dir);
   };
 
-  const javaMismatch = java?.found && java.major != null && requiredJava != null && java.major < requiredJava;
-  const canCreate = name.trim() && installPath && version && port > 0 && port < 65536 && ram >= 512 && acceptedEula && !creating;
+  const compatibleRuntimes = requiredJava != null ? allRuntimes.filter((r) => r.major >= requiredJava).sort((a, b) => a.major - b.major) : [];
+  const autoRuntime = compatibleRuntimes[0] || null;
+  const selectedRuntime = (selectedJavaPath ? allRuntimes.find((r) => r.path === selectedJavaPath) : autoRuntime) || null;
+  const javaCompatible = requiredJava == null || (selectedRuntime != null && selectedRuntime.major >= requiredJava);
+  const canCreate = name.trim() && installPath && version && port > 0 && port < 65536 && ram >= 512 && acceptedEula && !creating && javaCompatible;
 
   const handleCreate = async () => {
     if (!canCreate) return;
@@ -73,7 +90,7 @@ export default function MinecraftServerWizard() {
     setProgress({ pct: 0, message: 'Starting…' });
     const cleanup = window.electronAPI.onMinecraftCreateProgress((data) => setProgress(data));
     try {
-      const result = await window.electronAPI.minecraft.create({ name: name.trim(), installPath, version, serverType, ramMB: ram, port, acceptedEula });
+      const result = await window.electronAPI.minecraft.create({ name: name.trim(), installPath, version, serverType, ramMB: ram, port, acceptedEula, javaPath: selectedJavaPath });
       if (result.success && result.server) {
         toast.success('Server created');
         navigate(`/minecraft/server/${result.server.id}`);
@@ -136,11 +153,46 @@ export default function MinecraftServerWizard() {
             ))}
           </select>
         )}
-        {requiredJava && (
-          <p className={`text-[11px] mt-2 flex items-center gap-1.5 ${javaMismatch ? 'text-warning' : 'text-surface-500'}`}>
-            {javaMismatch && <AlertTriangle size={12} className="shrink-0" />}
-            Needs Java {requiredJava}+. {java?.found ? `Detected Java ${java.major ?? '?'} on this PC${javaMismatch ? ' — may not run this version.' : '.'}` : 'No Java installation detected on this PC — install a JDK before starting the server.'}
-          </p>
+      </Panel>
+
+      <Panel>
+        <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3 block">Java Compatibility</label>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-surface-400">Required Java</span>
+          <span className="font-mono font-semibold text-surface-100">
+            {checkingJava ? <Loader2 size={13} className="animate-spin inline" /> : requiredJava != null ? `Java ${requiredJava}` : 'Unknown'}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-sm mt-2">
+          <span className="text-surface-400">Selected Runtime</span>
+          {selectedRuntime ? (
+            <span className={`font-mono font-semibold flex items-center gap-1.5 ${javaCompatible ? 'text-success' : 'text-error'}`}>
+              Java {selectedRuntime.major} {javaCompatible ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+            </span>
+          ) : (
+            <span className="font-mono font-semibold text-error flex items-center gap-1.5">None found <XCircle size={13} /></span>
+          )}
+        </div>
+
+        {requiredJava != null && !javaCompatible && (
+          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-error-bg border border-error/20 text-xs text-error">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+            <span>
+              Java {requiredJava} is required for Minecraft {version}, but {selectedRuntime ? `Java ${selectedRuntime.major} is currently selected` : 'no compatible Java runtime was found'} on this PC.
+              Install a compatible JDK, then <button onClick={refreshRuntimes} className="underline hover:no-underline">re-check</button>.
+            </span>
+          </div>
+        )}
+
+        {compatibleRuntimes.length > 1 && (
+          <div className="mt-3">
+            <label className="text-[11px] text-surface-500 mb-1.5 block">Multiple compatible runtimes found — choose one:</label>
+            <select value={selectedJavaPath || autoRuntime?.path || ''} onChange={(e) => setSelectedJavaPath(e.target.value)} className="input-field text-sm">
+              {compatibleRuntimes.map((r) => (
+                <option key={r.path} value={r.path}>Java {r.major} — {r.source}</option>
+              ))}
+            </select>
+          </div>
         )}
       </Panel>
 
