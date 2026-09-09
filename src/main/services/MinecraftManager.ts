@@ -15,6 +15,8 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import os from 'os';
+import net from 'net';
 import { spawn, ChildProcess, execFile } from 'child_process';
 import { BrowserWindow } from 'electron';
 import axios from 'axios';
@@ -119,6 +121,33 @@ export interface MinecraftBackup {
   path: string;
   size: number;
   createdAt: string;
+}
+
+export interface MinecraftConnectionInfo {
+  serverId: string;
+  serverName: string;
+  serverType: MinecraftServerType;
+  version: string;
+  /** Mercy only ever creates/imports Java Edition servers — there is no
+   *  Bedrock server type. This is always 'java'; kept as a field (rather
+   *  than assumed silently by the UI) so nothing has to hardcode that
+   *  assumption in more than one place. */
+  edition: 'java';
+  status: MinecraftServerStatus;
+  port: number;
+  /** This machine's real, non-internal LAN IPv4 address, if one exists. */
+  lanAddress: string | null;
+  /** Null = not checked (server isn't running, so there's nothing to
+   *  verify). true/false = a real TCP connection to 127.0.0.1:port was
+   *  actually attempted just now — never assumed from process state alone. */
+  portListening: boolean | null;
+  bedrock: {
+    /** True only if a real installed plugin whose name suggests Geyser was
+     *  found on this server — never assumed true for a plain Java server. */
+    possible: boolean;
+    detectedPlugin: string | null;
+    note: string;
+  };
 }
 
 interface KnownPlayer { name: string; online: boolean; lastSeen: string; }
@@ -912,6 +941,84 @@ export class MinecraftManager {
     return { pid: server.pid, uptimeMs: Date.now() - new Date(server.startedAt).getTime() };
   }
 
+  // ── Connection info ──────────────────────────────────────────────────────
+  /** Actually attempts a real TCP connection to 127.0.0.1:port — the only
+   *  honest way to know whether something is really listening, rather than
+   *  inferring it from the Java process merely existing (a server can be
+   *  running but still be mid-startup, bound to a different port than
+   *  configured, or have crashed its listener while the process lingers). */
+  private checkPortListening(port: number, timeoutMs = 1500): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = new net.Socket();
+      let done = false;
+      const finish = (result: boolean) => {
+        if (done) return;
+        done = true;
+        try { socket.destroy(); } catch {}
+        resolve(result);
+      };
+      socket.setTimeout(timeoutMs);
+      socket.once('connect', () => finish(true));
+      socket.once('timeout', () => finish(false));
+      socket.once('error', () => finish(false));
+      try { socket.connect(port, '127.0.0.1'); } catch { finish(false); }
+    });
+  }
+
+  /** This machine's own real, non-internal IPv4 address — never a fabricated
+   *  or example address, and null (not a placeholder) when none is found
+   *  (e.g. no network adapter is up). */
+  private getLanAddress(): string | null {
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const iface of ifaces[name] || []) {
+        if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+      }
+    }
+    return null;
+  }
+
+  /** Real connection info for the Connect tab — always recomputed from the
+   *  server's CURRENT record and a live port check, never cached, so it
+   *  can't go stale after the user edits the port/version/type. */
+  async getConnectionInfo(id: string): Promise<MinecraftConnectionInfo | null> {
+    const server = this.getServer(id);
+    if (!server) return null;
+
+    // Checked whenever a process is actually alive (running, still starting
+    // up, or mid-graceful-stop) — a Minecraft server typically binds its
+    // socket well before it finishes loading, so "starting" can genuinely
+    // already be accepting connections. Only skipped when there's
+    // definitely no process to check (stopped/error).
+    const processIsAlive = server.status === 'running' || server.status === 'starting' || server.status === 'stopping';
+    const portListening = processIsAlive ? await this.checkPortListening(server.port) : null;
+    const lan = this.getLanAddress();
+
+    // Bedrock is only ever possible through a real installed Geyser plugin
+    // (Paper only) — never assumed for a plain Vanilla/Paper server, and
+    // never claimed "configured" just because the plugin file exists;
+    // Geyser also needs its own config, which Mercy doesn't verify here.
+    const geyser = server.installedContent.find((c) => /geyser/i.test(c.projectName) || /geyser/i.test(c.fileName));
+    const bedrock = geyser
+      ? {
+          possible: true, detectedPlugin: geyser.projectName,
+          note: `"${geyser.projectName}" is installed, which can let Bedrock Edition clients connect through this same port — but only if Geyser's own configuration is set up correctly. Mercy detected the plugin, not a working Bedrock connection.`,
+        }
+      : {
+          possible: false, detectedPlugin: null,
+          note: server.serverType === 'paper'
+            ? 'This is a Java Edition server. Bedrock Edition players cannot connect unless a Geyser plugin is installed and configured (Marketplace → search "Geyser").'
+            : 'This is a Java Edition Vanilla server. Bedrock Edition players cannot connect at all — Geyser requires a Paper server.',
+        };
+
+    return {
+      serverId: id, serverName: server.name, serverType: server.serverType, version: server.version,
+      edition: 'java', status: server.status, port: server.port,
+      lanAddress: lan ? `${lan}:${server.port}` : null,
+      portListening, bedrock,
+    };
+  }
+
   // ── Players (derived from real console output — no query/RCON assumed) ──
   private trackPlayerFromLine(id: string, line: string) {
     const joined = line.match(/: (\w+) joined the game/);
@@ -961,6 +1068,17 @@ export class MinecraftManager {
     try { if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`); } catch {}
     try {
       fs.writeFileSync(file, next.filter((l, i, arr) => l !== '' || i === arr.length - 1).join('\n'));
+      // Keep the registry's own port field in sync — the Connect tab (and
+      // everything else that reads server.port) must never show a stale
+      // port after the user changes it here rather than in the wizard.
+      if (Object.prototype.hasOwnProperty.call(changes, 'server-port')) {
+        const parsed = parseInt(changes['server-port'], 10);
+        if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535 && parsed !== server.port) {
+          server.port = parsed;
+          server.updatedAt = new Date().toISOString();
+          this.save();
+        }
+      }
       return { success: true };
     } catch (e: any) {
       return { success: false, error: e?.message || 'Failed to write server.properties' };

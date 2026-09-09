@@ -109,6 +109,15 @@ function mkFakeServer(dir, opts = {}) {
   ok('writeProperties PRESERVED the unknown property untouched', /some-unknown-future-property=42/.test(rawAfter));
   ok('writeProperties preserved server-port untouched', /server-port=25566/.test(rawAfter));
   ok('writeProperties created a .bak backup before overwriting', fs.existsSync(path.join(vanillaDir, 'server.properties.bak')));
+  ok('registry port unaffected when server-port was not part of the change', mgr.getServer(registeredId).port === 25566);
+
+  // Changing server-port through Properties must update the REAL registry
+  // field too — otherwise the Connect tab (and anything else reading
+  // server.port) would silently show a stale port after this edit.
+  const portChange = mgr.writeProperties(registeredId, { 'server-port': '25577' });
+  ok('writeProperties accepts a server-port change', portChange.success);
+  ok('the file itself reflects the new port', /server-port=25577/.test(fs.readFileSync(path.join(vanillaDir, 'server.properties'), 'utf-8')));
+  ok('the REGISTRY port is kept in sync with the edited server-port (no stale connection info)', mgr.getServer(registeredId).port === 25577);
 
   // 6. File access is strictly scoped to the server's own directory — path traversal must fail.
   const okList = mgr.listFiles(registeredId, '');

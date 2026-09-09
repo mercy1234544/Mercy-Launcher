@@ -277,6 +277,7 @@ function registerIpcHandlers() {
   ipcMain.handle('minecraft:setJavaPath', (_, id: string, javaPath: string | null) => minecraftManager.setServerJavaPath(id, javaPath));
   ipcMain.handle('minecraft:installJava', (event, major: number) =>
     minecraftManager.downloadAndInstallJava(major, (pct, message) => event.sender.send('minecraft:installJavaProgress', { pct, message })));
+  ipcMain.handle('minecraft:connectionInfo', (_, id: string) => minecraftManager.getConnectionInfo(id));
   ipcMain.handle('minecraft:fetchVanillaVersions', () => minecraftManager.fetchVanillaVersions());
   ipcMain.handle('minecraft:fetchPaperVersions', () => minecraftManager.fetchPaperVersions());
   ipcMain.handle('minecraft:create', (event, config) =>

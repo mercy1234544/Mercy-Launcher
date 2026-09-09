@@ -62,6 +62,7 @@ const electronAPI = {
     resolveLaunchJava: (id: string) => ipcRenderer.invoke('minecraft:resolveLaunchJava', id),
     setJavaPath: (id: string, javaPath: string | null) => ipcRenderer.invoke('minecraft:setJavaPath', id, javaPath),
     installJava: (major: number) => ipcRenderer.invoke('minecraft:installJava', major),
+    connectionInfo: (id: string) => ipcRenderer.invoke('minecraft:connectionInfo', id),
     fetchVanillaVersions: () => ipcRenderer.invoke('minecraft:fetchVanillaVersions'),
     fetchPaperVersions: () => ipcRenderer.invoke('minecraft:fetchPaperVersions'),
     create: (config: any) => ipcRenderer.invoke('minecraft:create', config),

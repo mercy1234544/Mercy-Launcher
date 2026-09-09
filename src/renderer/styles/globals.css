@@ -287,6 +287,19 @@
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-500) 15%, transparent), 0 0 0 1px color-mix(in srgb, var(--primary-500) 30%, transparent) inset;
   }
 
+  /* A native <select>'s open dropdown list renders as its own OS-level
+     popup, not layered over the page — so the translucent overlay tokens
+     every closed select/input uses (--bg-input, an ~4% tint meant to sit on
+     top of the app's own background) don't reach it, and text rendered in
+     a near-white --text-primary on that popup's default white canvas was
+     nearly invisible. This is a real, solid, theme-aware background/color
+     instead, applied to every <select> in the app (not just .input-field),
+     so it flips correctly across every preset and the light theme too. */
+  select option {
+    background: var(--surface-800);
+    color: var(--text-primary);
+  }
+
   /* ═══ Badges ═══ */
   .badge {
     @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium;

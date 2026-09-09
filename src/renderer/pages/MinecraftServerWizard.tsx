@@ -170,7 +170,7 @@ export default function MinecraftServerWizard() {
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-surface-600 mt-3">Fabric, Forge, and NeoForge aren't supported yet — their installers need a separate multi-step flow that isn't reliable enough to ship tonight.</p>
+        <p className="text-[11px] text-surface-600 mt-3">Fabric, Forge, and NeoForge aren't supported as server types yet — their installers need a separate, more involved setup flow Mercy doesn't run yet. Mods for those loaders can still be browsed in the Marketplace for reference.</p>
       </Panel>
 
       <Panel>

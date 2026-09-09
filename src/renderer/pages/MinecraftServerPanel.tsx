@@ -6,7 +6,7 @@ import {
   Blocks, ArrowLeft, Play, Square, RotateCcw, Loader2, Terminal, Settings2, Users,
   Archive, FolderOpen, LayoutDashboard, Cpu, MemoryStick, Clock, Hash, Save, Trash2,
   Download, RefreshCw, AlertTriangle, File as FileIcon, Folder, ChevronRight, Copy, Trash,
-  Puzzle, ExternalLink, ShieldAlert, Power,
+  Puzzle, ExternalLink, ShieldAlert, Power, Wifi, CheckCircle2, XCircle, Globe, Home, Gamepad2,
 } from 'lucide-react';
 import { Panel, SectionHeading, Toggle, EmptyState } from '../components/ui';
 import { useMinecraftStore } from '../stores/useMinecraftStore';
@@ -96,6 +96,7 @@ export default function MinecraftServerPanel() {
         <Tabs.List className="flex flex-wrap gap-1 mb-4" aria-label="Server management">
           {[
             { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+            { id: 'connect', label: 'Connect', icon: Wifi },
             { id: 'console', label: 'Console', icon: Terminal },
             { id: 'properties', label: 'Properties', icon: Settings2 },
             { id: 'players', label: 'Players', icon: Users },
@@ -115,6 +116,7 @@ export default function MinecraftServerPanel() {
         </Tabs.List>
 
         <Tabs.Content value="overview" className="outline-none"><OverviewTab server={server} onChange={load} /></Tabs.Content>
+        <Tabs.Content value="connect" className="outline-none"><ConnectTab server={server} /></Tabs.Content>
         <Tabs.Content value="console" className="outline-none"><ConsoleTab server={server} isRunning={isRunning} /></Tabs.Content>
         <Tabs.Content value="properties" className="outline-none"><PropertiesTab server={server} /></Tabs.Content>
         <Tabs.Content value="players" className="outline-none"><PlayersTab server={server} isRunning={isRunning} /></Tabs.Content>
@@ -251,6 +253,143 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
       <Panel className="flex items-center gap-4">
         <div className="flex-1"><p className="text-sm font-semibold text-surface-100">Auto-restart on crash</p><p className="text-xs text-surface-500 mt-0.5">Only restarts after an unexpected exit — never after a normal Stop.</p></div>
         <Toggle checked={server.autoRestart} onChange={toggleAutoRestart} />
+      </Panel>
+    </div>
+  );
+}
+
+// ── Connect ───────────────────────────────────────────────────────────────
+const STATUS_CONNECT_META: Record<string, { label: string; className: string }> = {
+  running: { label: 'Server online', className: 'text-success' },
+  starting: { label: 'Server starting…', className: 'text-warning' },
+  stopping: { label: 'Server stopping…', className: 'text-warning' },
+  stopped: { label: 'Server offline', className: 'text-surface-500' },
+  error: { label: 'Server error', className: 'text-error' },
+};
+
+function copyToClipboard(text: string, label: string) {
+  navigator.clipboard.writeText(text);
+  toast.success(`${label} copied`);
+}
+
+function ConnectTab({ server }: { server: MinecraftServer }) {
+  const [info, setInfo] = useState<MinecraftConnectionInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => window.electronAPI.minecraft.connectionInfo(server.id).then((i) => { setInfo(i); setLoading(false); }).catch(() => setLoading(false));
+  // Recomputed live on every poll and whenever the server's own record
+  // changes (port/version/type edits) — never a cached snapshot, so it
+  // can't go stale after a Properties change or a status transition.
+  useEffect(() => { setLoading(true); load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [server.id, server.port, server.version, server.serverType, server.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading || !info) {
+    return <Panel className="flex items-center justify-center py-16"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>;
+  }
+
+  const statusMeta = STATUS_CONNECT_META[info.status] || STATUS_CONNECT_META.stopped;
+  const localAddress = `127.0.0.1:${info.port}`;
+  const instructions = info.serverType === 'paper'
+    ? `This is a Paper server — it's joined exactly like a normal Java Edition server (Paper only adds plugin support on the server side; the client connection is identical).`
+    : `This is a Vanilla Java Edition server.`;
+
+  return (
+    <div className="space-y-4">
+      <Panel>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs font-bold text-surface-400 uppercase tracking-wider">Connection Status</p>
+          <span className={`flex items-center gap-1.5 text-xs font-semibold ${statusMeta.className}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${info.status === 'running' ? 'bg-emerald-400' : info.status === 'error' ? 'bg-red-400' : 'bg-surface-600'}`} />
+            {statusMeta.label}
+          </span>
+        </div>
+        {info.portListening !== null ? (
+          <p className={`text-xs mt-2 flex items-center gap-1.5 ${info.portListening ? 'text-success' : 'text-error'}`}>
+            {info.portListening ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+            {info.portListening
+              ? `Port ${info.port} is listening — verified with a real connection just now.`
+              : info.status === 'starting'
+                ? `Port ${info.port} isn't accepting connections yet — still starting up.`
+                : info.status === 'stopping'
+                  ? `Port ${info.port} is no longer accepting connections — shutting down.`
+                  : `Port ${info.port} is NOT accepting connections — the process is running but something is wrong.`}
+          </p>
+        ) : (
+          <p className="text-xs mt-2 text-surface-500 flex items-center gap-1.5"><XCircle size={13} /> Connection unavailable — start the server first.</p>
+        )}
+      </Panel>
+
+      <Panel>
+        <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Server Address</p>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Name</p><p className="text-sm text-surface-200 font-medium">{info.serverName}</p></div>
+          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Type</p><p className="text-sm text-surface-200 font-medium">{info.serverType === 'paper' ? 'Paper' : 'Vanilla'}</p></div>
+          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Minecraft Version</p><p className="text-sm text-surface-200 font-medium">{info.version}</p></div>
+          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Edition</p><p className="text-sm text-surface-200 font-medium">Java Edition</p></div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6">
+            <Home size={14} className="text-surface-500 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] text-surface-500">This computer</p>
+              <p className="text-sm font-mono text-surface-100 truncate">{localAddress}</p>
+            </div>
+            <button onClick={() => copyToClipboard(localAddress, 'Address')} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors" title="Copy address"><Copy size={13} /></button>
+          </div>
+
+          {info.lanAddress ? (
+            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6">
+              <Wifi size={14} className="text-primary-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-surface-500">LAN connection — other devices on this network</p>
+                <p className="text-sm font-mono text-surface-100 truncate">{info.lanAddress}</p>
+              </div>
+              <button onClick={() => copyToClipboard(info.lanAddress!, 'LAN address')} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors" title="Copy address"><Copy size={13} /></button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6 text-xs text-surface-500">
+              <Wifi size={14} className="shrink-0" /> No LAN network address could be detected on this machine.
+            </div>
+          )}
+
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-overlay-4 border border-overlay-8 text-xs text-surface-400">
+            <Globe size={14} className="shrink-0 mt-0.5 text-surface-500" />
+            <span>
+              <strong className="text-surface-300">Public/internet access is not configured.</strong> Mercy cannot detect or guarantee this automatically — a public IP alone doesn't mean the port is reachable.
+              To let people outside your network join, forward port <span className="font-mono">{info.port}</span> (TCP) on your router to this computer, or use a tunneling service (e.g. playit.gg, ngrok), then share that address instead.
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 mt-3">
+          <button onClick={() => copyToClipboard(info.lanAddress || localAddress, 'IP:Port')} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"><Copy size={12} /> Copy IP:Port</button>
+          <button
+            onClick={() => copyToClipboard(
+              `Join "${info.serverName}" (${info.serverType === 'paper' ? 'Paper' : 'Vanilla'} ${info.version}):\n1. Open Minecraft Java Edition ${info.version}\n2. Multiplayer → Add Server\n3. Server Address: ${info.lanAddress || localAddress}\n4. Join`,
+              'Connection instructions',
+            )}
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+          ><Copy size={12} /> Copy Instructions</button>
+        </div>
+      </Panel>
+
+      <Panel>
+        <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">How to Join</p>
+        <p className="text-xs text-surface-400 mb-3">{instructions}</p>
+        <ol className="space-y-2 text-sm text-surface-300">
+          <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">1.</span> Open Minecraft: Java Edition, version <strong>{info.version}</strong> (or a compatible version).</li>
+          <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">2.</span> Go to <strong>Multiplayer</strong> → <strong>Add Server</strong>.</li>
+          <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">3.</span> Enter <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{info.lanAddress || localAddress}</span> as the Server Address.</li>
+          <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">4.</span> Select the server and click <strong>Join Server</strong>.</li>
+        </ol>
+      </Panel>
+
+      <Panel className={info.bedrock.possible ? 'border-primary-500/20' : ''}>
+        <div className="flex items-center gap-2 mb-2">
+          <Gamepad2 size={14} className={info.bedrock.possible ? 'text-primary-400' : 'text-surface-500'} />
+          <p className="text-xs font-bold text-surface-400 uppercase tracking-wider">Bedrock Edition</p>
+        </div>
+        <p className="text-xs text-surface-400">{info.bedrock.note}</p>
       </Panel>
     </div>
   );

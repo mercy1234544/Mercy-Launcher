@@ -72,6 +72,7 @@ interface ElectronAPI {
     resolveLaunchJava: (id: string) => Promise<{ ok: boolean; required: number; javaPath: string | null; major: number | null; error?: string } | null>;
     setJavaPath: (id: string, javaPath: string | null) => Promise<boolean>;
     installJava: (major: number) => Promise<{ success: boolean; javaPath?: string; error?: string }>;
+    connectionInfo: (id: string) => Promise<MinecraftConnectionInfo | null>;
     fetchVanillaVersions: () => Promise<{ id: string; type: string; releaseTime: string }[]>;
     fetchPaperVersions: () => Promise<string[]>;
     create: (config: {
@@ -364,6 +365,18 @@ declare global {
     path: string;
     size: number;
     createdAt: string;
+  }
+  interface MinecraftConnectionInfo {
+    serverId: string;
+    serverName: string;
+    serverType: 'vanilla' | 'paper';
+    version: string;
+    edition: 'java';
+    status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
+    port: number;
+    lanAddress: string | null;
+    portListening: boolean | null;
+    bedrock: { possible: boolean; detectedPlugin: string | null; note: string };
   }
   interface InstalledContent {
     id: string;
