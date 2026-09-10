@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import * as Tabs from '@radix-ui/react-tabs';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Blocks, ArrowLeft, Play, Square, RotateCcw, Loader2, Terminal, Settings2, Users,
   Archive, FolderOpen, LayoutDashboard, Cpu, MemoryStick, Clock, Hash, Save, Trash2,
@@ -49,10 +49,13 @@ function fmtMemory(stats: { memoryBytes: number | null; metricsAvailable: boolea
 export default function MinecraftServerPanel() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { upsertServer } = useMinecraftStore();
   const [server, setServer] = useState<MinecraftServer | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState('overview');
+  const validTabs = ['overview', 'connect', 'console', 'properties', 'players', 'backups', 'files', 'content', 'worlds', 'packs', 'danger'];
+  const requestedTab = searchParams.get('tab');
+  const [tab, setTab] = useState(requestedTab && validTabs.includes(requestedTab) ? requestedTab : 'overview');
 
   const load = async () => {
     if (!id) return;
@@ -849,8 +852,13 @@ function ContentTab({ server }: { server: MinecraftServer }) {
       <Panel>
         <EmptyState
           icon={Puzzle}
-          title="Marketplace isn't supported for Bedrock yet"
-          description="Bedrock uses a structurally different add-on system (behavior packs and resource packs, not Java plugins/mods/datapacks). Mercy's current Marketplace is built around Modrinth's Java ecosystem and doesn't install Bedrock add-ons — that's a planned future milestone, not something Mercy will pretend to do here."
+          title="Java Marketplace doesn't apply to Bedrock"
+          description="Bedrock uses a structurally different add-on system — resource packs and behavior packs, not Java plugins/mods/datapacks. There's no legitimate public download catalog Mercy can honestly plug in for Bedrock, so add-ons already on this server are managed directly from its own Packs tab instead."
+          action={
+            <button onClick={() => navigate(`/minecraft/server/${server.id}?tab=packs`)} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5">
+              <PackageCheck size={13} /> Open Packs
+            </button>
+          }
         />
       </Panel>
     );
@@ -1023,7 +1031,13 @@ function WorldsTab({ server, isRunning }: { server: MinecraftServer; isRunning: 
 }
 
 // ── Bedrock Resource & Behavior Packs (real manifest-based, local-folder) ────
+const PACK_KIND_META: Record<'resource_packs' | 'behavior_packs', { label: string; description: string }> = {
+  resource_packs: { label: 'Resource Packs', description: 'Changes textures, sounds, models, UI, and other visual assets.' },
+  behavior_packs: { label: 'Behavior Packs', description: 'Changes gameplay, entities, items, recipes, and other behavior.' },
+};
+
 function PacksTab({ server }: { server: MinecraftServer }) {
+  const navigate = useNavigate();
   const [kind, setKind] = useState<'resource_packs' | 'behavior_packs'>('resource_packs');
   const [packs, setPacks] = useState<{ folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1063,18 +1077,26 @@ function PacksTab({ server }: { server: MinecraftServer }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex gap-1 p-1 rounded-xl bg-overlay-4 border border-overlay-8">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-bold text-surface-100">Bedrock Packs</p>
+          <p className="text-xs text-surface-500 mt-0.5">Manage add-ons already installed on this server. Looking to find new content? Use the <button onClick={() => navigate(`/minecraft/marketplace?server=${server.id}`)} className="text-primary-400 hover:underline font-medium">Marketplace</button>.</p>
+        </div>
+        <button onClick={install} disabled={installing} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5 disabled:opacity-60 shrink-0">
+          {installing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {installing ? 'Installing…' : 'Install Pack'}
+        </button>
+      </div>
+
+      <div>
+        <div className="flex gap-1 p-1 rounded-xl bg-overlay-4 border border-overlay-8 w-fit">
           {(['resource_packs', 'behavior_packs'] as const).map((k) => (
             <button key={k} onClick={() => setKind(k)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${kind === k ? 'bg-primary-600/20 text-primary-300' : 'text-surface-400 hover:text-surface-200'}`}>
-              {k === 'resource_packs' ? 'Resource Packs' : 'Behavior Packs'}
+              {PACK_KIND_META[k].label}
             </button>
           ))}
         </div>
-        <button onClick={install} disabled={installing} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5 disabled:opacity-60">
-          {installing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {installing ? 'Installing…' : 'Install Pack'}
-        </button>
+        <p className="text-[11px] text-surface-500 mt-2">{PACK_KIND_META[kind].description}</p>
       </div>
 
       {loading ? (
@@ -1091,7 +1113,7 @@ function PacksTab({ server }: { server: MinecraftServer }) {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-surface-100 truncate">{p.name} {p.valid && <span className="text-surface-500 font-normal">v{p.version}</span>}</p>
                 <p className="text-[11px] text-surface-500 truncate">
-                  {p.valid ? (p.description || p.folderName) : (p.invalidReason || 'Invalid pack')}
+                  {p.valid ? (p.description || 'No description available') : (p.invalidReason || 'Invalid pack')}
                 </p>
               </div>
               {p.valid && (

@@ -274,8 +274,38 @@ function mkBedrockPackFixture(dir, { uuid, version = [1, 0, 0], name = 'Test Pac
     const listedWithComment = mgr.listBedrockPacks(bedrockId, 'resource_packs');
     const commentPackEntry = listedWithComment.find((p) => p.uuid === commentPackUuid);
     ok('the comment-containing manifest is listed as valid (not "manifest.json is not valid JSON")', commentPackEntry?.valid === true);
-    ok('its real name/version were still correctly read despite the comments', commentPackEntry?.name === 'pack.name' && commentPackEntry?.version === '1.0.0');
+    ok('its real version was still correctly read despite the comments', commentPackEntry?.version === '1.0.0');
+    // No texts/en_US.lang shipped with this fixture, so the raw "pack.name"
+    // loc key can't be resolved — it must fall back to the folder name
+    // rather than showing the confusing raw placeholder-looking key.
+    ok('an unresolved loc key ("pack.name") falls back to the folder name instead of showing the raw key', commentPackEntry?.name === installComment.folderName && commentPackEntry?.name !== 'pack.name');
+    ok('an unresolved description loc key falls back to empty rather than showing "pack.description"', commentPackEntry?.description === '');
     mgr.removeBedrockPack(bedrockId, 'resource_packs', installComment.folderName, commentPackUuid);
+
+    // LANG RESOLUTION: when a real texts/en_US.lang IS shipped (as Mojang's
+    // actual chemistry packs do), the loc key must resolve to its real,
+    // human-readable value instead of falling back.
+    const langPackUuid = '1a090000-2222-4333-8444-555566667777';
+    const langPackSrc = path.join(base, 'lang-pack-src');
+    fs.mkdirSync(path.join(langPackSrc, 'texts'), { recursive: true });
+    fs.writeFileSync(path.join(langPackSrc, 'manifest.json'), JSON.stringify({
+      format_version: 2,
+      header: { name: 'pack.name', description: 'pack.description', uuid: langPackUuid, version: [2, 1, 0] },
+      modules: [{ type: 'resources', uuid: 'e1f2a3b4-c5d6-4789-a012-3456789abcde', version: [2, 1, 0] }],
+    }, null, 2));
+    fs.writeFileSync(path.join(langPackSrc, 'texts', 'en_US.lang'), [
+      '## Real Mojang-style lang file',
+      'pack.name=Really Cool Resource Pack',
+      'pack.description=Adds really cool textures.\t##comment suffix Mojang sometimes includes',
+    ].join('\n'));
+    const langPackZip = path.join(base, 'lang-pack.zip');
+    await zipDir(langPackSrc, langPackZip, false);
+    const installLang = await mgr.installBedrockPack(bedrockId, 'resource_packs', langPackZip);
+    ok('installBedrockPack succeeds for a pack whose manifest uses lang keys with a real lang file', installLang.success === true);
+    const langPackEntry = mgr.listBedrockPacks(bedrockId, 'resource_packs').find((p) => p.uuid === langPackUuid);
+    ok('the loc key "pack.name" resolves to its real lang-file value', langPackEntry?.name === 'Really Cool Resource Pack');
+    ok('the loc key "pack.description" resolves to its real lang-file value, with the trailing \\t##comment stripped', langPackEntry?.description === 'Adds really cool textures.');
+    mgr.removeBedrockPack(bedrockId, 'resource_packs', installLang.folderName, langPackUuid);
 
     // REMOVE: pack A's folder + activation entries genuinely disappear; pack B untouched.
     const removeA = mgr.removeBedrockPack(bedrockId, 'resource_packs', installA.folderName, packUuidA);

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Search, Download, Loader2, X, ExternalLink, Package, Puzzle, Layers,
-  AlertTriangle, CheckCircle2, Server as ServerIcon, ShieldCheck,
+  AlertTriangle, CheckCircle2, Server as ServerIcon, ShieldCheck, Blocks, Box, Map, PackageCheck, PackageX,
 } from 'lucide-react';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -23,8 +23,17 @@ export default function MinecraftMarketplace() {
   const preselectServerId = params.get('server') || '';
 
   const [servers, setServers] = useState<MinecraftServer[]>([]);
+  const [serversLoaded, setServersLoaded] = useState(false);
   const [targetServerId, setTargetServerId] = useState(preselectServerId);
   const targetServer = servers.find((s) => s.id === targetServerId) || null;
+
+  // Edition is the primary, top-level choice — the catalog shown, and which
+  // servers are even offered in the picker below, both follow from it. When
+  // arriving pre-targeted at a specific server (e.g. from that server's own
+  // Content/Packs tab), the server's own real edition is the source of
+  // truth and seeds this rather than defaulting to Java.
+  const [edition, setEdition] = useState<'java' | 'bedrock'>('java');
+  const editionServers = servers.filter((s) => (edition === 'bedrock' ? s.edition === 'bedrock' : s.edition !== 'bedrock'));
 
   const [query, setQuery] = useState('');
   const [projectType, setProjectType] = useState('');
@@ -39,9 +48,29 @@ export default function MinecraftMarketplace() {
   const [selected, setSelected] = useState<MarketplaceHit | null>(null);
 
   useEffect(() => {
-    window.electronAPI.minecraft.getAll().then(setServers).catch(() => setServers([]));
+    window.electronAPI.minecraft.getAll().then((all) => { setServers(all); setServersLoaded(true); }).catch(() => setServersLoaded(true));
     window.electronAPI.minecraft.fetchVanillaVersions().then((v) => setVersions(v.filter((x) => x.type === 'release'))).catch(() => setVersions([]));
   }, []);
+
+  // Seed the edition from the preselected server's real edition, exactly once,
+  // once the server list has actually loaded (never guessed/left at the
+  // default while the real value is available).
+  useEffect(() => {
+    if (!serversLoaded || !preselectServerId) return;
+    const found = servers.find((s) => s.id === preselectServerId);
+    if (found) setEdition(found.edition === 'bedrock' ? 'bedrock' : 'java');
+  }, [serversLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const chooseEdition = (next: 'java' | 'bedrock') => {
+    setEdition(next);
+    // A server that belongs to the other edition can never be a valid
+    // install target for this catalog — drop the selection rather than
+    // leave a mismatched server silently selected underneath.
+    if (targetServer && (next === 'bedrock') !== (targetServer.edition === 'bedrock')) {
+      setTargetServerId('');
+      const next2 = new URLSearchParams(params); next2.delete('server'); setParams(next2, { replace: true });
+    }
+  };
 
   // When a target server is chosen, default the version filter to its own version.
   useEffect(() => {
@@ -49,6 +78,7 @@ export default function MinecraftMarketplace() {
   }, [targetServerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runSearch = async () => {
+    if (edition === 'bedrock') return; // Modrinth is a Java-only catalog — never queried while browsing Bedrock.
     setLoading(true); setError(null);
     try {
       const res = await window.electronAPI.minecraftMarketplace.search({ query, projectType: projectType || undefined, loader: loader || undefined, minecraftVersion: mcVersion || undefined, limit: 24 });
@@ -59,7 +89,7 @@ export default function MinecraftMarketplace() {
   };
 
   useEffect(() => { runSearch(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { const t = setTimeout(runSearch, 350); return () => clearTimeout(t); }, [query, projectType, loader, mcVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(runSearch, 350); return () => clearTimeout(t); }, [query, projectType, loader, mcVersion, edition]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setTarget = (id: string) => {
     setTargetServerId(id);
@@ -70,7 +100,20 @@ export default function MinecraftMarketplace() {
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-5 max-w-6xl mx-auto pb-16">
       <div className="flex items-center gap-3">
         <button onClick={() => navigate(preselectServerId ? `/minecraft/server/${preselectServerId}` : '/minecraft')} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors"><ArrowLeft size={16} /></button>
-        <SectionHeading icon={Puzzle} iconClass="bg-emerald-500/15 border-emerald-500/25 text-emerald-300" title="Minecraft Marketplace" subtitle="Real mods, plugins, and datapacks from Modrinth — Java Edition catalog only" />
+        <SectionHeading icon={Puzzle} iconClass="bg-emerald-500/15 border-emerald-500/25 text-emerald-300" title="Minecraft Marketplace" subtitle="Browse and install Minecraft content" />
+      </div>
+
+      {/* Edition is the top-level choice — it decides the catalog below. */}
+      <div className="flex gap-2">
+        {([
+          { id: 'java' as const, label: 'Java Edition', icon: Blocks },
+          { id: 'bedrock' as const, label: 'Bedrock Edition', icon: Box },
+        ]).map((e) => (
+          <button key={e.id} onClick={() => chooseEdition(e.id)}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border text-sm font-bold transition-all ${edition === e.id ? 'border-primary-500/50 bg-primary-500/10 text-primary-300' : 'border-overlay-6 bg-overlay-3 text-surface-400 hover:bg-overlay-6'}`}>
+            <e.icon size={16} /> {e.label}
+          </button>
+        ))}
       </div>
 
       <Panel className="flex items-center gap-3">
@@ -79,48 +122,45 @@ export default function MinecraftMarketplace() {
           <p className="text-xs text-surface-500">Installing for</p>
           <select value={targetServerId} onChange={(e) => setTarget(e.target.value)} className="input-field text-sm py-1.5 mt-0.5">
             <option value="">Browse only (choose a server to enable installing)</option>
-            {servers.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.serverType === 'bedrock' ? 'Bedrock (catalog not available)' : s.serverType === 'paper' ? 'Paper' : 'Vanilla'} {s.version !== 'unknown' ? s.version : ''}</option>)}
+            {editionServers.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.serverType === 'paper' ? 'Paper' : s.serverType === 'bedrock' ? 'Bedrock' : 'Vanilla'} {s.version !== 'unknown' ? s.version : ''}</option>)}
           </select>
+          {editionServers.length === 0 && serversLoaded && (
+            <p className="text-[11px] text-surface-600 mt-1">No {edition === 'bedrock' ? 'Bedrock' : 'Java'} Edition servers yet — this catalog is for browsing only until you create or import one.</p>
+          )}
         </div>
-        {targetServer && targetServer.serverType !== 'bedrock' && (
+        {targetServer && edition === 'java' && (
           <span className="text-[11px] text-surface-500 flex items-center gap-1.5 shrink-0"><ShieldCheck size={13} className="text-success" /> Compatibility is checked against this server</span>
         )}
       </Panel>
 
-      {targetServer?.serverType === 'bedrock' && (
-        <Panel>
-          <EmptyState
-            icon={AlertTriangle}
-            title="No Marketplace catalog available for Bedrock"
-            description="Mercy's Marketplace is built on Modrinth, which only hosts Java Edition content (mods, plugins, datapacks). There is no equivalent legitimate, publicly-accessible catalog API for Bedrock add-ons that Mercy can honestly plug in here, so rather than show Java results that could never install on this server, Bedrock resource packs and behavior packs are managed directly from this server's own Packs tab instead."
-          />
+      {edition === 'bedrock' ? (
+        <BedrockCatalogPanel targetServer={targetServer} />
+      ) : (
+        <Panel className="space-y-3">
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search mods, plugins, datapacks…" className="input-field pl-9" />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {TYPE_TABS.map((t) => (
+              <button key={t.id} onClick={() => setProjectType(t.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${projectType === t.id ? 'bg-primary-600/15 text-primary-300 border border-primary-500/25' : 'text-surface-400 hover:text-surface-200 hover:bg-overlay-4 border border-transparent'}`}>
+                <t.icon size={13} /> {t.label}
+              </button>
+            ))}
+            <div className="w-px h-5 bg-overlay-8 mx-1" />
+            <select value={mcVersion} onChange={(e) => setMcVersion(e.target.value)} className="input-field text-xs py-1.5 w-auto">
+              <option value="">Any Minecraft version</option>
+              {versions.map((v) => <option key={v.id} value={v.id}>{v.id}</option>)}
+            </select>
+            <select value={loader} onChange={(e) => setLoader(e.target.value)} className="input-field text-xs py-1.5 w-auto">
+              {LOADERS.map((l) => <option key={l} value={l}>{l || 'Any loader/platform'}</option>)}
+            </select>
+          </div>
         </Panel>
       )}
 
-      {targetServer?.serverType !== 'bedrock' && <Panel className="space-y-3">
-        <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search mods, plugins, datapacks…" className="input-field pl-9" />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {TYPE_TABS.map((t) => (
-            <button key={t.id} onClick={() => setProjectType(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${projectType === t.id ? 'bg-primary-600/15 text-primary-300 border border-primary-500/25' : 'text-surface-400 hover:text-surface-200 hover:bg-overlay-4 border border-transparent'}`}>
-              <t.icon size={13} /> {t.label}
-            </button>
-          ))}
-          <div className="w-px h-5 bg-overlay-8 mx-1" />
-          <select value={mcVersion} onChange={(e) => setMcVersion(e.target.value)} className="input-field text-xs py-1.5 w-auto">
-            <option value="">Any Minecraft version</option>
-            {versions.map((v) => <option key={v.id} value={v.id}>{v.id}</option>)}
-          </select>
-          <select value={loader} onChange={(e) => setLoader(e.target.value)} className="input-field text-xs py-1.5 w-auto">
-            {LOADERS.map((l) => <option key={l} value={l}>{l || 'Any loader/platform'}</option>)}
-          </select>
-        </div>
-      </Panel>}
-
-      {targetServer?.serverType === 'bedrock' ? null : loading ? (
+      {edition === 'bedrock' ? null : loading ? (
         <Panel className="flex items-center justify-center py-16"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>
       ) : error ? (
         <Panel><EmptyState icon={AlertTriangle} title="Couldn't load Marketplace results" description={error} /></Panel>
@@ -155,6 +195,52 @@ export default function MinecraftMarketplace() {
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+// ── Bedrock: an honest catalog breakdown, never a fabricated marketplace ────
+// There is no legitimate, publicly-accessible download API for Bedrock
+// add-ons the way Modrinth serves Java content — so rather than fake a
+// browsing experience, this explains exactly what each content category is
+// and points at where it's actually managed (a server's own Packs/World
+// tabs), category by category, honestly.
+const BEDROCK_CATEGORIES: { icon: any; title: string; description: string; status: string; tab: 'packs' | 'worlds' }[] = [
+  { icon: PackageCheck, title: 'Resource Packs', description: 'Textures, sounds, models, and UI.', status: 'No legitimate public catalog exists to browse — install a .zip/.mcpack you already have from a server\'s Packs tab.', tab: 'packs' },
+  { icon: PackageX, title: 'Behavior Packs', description: 'Gameplay, entities, items, and recipes.', status: 'No legitimate public catalog exists to browse — install a .zip/.mcpack you already have from a server\'s Packs tab.', tab: 'packs' },
+  { icon: Map, title: 'Worlds', description: 'Full world saves.', status: 'Not something Mercy browses either — import or export a world directly from a server\'s World tab.', tab: 'worlds' },
+];
+
+function BedrockCatalogPanel({ targetServer }: { targetServer: MinecraftServer | null }) {
+  const navigate = useNavigate();
+  return (
+    <div className="space-y-3">
+      <Panel>
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0"><AlertTriangle size={18} className="text-amber-400" /></div>
+          <div>
+            <p className="text-sm font-bold text-surface-100">No Bedrock catalog to browse here</p>
+            <p className="text-xs text-surface-400 mt-1">Mercy's Marketplace is built on Modrinth, which only hosts Java Edition content. There's no equivalent legitimate, publicly-accessible download API for Bedrock add-ons that Mercy can honestly plug in — so instead of faking a catalog, here's exactly what each category is and where it's actually managed.</p>
+          </div>
+        </div>
+      </Panel>
+      {BEDROCK_CATEGORIES.map((c) => (
+        <Panel key={c.title} padding="sm" className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-overlay-6 flex items-center justify-center shrink-0 text-surface-400"><c.icon size={16} /></div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-surface-100">{c.title} <span className="text-surface-500 font-normal">— {c.description}</span></p>
+            <p className="text-[11px] text-surface-500 mt-0.5">{c.status}</p>
+          </div>
+          {targetServer && (
+            <button onClick={() => navigate(`/minecraft/server/${targetServer.id}?tab=${c.tab}`)} className="btn-secondary text-xs py-1.5 px-3 shrink-0">
+              Open {c.tab === 'packs' ? 'Packs' : 'World'}
+            </button>
+          )}
+        </Panel>
+      ))}
+      {!targetServer && (
+        <p className="text-[11px] text-surface-600 text-center">Select a Bedrock server above to jump straight to its Packs/World tabs.</p>
+      )}
+    </div>
   );
 }
 

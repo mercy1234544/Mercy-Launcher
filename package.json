@@ -1,6 +1,6 @@
 {
   "name": "fivem-server-builder",
-  "version": "1.89.0",
+  "version": "1.90.0",
   "description": "Mercy Launcher — a centralized game-management hub, starting with a full FiveM server-management ecosystem",
   "main": "dist/main/main.js",
   "scripts": {

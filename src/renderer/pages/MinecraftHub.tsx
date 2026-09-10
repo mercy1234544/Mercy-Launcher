@@ -60,7 +60,7 @@ export default function MinecraftHub() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {[
           { icon: PlusCircle, title: 'Create Server', sub: 'Set up a new Vanilla or Paper server', tint: 'bg-purple-600/20 text-purple-400 border-purple-500/20', path: '/minecraft/create' },
-          { icon: Puzzle, title: 'Marketplace', sub: 'Mods, plugins & datapacks', tint: 'bg-blue-600/20 text-blue-400 border-blue-500/20', path: '/minecraft/marketplace' },
+          { icon: Puzzle, title: 'Marketplace', sub: 'Browse and install content — Java or Bedrock', tint: 'bg-blue-600/20 text-blue-400 border-blue-500/20', path: '/minecraft/marketplace' },
         ].map((c) => (
           <Panel as="button" interactive key={c.title} padding="lg" onClick={() => navigate(c.path)} className="group flex items-center gap-5">
             <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.tint}`}><c.icon size={24} /></div>

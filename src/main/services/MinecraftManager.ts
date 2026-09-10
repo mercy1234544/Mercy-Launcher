@@ -1967,6 +1967,49 @@ export class MinecraftManager {
     try { return JSON.parse(raw); } catch { return JSON.parse(this.stripJsonComments(raw)); }
   }
 
+  /** Real Bedrock packs often put loc keys (e.g. "pack.name") in the
+   *  manifest and define the actual display string in texts/en_US.lang —
+   *  Mojang's own bundled "chemistry" packs do exactly this. A raw,
+   *  unresolved loc key looks like confusing placeholder text to a user, so
+   *  this detects that shape and resolves it against the pack's own lang
+   *  file when one exists. */
+  private looksLikeBedrockLocKey(s: string): boolean {
+    return /^[a-z0-9_]+(\.[a-z0-9_]+)+$/i.test(s.trim());
+  }
+
+  private resolveBedrockLangValue(packDir: string, key: string): string | null {
+    for (const lang of ['en_US.lang', 'en_GB.lang']) {
+      const langPath = path.join(packDir, 'texts', lang);
+      if (!fs.existsSync(langPath)) continue;
+      try {
+        for (const line of fs.readFileSync(langPath, 'utf-8').split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+          const eq = trimmed.indexOf('=');
+          if (eq === -1) continue;
+          if (trimmed.slice(0, eq).trim() === key) {
+            // Bedrock lang lines may carry a trailing "\t##comment".
+            const value = trimmed.slice(eq + 1).split('\t')[0].trim();
+            if (value) return value;
+          }
+        }
+      } catch {}
+    }
+    return null;
+  }
+
+  /** Resolves a manifest string for display: a real, human-written value is
+   *  used as-is; a raw loc key is resolved via the pack's lang file when
+   *  possible, and otherwise replaced with `fallback` rather than shown
+   *  verbatim (never "pack.name"/"pack.description" on screen). */
+  private resolveBedrockDisplayString(packDir: string, raw: string | undefined, fallback: string): string {
+    const value = (raw || '').trim();
+    if (!value) return fallback;
+    if (!this.looksLikeBedrockLocKey(value)) return value;
+    const resolved = this.resolveBedrockLangValue(packDir, value);
+    return resolved || fallback;
+  }
+
   /** Finds a genuine manifest.json (with a real, valid header.uuid + a
    *  3-number header.version — never assumed from the archive/file name)
    *  at the extraction root or one level of subdirectories. */
@@ -2030,7 +2073,8 @@ export class MinecraftManager {
     for (const entry of fs.readdirSync(packsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const folderName = entry.name;
-      const manifestPath = path.join(packsDir, folderName, 'manifest.json');
+      const packDir = path.join(packsDir, folderName);
+      const manifestPath = path.join(packDir, 'manifest.json');
       if (!fs.existsSync(manifestPath)) {
         results.push({ folderName, uuid: null, name: folderName, version: 'unknown', description: '', valid: false, invalidReason: 'No manifest.json found.', enabled: false });
         continue;
@@ -2038,13 +2082,25 @@ export class MinecraftManager {
       try {
         const manifest = this.parseBedrockManifestFile(manifestPath);
         if (!this.isValidBedrockManifest(manifest)) {
-          results.push({ folderName, uuid: typeof manifest?.header?.uuid === 'string' ? manifest.header.uuid : null, name: manifest?.header?.name || folderName, version: 'unknown', description: manifest?.header?.description || '', valid: false, invalidReason: 'manifest.json has no valid header.uuid/header.version.', enabled: false });
+          results.push({
+            folderName, uuid: typeof manifest?.header?.uuid === 'string' ? manifest.header.uuid : null,
+            name: this.resolveBedrockDisplayString(packDir, manifest?.header?.name, folderName),
+            version: 'unknown',
+            description: this.resolveBedrockDisplayString(packDir, manifest?.header?.description, ''),
+            valid: false, invalidReason: 'manifest.json has no valid header.uuid/header.version.', enabled: false,
+          });
           continue;
         }
         const uuid = manifest.header.uuid as string;
         const versionArr = manifest.header.version as number[];
         const enabled = activation.some((a) => a.pack_id === uuid && Array.isArray(a.version) && a.version.length === 3 && a.version.every((n, i) => n === versionArr[i]));
-        results.push({ folderName, uuid, name: manifest.header.name || folderName, version: versionArr.join('.'), description: manifest.header.description || '', valid: true, enabled });
+        results.push({
+          folderName, uuid,
+          name: this.resolveBedrockDisplayString(packDir, manifest.header.name, folderName),
+          version: versionArr.join('.'),
+          description: this.resolveBedrockDisplayString(packDir, manifest.header.description, ''),
+          valid: true, enabled,
+        });
       } catch {
         results.push({ folderName, uuid: null, name: folderName, version: 'unknown', description: '', valid: false, invalidReason: 'manifest.json is not valid JSON.', enabled: false });
       }
@@ -2075,7 +2131,13 @@ export class MinecraftManager {
 
       const packsDir = path.join(server.installPath, kind);
       fs.mkdirSync(packsDir, { recursive: true });
-      const baseName = (found.manifest.header.name || path.basename(zipPath, path.extname(zipPath))).replace(/[^a-z0-9-_ .]/gi, '_').trim() || 'pack';
+      // Resolve a loc key (e.g. "pack.name") against the pack's own lang
+      // file before using it as the folder name too — otherwise a pack
+      // whose manifest uses lang keys but ships without (or before we've
+      // moved it next to) its lang file would end up in a folder literally
+      // named "pack.name" on disk.
+      const resolvedDisplayName = this.resolveBedrockDisplayString(found.root, found.manifest.header.name, path.basename(zipPath, path.extname(zipPath)));
+      const baseName = resolvedDisplayName.replace(/[^a-z0-9-_ .]/gi, '_').trim() || 'pack';
       let folderName = baseName;
       let targetDir = path.join(packsDir, folderName);
       let suffix = 2;
