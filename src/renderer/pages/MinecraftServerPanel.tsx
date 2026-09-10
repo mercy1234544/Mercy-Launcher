@@ -346,6 +346,10 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
   // placeholder) when nothing real was detected, exactly as getConnectionInfo
   // already guarantees.
   const primaryAddress = info.lanAddress || localAddress;
+  // Address alone, with no port baked in — primaryAddress is always
+  // "ip:port" (see localAddress/info.lanAddress above), so splitting on the
+  // colon is safe here (these are always IPv4 addresses, never IPv6).
+  const primaryIp = primaryAddress.split(':')[0];
   const typeLabel = info.serverType === 'bedrock' ? 'Bedrock Edition' : info.serverType === 'paper' ? 'Paper' : 'Vanilla';
 
   // Real reachability, from the SAME live checks as before (TCP port-connect
@@ -378,28 +382,53 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
           <span className="text-xs text-surface-500">{isBedrock ? 'Bedrock Edition' : typeLabel} · {info.version}</span>
         </div>
 
-        <p className="text-[10px] text-surface-500 uppercase tracking-wider mb-1.5">{isBedrock ? 'Server Address (UDP)' : 'Server Address'}</p>
-        <div className="flex items-center gap-2">
-          <div className="flex-1 min-w-0 bg-overlay-3 border border-overlay-6 rounded-xl px-4 py-3">
-            <p className="font-mono text-lg font-bold text-surface-100 truncate">{primaryAddress}</p>
+        {/* Address and Port are always shown as separate fields — the port
+            is never hardcoded, it's read fresh from info.port (itself
+            always the server's real, current configured port) on every
+            render, so it updates everywhere the moment it changes. */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-[10px] text-surface-500 uppercase tracking-wider mb-1.5">Server Address</p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0 bg-overlay-3 border border-overlay-6 rounded-xl px-4 py-3">
+                <p className="font-mono text-lg font-bold text-surface-100 truncate">{primaryIp}</p>
+              </div>
+              <button onClick={() => copyToClipboard(primaryIp, 'Address')} className="btn-secondary px-3.5 py-3 shrink-0" title="Copy Address"><Copy size={15} /></button>
+            </div>
           </div>
-          <button onClick={() => copyToClipboard(primaryAddress, 'Address')} className="btn-primary px-4 py-3 flex items-center gap-1.5 shrink-0"><Copy size={15} /> Copy</button>
+          <div>
+            <p className="text-[10px] text-surface-500 uppercase tracking-wider mb-1.5">Port{isBedrock ? ' (UDP)' : ''}</p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0 bg-overlay-3 border border-overlay-6 rounded-xl px-4 py-3">
+                <p className="font-mono text-lg font-bold text-surface-100 truncate">{info.port}</p>
+              </div>
+              <button onClick={() => copyToClipboard(String(info.port), 'Port')} className="btn-secondary px-3.5 py-3 shrink-0" title="Copy Port"><Copy size={15} /></button>
+            </div>
+          </div>
         </div>
         {!info.lanAddress && (
           <p className="text-[11px] text-surface-600 mt-1.5">Showing this computer's own address — no LAN network was detected, so this only works for players on this same PC.</p>
         )}
 
+        <p className="text-[10px] text-surface-500 uppercase tracking-wider mt-4 mb-1.5">Full Address</p>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0 bg-overlay-3 border border-overlay-6 rounded-xl px-4 py-2.5">
+            <p className="font-mono text-sm text-surface-200 truncate">{primaryAddress}</p>
+          </div>
+          <button onClick={() => copyToClipboard(primaryAddress, 'Full address')} className="btn-primary px-4 py-2.5 flex items-center gap-1.5 shrink-0"><Copy size={14} /> Copy</button>
+        </div>
+
         <p className="text-[10px] text-surface-500 uppercase tracking-wider mt-4 mb-1.5">How to Join</p>
         {isBedrock ? (
           <ol className="space-y-1 text-sm text-surface-300">
             <li>1. Open Minecraft (Bedrock) → <strong>Play</strong> → <strong>Servers</strong> → <strong>Add Server</strong></li>
-            <li>2. Address <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{primaryAddress.split(':')[0]}</span>, Port <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{info.port}</span></li>
+            <li>2. Address <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{primaryIp}</span>, Port <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{info.port}</span></li>
             <li>3. Select the server and join</li>
           </ol>
         ) : (
           <ol className="space-y-1 text-sm text-surface-300">
             <li>1. Open Minecraft: Java Edition {info.version} → <strong>Multiplayer</strong> → <strong>Add Server</strong></li>
-            <li>2. Server Address: <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{primaryAddress}</span></li>
+            <li>2. Server Address: <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{primaryAddress}</span> <span className="text-surface-500">(address and port together — Java's own client takes one combined field)</span></li>
             <li>3. Select the server and click <strong>Join Server</strong></li>
           </ol>
         )}

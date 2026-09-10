@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Search, Download, Loader2, X, ExternalLink, Package, Puzzle, Layers,
-  AlertTriangle, CheckCircle2, Server as ServerIcon, ShieldCheck, Blocks, Box, Map, PackageCheck, PackageX,
+  AlertTriangle, CheckCircle2, Server as ServerIcon, ShieldCheck, Blocks, Box, Map, PackageCheck, PackageX, Info,
 } from 'lucide-react';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -198,49 +198,253 @@ export default function MinecraftMarketplace() {
   );
 }
 
-// ── Bedrock: an honest catalog breakdown, never a fabricated marketplace ────
-// There is no legitimate, publicly-accessible download API for Bedrock
-// add-ons the way Modrinth serves Java content — so rather than fake a
-// browsing experience, this explains exactly what each content category is
-// and points at where it's actually managed (a server's own Packs/World
-// tabs), category by category, honestly.
-const BEDROCK_CATEGORIES: { icon: any; title: string; description: string; status: string; tab: 'packs' | 'worlds' }[] = [
-  { icon: PackageCheck, title: 'Resource Packs', description: 'Textures, sounds, models, and UI.', status: 'No legitimate public catalog exists to browse — install a .zip/.mcpack you already have from a server\'s Packs tab.', tab: 'packs' },
-  { icon: PackageX, title: 'Behavior Packs', description: 'Gameplay, entities, items, and recipes.', status: 'No legitimate public catalog exists to browse — install a .zip/.mcpack you already have from a server\'s Packs tab.', tab: 'packs' },
-  { icon: Map, title: 'Worlds', description: 'Full world saves.', status: 'Not something Mercy browses either — import or export a world directly from a server\'s World tab.', tab: 'worlds' },
+// ── Bedrock: a real catalog backed by GitHub (see BedrockMarketplace.ts's
+// own header comment for why GitHub, and why not Mojang's Marketplace,
+// MCPEDL, or Modrinth). Every result here is real GitHub repo/release data
+// — never fabricated, and never Java content relabeled as Bedrock.
+const BEDROCK_CATEGORY_TABS: { id: BedrockCategory; label: string; icon: any }[] = [
+  { id: 'resource_pack', label: 'Resource Packs', icon: PackageCheck },
+  { id: 'behavior_pack', label: 'Behavior Packs', icon: PackageX },
+  { id: 'addon', label: 'Add-ons', icon: Blocks },
+  { id: 'world', label: 'Worlds', icon: Map },
 ];
 
+const MCPEDL_PATH: Record<BedrockCategory, string> = {
+  resource_pack: 'texture-packs', behavior_pack: 'addons', addon: 'addons', world: 'maps',
+};
+function mcpedlUrl(category: BedrockCategory, query: string): string {
+  const q = query.trim();
+  return q ? `https://mcpedl.com/?s=${encodeURIComponent(q)}` : `https://mcpedl.com/${MCPEDL_PATH[category]}/`;
+}
+
 function BedrockCatalogPanel({ targetServer }: { targetServer: MinecraftServer | null }) {
-  const navigate = useNavigate();
+  const [category, setCategory] = useState<BedrockCategory>('resource_pack');
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<BedrockMarketplaceHit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<BedrockMarketplaceHit | null>(null);
+
+  const runSearch = async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await window.electronAPI.bedrockMarketplace.search(category, query);
+      setHits(res.hits);
+    } catch (e: any) {
+      setError(e?.message || 'Could not reach GitHub.');
+      setHits([]);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { runSearch(); }, [category]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(runSearch, 500); return () => clearTimeout(t); }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="space-y-3">
-      <Panel>
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0"><AlertTriangle size={18} className="text-amber-400" /></div>
-          <div>
-            <p className="text-sm font-bold text-surface-100">No Bedrock catalog to browse here</p>
-            <p className="text-xs text-surface-400 mt-1">Mercy's Marketplace is built on Modrinth, which only hosts Java Edition content. There's no equivalent legitimate, publicly-accessible download API for Bedrock add-ons that Mercy can honestly plug in — so instead of faking a catalog, here's exactly what each category is and where it's actually managed.</p>
-          </div>
-        </div>
+    <div className="space-y-4">
+      <Panel padding="sm" className="flex items-start gap-3">
+        <div className="w-8 h-8 rounded-lg bg-overlay-6 flex items-center justify-center shrink-0 text-surface-400"><Info size={14} /></div>
+        <p className="text-[11px] text-surface-400 leading-relaxed">
+          Real, open-source Bedrock content from GitHub — Mojang's own Marketplace has no public API, and Modrinth is Java-only. Results are actual repositories with real releases; there's no legitimate way for Mercy to fabricate more than what's shown here.
+        </p>
       </Panel>
-      {BEDROCK_CATEGORIES.map((c) => (
-        <Panel key={c.title} padding="sm" className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-overlay-6 flex items-center justify-center shrink-0 text-surface-400"><c.icon size={16} /></div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-surface-100">{c.title} <span className="text-surface-500 font-normal">— {c.description}</span></p>
-            <p className="text-[11px] text-surface-500 mt-0.5">{c.status}</p>
-          </div>
-          {targetServer && (
-            <button onClick={() => navigate(`/minecraft/server/${targetServer.id}?tab=${c.tab}`)} className="btn-secondary text-xs py-1.5 px-3 shrink-0">
-              Open {c.tab === 'packs' ? 'Packs' : 'World'}
+
+      <div className="flex flex-wrap gap-2">
+        {BEDROCK_CATEGORY_TABS.map((t) => (
+          <button key={t.id} onClick={() => setCategory(t.id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${category === t.id ? 'bg-primary-600/15 text-primary-300 border border-primary-500/25' : 'text-surface-400 hover:text-surface-200 hover:bg-overlay-4 border border-transparent'}`}>
+            <t.icon size={13} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="relative">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search GitHub for Bedrock content…" className="input-field pl-9" />
+      </div>
+
+      {loading ? (
+        <Panel className="flex items-center justify-center py-16"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>
+      ) : error ? (
+        <Panel><EmptyState icon={AlertTriangle} title="Couldn't load results" description={error} /></Panel>
+      ) : hits.length === 0 ? (
+        <Panel><EmptyState icon={Search} title="No results" description="Try a different search term, or a different category." /></Panel>
+      ) : (
+        <div className="grid grid-cols-3 gap-4">
+          {hits.map((h) => (
+            <button key={h.id} onClick={() => setSelected(h)} className="text-left">
+              <Panel interactive className="h-full flex flex-col gap-2">
+                <div className="flex items-center gap-2.5">
+                  {h.authorAvatarUrl ? <img src={h.authorAvatarUrl} alt="" className="w-9 h-9 rounded-lg object-cover shrink-0" /> : <div className="w-9 h-9 rounded-lg bg-overlay-6 flex items-center justify-center shrink-0"><Package size={16} className="text-surface-500" /></div>}
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-surface-100 truncate">{h.name}</p>
+                    <p className="text-[11px] text-surface-500 truncate">by {h.owner}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-surface-400 line-clamp-2 flex-1">{h.description || 'No description provided.'}</p>
+                <div className="flex items-center justify-between text-[10px] text-surface-500">
+                  <span className="capitalize">{bedrockCategoryLabelClient(category)}</span>
+                  <span>★ {h.stars.toLocaleString()}</span>
+                </div>
+              </Panel>
             </button>
-          )}
-        </Panel>
-      ))}
-      {!targetServer && (
-        <p className="text-[11px] text-surface-600 text-center">Select a Bedrock server above to jump straight to its Packs/World tabs.</p>
+          ))}
+        </div>
       )}
+
+      <Panel padding="sm" className="flex items-center justify-between gap-3">
+        <p className="text-[11px] text-surface-500">Not finding it? MCPEDL hosts far more community content, but has no API Mercy can install from directly.</p>
+        <button onClick={() => window.electronAPI?.openExternal(mcpedlUrl(category, query))} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 shrink-0">
+          Search MCPEDL <ExternalLink size={12} />
+        </button>
+      </Panel>
+
+      <AnimatePresence>
+        {selected && <BedrockDetailModal hit={selected} category={category} targetServer={targetServer} onClose={() => setSelected(null)} />}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function bedrockCategoryLabelClient(category: BedrockCategory): string {
+  return category === 'resource_pack' ? 'Resource Pack' : category === 'behavior_pack' ? 'Behavior Pack' : category === 'addon' ? 'Add-on' : 'World';
+}
+
+// ── Bedrock detail + install modal ──────────────────────────────────────────
+function BedrockDetailModal({ hit, category, targetServer, onClose }: { hit: BedrockMarketplaceHit; category: BedrockCategory; targetServer: MinecraftServer | null; onClose: () => void }) {
+  const [releases, setReleases] = useState<BedrockRelease[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
+  const [pendingAsset, setPendingAsset] = useState<BedrockReleaseAsset | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true); setError(null);
+      try {
+        setReleases(await window.electronAPI.bedrockMarketplace.getReleases(hit.owner, hit.repo, category));
+      } catch (e: any) { setError(e?.message || 'Could not load releases'); }
+      finally { setLoading(false); }
+    })();
+  }, [hit.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const install = async (asset: BedrockReleaseAsset, confirmReplaceWorld = false) => {
+    if (!targetServer) return;
+    setInstalling(true);
+    const cleanup = window.electronAPI.onBedrockMarketplaceInstallProgress(setProgress);
+    try {
+      const result = await window.electronAPI.bedrockMarketplace.install(targetServer.id, category, { browserDownloadUrl: asset.browserDownloadUrl, name: asset.name }, confirmReplaceWorld);
+      if (result.success) {
+        setPendingAsset(null);
+        if (category === 'addon' && (result.installedResourcePack || result.installedBehaviorPack)) {
+          const parts = [result.installedResourcePack && 'Resource Pack', result.installedBehaviorPack && 'Behavior Pack'].filter(Boolean);
+          toast.success(`Installed as: ${parts.join(' + ')}`);
+        } else {
+          toast.success(`${hit.name} installed`);
+        }
+        onClose();
+      } else if (result.needsConfirmation) {
+        setPendingAsset(asset);
+      } else {
+        toast.error(result.error || 'Install failed');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Install failed');
+    } finally {
+      cleanup?.(); setInstalling(false); setProgress(null);
+    }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6" onClick={onClose}>
+      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl bg-surface-900 border border-overlay-10 p-6 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {hit.authorAvatarUrl ? <img src={hit.authorAvatarUrl} alt="" className="w-12 h-12 rounded-xl object-cover" /> : <div className="w-12 h-12 rounded-xl bg-overlay-6 flex items-center justify-center"><Package size={20} className="text-surface-500" /></div>}
+            <div>
+              <p className="text-base font-bold text-surface-100">{hit.name}</p>
+              <p className="text-xs text-surface-500">by {hit.owner} · ★ {hit.stars.toLocaleString()}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6"><X size={16} /></button>
+        </div>
+
+        <p className="text-sm text-surface-300">{hit.description || 'No description provided.'}</p>
+        {hit.topics.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {hit.topics.map((c) => <span key={c} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-overlay-6 text-surface-400">{c}</span>)}
+          </div>
+        )}
+        <p className="text-[11px] text-surface-500">
+          <a className="text-primary-400 hover:underline cursor-pointer" onClick={() => window.electronAPI?.openExternal(hit.htmlUrl)}>View on GitHub <ExternalLink size={10} className="inline" /></a>
+        </p>
+
+        <div className="border-t border-overlay-6 pt-4">
+          <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">Releases</label>
+          {loading ? (
+            <div className="flex items-center justify-center py-6"><Loader2 size={16} className="animate-spin text-primary-400" /></div>
+          ) : error ? (
+            <p className="text-xs text-error">{error}</p>
+          ) : releases.length === 0 ? (
+            <p className="text-xs text-surface-500">This repository has no published releases — nothing for Mercy to install yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {releases.slice(0, 3).map((r) => (
+                <div key={r.tagName} className="rounded-xl border border-overlay-6 p-3">
+                  <p className="text-xs font-semibold text-surface-200">{r.name} {r.prerelease && <span className="text-amber-400">(pre-release)</span>}</p>
+                  {r.assets.length === 0 ? (
+                    <p className="text-[11px] text-surface-500 mt-1">No downloadable files attached to this release.</p>
+                  ) : (
+                    <div className="mt-2 space-y-1.5">
+                      {r.assets.map((a) => (
+                        <div key={a.name} className="flex items-center gap-2">
+                          <span className={`text-xs flex-1 truncate ${a.installable ? 'text-surface-200' : 'text-surface-600'}`}>{a.name}</span>
+                          <span className="text-[10px] text-surface-500 shrink-0">{(a.size / 1024 / 1024).toFixed(1)} MB{a.downloadCount > 0 ? ` · ${a.downloadCount.toLocaleString()} downloads` : ''}</span>
+                          {!targetServer ? (
+                            <span className="text-[10px] text-surface-600 shrink-0">Select a server</span>
+                          ) : !a.installable ? (
+                            <span className="text-[10px] text-surface-600 shrink-0" title={`Not a recognized ${bedrockCategoryLabelClient(category)} file`}>Not installable</span>
+                          ) : (
+                            <button onClick={() => install(a)} disabled={installing} className="btn-primary text-[11px] py-1 px-2.5 shrink-0 disabled:opacity-50">
+                              {installing ? <Loader2 size={11} className="animate-spin" /> : 'Install'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {progress && (
+          <div>
+            <div className="flex items-center justify-between mb-1.5 text-xs"><span className="text-surface-300">{progress.message}</span><span className="text-surface-500">{progress.pct}%</span></div>
+            <div className="w-full h-1.5 bg-overlay-6 rounded-full overflow-hidden"><div className="h-full bg-primary-500 transition-all" style={{ width: `${progress.pct}%` }} /></div>
+          </div>
+        )}
+
+        {pendingAsset && (
+          <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-200">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <div className="flex-1">
+              A world already exists on this server — installing will replace it (backed up first).
+              <div className="flex gap-2 mt-2">
+                <button onClick={() => setPendingAsset(null)} className="btn-secondary text-xs py-1 px-2.5">Cancel</button>
+                <button onClick={() => install(pendingAsset, true)} disabled={installing} className="btn-primary text-xs py-1 px-2.5">Back Up &amp; Replace</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!targetServer && (
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-overlay-4 border border-overlay-8 text-xs text-surface-400"><ServerIcon size={14} className="shrink-0" /> Select a Bedrock server above to install this.</div>
+        )}
+      </motion.div>
+    </motion.div>
   );
 }
 

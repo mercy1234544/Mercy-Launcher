@@ -2014,6 +2014,15 @@ export class MinecraftManager {
    *  3-number header.version — never assumed from the archive/file name)
    *  at the extraction root or one level of subdirectories. */
   private findManifestRoot(extractDir: string): { root: string; manifest: any } | null {
+    return this.findAllManifestRoots(extractDir)[0] || null;
+  }
+
+  /** Same real-manifest search as findManifestRoot, but collects EVERY valid
+   *  manifest found (direct dir + one level of subdirs) instead of stopping
+   *  at the first — needed for a real Bedrock .mcaddon container, which
+   *  legitimately ships a resource pack AND a behavior pack side by side in
+   *  one archive. */
+  private findAllManifestRoots(extractDir: string): { root: string; manifest: any }[] {
     const tryDir = (dir: string): any | null => {
       const p = path.join(dir, 'manifest.json');
       if (!fs.existsSync(p)) return null;
@@ -2023,15 +2032,37 @@ export class MinecraftManager {
         return m;
       } catch { return null; }
     };
+    const found: { root: string; manifest: any }[] = [];
     const direct = tryDir(extractDir);
-    if (direct) return { root: extractDir, manifest: direct };
+    if (direct) found.push({ root: extractDir, manifest: direct });
     for (const entry of fs.readdirSync(extractDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const sub = path.join(extractDir, entry.name);
       const m = tryDir(sub);
-      if (m) return { root: sub, manifest: m };
+      if (m) found.push({ root: sub, manifest: m });
     }
-    return null;
+    return found;
+  }
+
+  /** Shared "place a validated manifest folder into resource_packs/
+   *  behavior_packs" step used by both a single-pack install and a
+   *  multi-pack add-on install — one real copy/naming implementation, never
+   *  duplicated. */
+  private placeFoundPack(server: MinecraftServer, kind: 'resource_packs' | 'behavior_packs', foundRoot: string, manifestName: string | undefined, fallbackBaseName: string): { folderName: string } {
+    const packsDir = path.join(server.installPath, kind);
+    fs.mkdirSync(packsDir, { recursive: true });
+    // Resolve a loc key (e.g. "pack.name") against the pack's own lang file
+    // before using it as the folder name too — otherwise a pack whose
+    // manifest uses lang keys but ships without its lang file would end up
+    // in a folder literally named "pack.name" on disk.
+    const resolvedDisplayName = this.resolveBedrockDisplayString(foundRoot, manifestName, fallbackBaseName);
+    const baseName = resolvedDisplayName.replace(/[^a-z0-9-_ .]/gi, '_').trim() || 'pack';
+    let folderName = baseName;
+    let targetDir = path.join(packsDir, folderName);
+    let suffix = 2;
+    while (fs.existsSync(targetDir)) { folderName = `${baseName} (${suffix})`; targetDir = path.join(packsDir, folderName); suffix++; }
+    fs.cpSync(foundRoot, targetDir, { recursive: true });
+    return { folderName };
   }
 
   private isValidBedrockManifest(m: any): boolean {
@@ -2129,24 +2160,59 @@ export class MinecraftManager {
       const found = this.findManifestRoot(tmpRoot);
       if (!found) return { success: false, error: 'Could not find a valid manifest.json (with a real header.uuid and header.version) in that archive.' };
 
-      const packsDir = path.join(server.installPath, kind);
-      fs.mkdirSync(packsDir, { recursive: true });
-      // Resolve a loc key (e.g. "pack.name") against the pack's own lang
-      // file before using it as the folder name too — otherwise a pack
-      // whose manifest uses lang keys but ships without (or before we've
-      // moved it next to) its lang file would end up in a folder literally
-      // named "pack.name" on disk.
-      const resolvedDisplayName = this.resolveBedrockDisplayString(found.root, found.manifest.header.name, path.basename(zipPath, path.extname(zipPath)));
-      const baseName = resolvedDisplayName.replace(/[^a-z0-9-_ .]/gi, '_').trim() || 'pack';
-      let folderName = baseName;
-      let targetDir = path.join(packsDir, folderName);
-      let suffix = 2;
-      while (fs.existsSync(targetDir)) { folderName = `${baseName} (${suffix})`; targetDir = path.join(packsDir, folderName); suffix++; }
-
-      fs.cpSync(found.root, targetDir, { recursive: true });
+      const { folderName } = this.placeFoundPack(server, kind, found.root, found.manifest.header.name, path.basename(zipPath, path.extname(zipPath)));
       return { success: true, folderName };
     } catch (e: any) {
       return { success: false, error: e?.message || 'Pack install failed.' };
+    } finally {
+      if (tmpRoot) { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {} }
+    }
+  }
+
+  /** Installs a real Bedrock .mcaddon-style container: an archive that
+   *  legitimately bundles a resource pack AND a behavior pack side by side
+   *  (each its own manifest.json). Reuses the exact same validation/copy
+   *  logic as installBedrockPack via placeFoundPack — this is not a second
+   *  pack-management system, just an entry point that dispatches each
+   *  manifest it finds to the correct existing kind based on its own real
+   *  module type, instead of assuming an archive contains only one pack. */
+  async installBedrockAddon(id: string, zipPath: string): Promise<{ success: boolean; error?: string; installedResourcePack?: string; installedBehaviorPack?: string }> {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+    if (server.edition !== 'bedrock') return { success: false, error: 'This server is not Bedrock Edition.' };
+    if (!fs.existsSync(zipPath)) return { success: false, error: 'Selected file does not exist.' };
+
+    let tmpRoot = '';
+    try {
+      this.checkArchiveSize(zipPath, this.MAX_PACK_ARCHIVE_BYTES, 'Add-on archive');
+      tmpRoot = path.join(this.userDataPath, 'tmp', `addon-import-${id}-${Date.now()}`);
+      fs.mkdirSync(tmpRoot, { recursive: true });
+      await extractZip(zipPath, { dir: tmpRoot });
+      this.assertNoTraversal(tmpRoot);
+
+      const found = this.findAllManifestRoots(tmpRoot);
+      if (found.length === 0) return { success: false, error: 'Could not find a valid manifest.json (with a real header.uuid and header.version) in that archive.' };
+
+      const fallbackBaseName = path.basename(zipPath, path.extname(zipPath));
+      let installedResourcePack: string | undefined;
+      let installedBehaviorPack: string | undefined;
+      for (const f of found) {
+        const moduleTypes: string[] = Array.isArray(f.manifest?.modules) ? f.manifest.modules.map((m: any) => m?.type).filter((t: any) => typeof t === 'string') : [];
+        const isBehavior = moduleTypes.includes('data');
+        const isResource = moduleTypes.includes('resources') || moduleTypes.includes('client_data') || moduleTypes.includes('interface');
+        // A manifest with no recognizable module type is skipped rather than guessed into the wrong folder.
+        if (isBehavior && !installedBehaviorPack) {
+          installedBehaviorPack = this.placeFoundPack(server, 'behavior_packs', f.root, f.manifest.header.name, fallbackBaseName).folderName;
+        } else if (isResource && !installedResourcePack) {
+          installedResourcePack = this.placeFoundPack(server, 'resource_packs', f.root, f.manifest.header.name, fallbackBaseName).folderName;
+        }
+      }
+      if (!installedResourcePack && !installedBehaviorPack) {
+        return { success: false, error: 'Found a manifest.json in that archive, but could not tell whether it was a resource pack or behavior pack (no recognizable module type).' };
+      }
+      return { success: true, installedResourcePack, installedBehaviorPack };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Add-on install failed.' };
     } finally {
       if (tmpRoot) { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {} }
     }

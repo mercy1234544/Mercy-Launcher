@@ -126,10 +126,23 @@ const electronAPI = {
     setContentEnabled: (serverId: string, contentId: string, enabled: boolean) => ipcRenderer.invoke('minecraft:marketplace:setContentEnabled', serverId, contentId, enabled),
   },
 
+  bedrockMarketplace: {
+    search: (category: string, query?: string) => ipcRenderer.invoke('minecraft:bedrockMarketplace:search', category, query),
+    getRepo: (owner: string, repo: string) => ipcRenderer.invoke('minecraft:bedrockMarketplace:getRepo', owner, repo),
+    getReleases: (owner: string, repo: string, category: string) => ipcRenderer.invoke('minecraft:bedrockMarketplace:getReleases', owner, repo, category),
+    install: (serverId: string, category: string, asset: { browserDownloadUrl: string; name: string }, confirmReplaceWorld?: boolean) =>
+      ipcRenderer.invoke('minecraft:bedrockMarketplace:install', serverId, category, asset, confirmReplaceWorld),
+  },
+
   onMinecraftMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => {
     const handler = (_: any, data: any) => callback(data);
     ipcRenderer.on('minecraft:marketplace:installProgress', handler);
     return () => { ipcRenderer.removeListener('minecraft:marketplace:installProgress', handler); };
+  },
+  onBedrockMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('minecraft:bedrockMarketplace:installProgress', handler);
+    return () => { ipcRenderer.removeListener('minecraft:bedrockMarketplace:installProgress', handler); };
   },
   onMinecraftInstallJavaProgress: (callback: (data: { pct: number; message: string }) => void) => {
     const handler = (_: any, data: any) => callback(data);

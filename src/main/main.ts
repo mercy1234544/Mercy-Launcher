@@ -18,6 +18,7 @@ import { VehicleStudioAuth } from './services/VehicleStudioAuth';
 import { SettingsManager } from './services/SettingsManager';
 import { MinecraftManager } from './services/MinecraftManager';
 import { MinecraftMarketplace } from './services/MinecraftMarketplace';
+import { BedrockMarketplace } from './services/BedrockMarketplace';
 import { ThemeManager } from './services/ThemeManager';
 import axios from 'axios';
 import { autoUpdater } from 'electron-updater';
@@ -67,6 +68,7 @@ let vehicleStudioAuth: VehicleStudioAuth;
 let settingsManager: SettingsManager;
 let minecraftManager: MinecraftManager;
 let minecraftMarketplace: MinecraftMarketplace;
+let bedrockMarketplace: BedrockMarketplace;
 let themeManager: ThemeManager;
 const vehicleResourceScanner = new VehicleResourceScanner();
 
@@ -159,6 +161,7 @@ function initializeServices() {
   settingsManager = new SettingsManager();
   minecraftManager = new MinecraftManager(userDataPath);
   minecraftMarketplace = new MinecraftMarketplace();
+  bedrockMarketplace = new BedrockMarketplace(userDataPath);
   themeManager = new ThemeManager(userDataPath);
   serverManager.setDatabaseManager(databaseManager);
   healthScanner.setDatabaseManager(databaseManager);
@@ -363,6 +366,13 @@ function registerIpcHandlers() {
   ipcMain.handle('minecraft:marketplace:listInstalled', (_, serverId: string) => minecraftMarketplace.listInstalled(minecraftManager, serverId));
   ipcMain.handle('minecraft:marketplace:removeContent', (_, serverId: string, contentId: string) => minecraftMarketplace.removeContent(minecraftManager, serverId, contentId));
   ipcMain.handle('minecraft:marketplace:setContentEnabled', (_, serverId: string, contentId: string, enabled: boolean) => minecraftMarketplace.setContentEnabled(minecraftManager, serverId, contentId, enabled));
+
+  // Bedrock Marketplace (real GitHub-hosted content — see BedrockMarketplace.ts's own header comment).
+  ipcMain.handle('minecraft:bedrockMarketplace:search', (_, category, query?: string) => bedrockMarketplace.search(category, query));
+  ipcMain.handle('minecraft:bedrockMarketplace:getRepo', (_, owner: string, repo: string) => bedrockMarketplace.getRepo(owner, repo));
+  ipcMain.handle('minecraft:bedrockMarketplace:getReleases', (_, owner: string, repo: string, category) => bedrockMarketplace.getReleases(owner, repo, category));
+  ipcMain.handle('minecraft:bedrockMarketplace:install', (event, serverId: string, category, asset, confirmReplaceWorld?: boolean) =>
+    bedrockMarketplace.installAsset(minecraftManager, serverId, category, asset, { confirmReplaceWorld }, (pct, message) => event.sender.send('minecraft:bedrockMarketplace:installProgress', { pct, message })));
 
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());

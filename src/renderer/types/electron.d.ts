@@ -145,10 +145,21 @@ interface ElectronAPI {
     setContentEnabled: (serverId: string, contentId: string, enabled: boolean) => Promise<{ success: boolean; error?: string }>;
   };
 
+  bedrockMarketplace: {
+    search: (category: BedrockCategory, query?: string) => Promise<{ hits: BedrockMarketplaceHit[]; total: number; category: BedrockCategory }>;
+    getRepo: (owner: string, repo: string) => Promise<BedrockRepoDetail>;
+    getReleases: (owner: string, repo: string, category: BedrockCategory) => Promise<BedrockRelease[]>;
+    install: (serverId: string, category: BedrockCategory, asset: { browserDownloadUrl: string; name: string }, confirmReplaceWorld?: boolean) => Promise<{
+      success: boolean; error?: string; needsConfirmation?: boolean; detectedEdition?: 'java' | 'bedrock';
+      folderName?: string; installedResourcePack?: string; installedBehaviorPack?: string;
+    }>;
+  };
+
   onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
   onMinecraftStatusChange: (callback: (data: { serverId: string; status: string }) => void) => () => void;
   onMinecraftCreateProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
   onMinecraftMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
+  onBedrockMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
   onMinecraftInstallJavaProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
 
   resource: {
@@ -467,6 +478,24 @@ declare global {
     license: { id: string; name: string; url: string | null } | null;
     sourceUrl: string | null; websiteUrl: string | null; iconUrl: string | null; downloads: number;
     gameVersions: string[]; loaders: string[];
+  }
+
+  // ── Bedrock Marketplace types (mirror src/main/services/BedrockMarketplace.ts) ─
+  type BedrockCategory = 'resource_pack' | 'behavior_pack' | 'addon' | 'world';
+  interface BedrockMarketplaceHit {
+    id: string; owner: string; repo: string; name: string; description: string;
+    authorAvatarUrl: string | null; stars: number; htmlUrl: string; topics: string[]; updatedAt: string;
+  }
+  interface BedrockReleaseAsset {
+    name: string; size: number; downloadCount: number; browserDownloadUrl: string; contentType: string; installable: boolean;
+  }
+  interface BedrockRelease {
+    tagName: string; name: string; body: string; publishedAt: string; prerelease: boolean; assets: BedrockReleaseAsset[];
+  }
+  interface BedrockRepoDetail {
+    id: string; owner: string; repo: string; name: string; description: string;
+    authorAvatarUrl: string | null; stars: number; forks: number; htmlUrl: string;
+    homepageUrl: string | null; license: string | null; topics: string[];
   }
 
   // ── Vehicle Studio types (mirror src/main/services/VehicleStudio.ts) ────────
