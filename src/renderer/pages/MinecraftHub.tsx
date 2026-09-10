@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Blocks, PlusCircle, FolderInput, Server, Zap, ArrowRight, Loader2, X, FolderOpen, CheckCircle2, AlertTriangle, Puzzle } from 'lucide-react';
+import { Blocks, PlusCircle, FolderInput, Server, Zap, ArrowRight, ArrowLeft, Loader2, X, FolderOpen, CheckCircle2, AlertTriangle, Puzzle } from 'lucide-react';
 import { useMinecraftStore } from '../stores/useMinecraftStore';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
 import toast from 'react-hot-toast';
@@ -26,6 +26,9 @@ export default function MinecraftHub() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-6 max-w-6xl mx-auto">
+      <button onClick={() => navigate('/')} className="flex items-center gap-1.5 text-xs font-semibold text-surface-500 hover:text-surface-100 transition-colors">
+        <ArrowLeft size={13} /> Back to Home
+      </button>
       <SectionHeading
         icon={Blocks}
         iconClass="bg-emerald-500/15 border-emerald-500/25 text-emerald-300"

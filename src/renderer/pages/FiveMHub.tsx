@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
   Server, Package, Download, HardDrive, Search, FileText, Cpu,
-  ArrowRight, Zap, Loader2, X, AlertTriangle, Sparkles, Car, RefreshCw,
+  ArrowRight, ArrowLeft, Zap, Loader2, X, AlertTriangle, Sparkles, Car, RefreshCw,
   Settings as SettingsIcon, FolderOpen,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
@@ -78,6 +78,9 @@ export default function FiveMHub() {
     <motion.div variants={containerVariants} initial="hidden" animate="show" className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* Header */}
       <motion.div variants={itemVariants}>
+        <button onClick={() => navigate('/')} className="flex items-center gap-1.5 text-xs font-semibold text-surface-500 hover:text-surface-100 transition-colors mb-3">
+          <ArrowLeft size={13} /> Back to Home
+        </button>
         <SectionHeading
           icon={Car}
           iconClass="bg-orange-500/15 border-orange-500/25 text-orange-300"
