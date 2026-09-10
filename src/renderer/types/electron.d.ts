@@ -85,16 +85,18 @@ interface ElectronAPI {
     connectionInfo: (id: string) => Promise<MinecraftConnectionInfo | null>;
     fetchVanillaVersions: () => Promise<{ id: string; type: string; releaseTime: string }[]>;
     fetchPaperVersions: () => Promise<string[]>;
+    fetchBedrockVersions: () => Promise<{ stable: { version: string; url: string }; preview: { version: string; url: string } | null }>;
     create: (config: {
-      name: string; installPath: string; version: string; serverType: 'vanilla' | 'paper';
+      name: string; installPath: string; version: string; serverType: 'vanilla' | 'paper' | 'bedrock';
       ramMB: number; port: number; acceptedEula: boolean; javaPath?: string | null;
       seed?: string; gamemode?: 'survival' | 'creative' | 'adventure' | 'spectator';
       difficulty?: 'peaceful' | 'easy' | 'normal' | 'hard'; hardcore?: boolean;
       onlineMode?: boolean; maxPlayers?: number; motd?: string;
       viewDistance?: number; simulationDistance?: number; pvp?: boolean; whitelist?: boolean;
+      allowCheats?: boolean; bedrockChannel?: 'stable' | 'preview';
     }) => Promise<{ success: boolean; server?: MinecraftServer; error?: string }>;
     detectExisting: (dirPath: string) => Promise<{
-      valid: boolean; reason?: string; jarFile?: string; version?: string; serverType?: 'vanilla' | 'paper';
+      valid: boolean; reason?: string; edition?: 'java' | 'bedrock'; jarFile?: string; version?: string; serverType?: 'vanilla' | 'paper' | 'bedrock';
       hasProperties: boolean; hasWorld: boolean; hasEula: boolean; port?: number;
     }>;
     import: (dirPath: string, name: string, ramMB: number) => Promise<{ success: boolean; server?: MinecraftServer; error?: string }>;
@@ -352,7 +354,8 @@ declare global {
     name: string;
     installPath: string;
     version: string;
-    serverType: 'vanilla' | 'paper';
+    serverType: 'vanilla' | 'paper' | 'bedrock';
+    edition: 'java' | 'bedrock';
     jarFile: string;
     ramMB: number;
     port: number;
@@ -379,14 +382,15 @@ declare global {
   interface MinecraftConnectionInfo {
     serverId: string;
     serverName: string;
-    serverType: 'vanilla' | 'paper';
+    serverType: 'vanilla' | 'paper' | 'bedrock';
     version: string;
-    edition: 'java';
+    edition: 'java' | 'bedrock';
     status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
     port: number;
     lanAddress: string | null;
     portListening: boolean | null;
     bedrock: { possible: boolean; detectedPlugin: string | null; note: string };
+    raknet: { checked: boolean; reachable: boolean | null; note: string } | null;
   }
   interface GitHubRepoDetails {
     owner: string;

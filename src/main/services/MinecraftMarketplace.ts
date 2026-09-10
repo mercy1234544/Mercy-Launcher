@@ -89,6 +89,13 @@ const MOD_LOADERS = ['fabric', 'forge', 'neoforge', 'quilt'];
  *  is only a fallback for projects with no loaders at all (datapacks,
  *  resourcepacks, shaders don't carry mod-loader-shaped loaders). */
 export function classifyForServer(projectType: string, loaders: string[], serverType: MinecraftServerType): ContentClassification {
+  // Bedrock is a structurally different content ecosystem (behavior_packs/
+  // resource_packs, not a Java plugin/mod/datapack folder layout) that this
+  // Modrinth-backed pipeline was never built to handle — see this file's own
+  // header comment. Gated first, before the datapack early-return below,
+  // which otherwise has no serverType check at all and would incorrectly
+  // report a datapack "installable" on a Bedrock server.
+  if (serverType === 'bedrock') return { installable: false, reason: 'Marketplace content isn\'t supported for Bedrock servers yet — Java plugins, mods, and datapacks don\'t run on Bedrock.' };
   if (projectType === 'datapack') return { installable: true, kind: 'datapack' }; // no mod loader needed — a vanilla game feature
 
   const hasPluginLoader = loaders.some((l) => PLUGIN_LOADERS.includes(l));

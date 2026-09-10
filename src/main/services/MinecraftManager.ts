@@ -17,13 +17,18 @@ import path from 'path';
 import crypto from 'crypto';
 import os from 'os';
 import net from 'net';
+import dgram from 'dgram';
+import https from 'https';
 import { spawn, ChildProcess, execFile } from 'child_process';
 import { BrowserWindow } from 'electron';
 import axios from 'axios';
 import archiver from 'archiver';
 import extractZip from 'extract-zip';
 
-export type MinecraftServerType = 'vanilla' | 'paper';
+// 'bedrock' added alongside the existing Java variants — Bedrock Dedicated
+// Server has no Vanilla/Paper distinction, so it's just its own value here.
+export type MinecraftServerType = 'vanilla' | 'paper' | 'bedrock';
+export type MinecraftEdition = 'java' | 'bedrock';
 export type MinecraftServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
 
 export interface MinecraftServer {
@@ -32,6 +37,14 @@ export interface MinecraftServer {
   installPath: string;
   version: string;
   serverType: MinecraftServerType;
+  /** 'java' for vanilla/paper, 'bedrock' for a native Bedrock Dedicated
+   *  Server. Servers persisted before Bedrock support existed have no
+   *  edition field on disk at all — load() back-fills it from serverType
+   *  the first time an old record is read, defaulting to 'java' (the only
+   *  edition that ever existed), never guessing 'bedrock' for an old record. */
+  edition: MinecraftEdition;
+  /** Java-only — the jar Mercy launches with `java -jar <jarFile>`. Always
+   *  '' for a Bedrock server, which launches bedrock_server.exe directly. */
   jarFile: string;
   ramMB: number;
   port: number;
@@ -72,19 +85,34 @@ export interface MinecraftWorldOptions {
   simulationDistance?: number;
   pvp?: boolean;
   whitelist?: boolean;
+  /** Bedrock only — its "allow cheats" toggle. Java has no equivalent
+   *  single server.properties key (commands are gated per-player/op). */
+  allowCheats?: boolean;
 }
 
 export interface MinecraftCreateConfig extends MinecraftWorldOptions {
   name: string;
   installPath: string;
+  /** Ignored for Bedrock — its version is whatever Mojang/Microsoft's
+   *  download API currently serves for the chosen channel, resolved
+   *  server-side and stored on the created record. */
   version: string;
   serverType: MinecraftServerType;
   ramMB: number;
   port: number;
+  /** Java only. Bedrock Dedicated Server has no eula.txt-style acceptance
+   *  file at all — Mojang's EULA still applies, but there's nothing to
+   *  write, so this is ignored entirely for a Bedrock create. */
   acceptedEula: boolean;
   /** Optional explicit Java runtime to pin this server to (from the Create
-   *  Server wizard's runtime picker). Omit to auto-select at start time. */
+   *  Server wizard's runtime picker). Omit to auto-select at start time.
+   *  Ignored for Bedrock — it never launches a JVM. */
   javaPath?: string | null;
+  /** Bedrock only — which of Mojang/Microsoft's currently-published builds
+   *  to install. There is no historical version list for Bedrock the way
+   *  there is for Java (see fetchBedrockVersions()), so this is the only
+   *  choice offered. Defaults to 'stable'. */
+  bedrockChannel?: 'stable' | 'preview';
 }
 
 export interface InstalledContent {
@@ -128,19 +156,21 @@ export interface MinecraftConnectionInfo {
   serverName: string;
   serverType: MinecraftServerType;
   version: string;
-  /** Mercy only ever creates/imports Java Edition servers — there is no
-   *  Bedrock server type. This is always 'java'; kept as a field (rather
-   *  than assumed silently by the UI) so nothing has to hardcode that
-   *  assumption in more than one place. */
-  edition: 'java';
+  /** Real and derived from the server's own record — 'java' for
+   *  vanilla/paper, 'bedrock' for a native Bedrock Dedicated Server. */
+  edition: MinecraftEdition;
   status: MinecraftServerStatus;
   port: number;
   /** This machine's real, non-internal LAN IPv4 address, if one exists. */
   lanAddress: string | null;
-  /** Null = not checked (server isn't running, so there's nothing to
-   *  verify). true/false = a real TCP connection to 127.0.0.1:port was
-   *  actually attempted just now — never assumed from process state alone. */
+  /** Java only. Null = not checked (server isn't running, so there's
+   *  nothing to verify, OR this is a Bedrock server — see raknet below).
+   *  true/false = a real TCP connection to 127.0.0.1:port was actually
+   *  attempted just now — never assumed from process state alone. */
   portListening: boolean | null;
+  /** Java only — whether Bedrock clients could join THIS Java server via a
+   *  separately-installed Geyser plugin. Always the "not applicable" shape
+   *  for an edition:'bedrock' server, which needs no such bridge. */
   bedrock: {
     /** True only if a real installed plugin whose name suggests Geyser was
      *  found on this server — never assumed true for a plain Java server. */
@@ -148,6 +178,10 @@ export interface MinecraftConnectionInfo {
     detectedPlugin: string | null;
     note: string;
   };
+  /** Bedrock only — a real RakNet "Unconnected Ping" probe against the
+   *  server's own configured UDP port (see checkRakNetReachable()). Always
+   *  null for a Java server, which uses portListening (TCP) instead. */
+  raknet: { checked: boolean; reachable: boolean | null; note: string } | null;
 }
 
 interface KnownPlayer { name: string; online: boolean; lastSeen: string; }
@@ -252,7 +286,22 @@ export class MinecraftManager {
 
   private load() {
     try {
-      if (fs.existsSync(this.dataFile)) this.servers = JSON.parse(fs.readFileSync(this.dataFile, 'utf-8'));
+      if (fs.existsSync(this.dataFile)) {
+        this.servers = JSON.parse(fs.readFileSync(this.dataFile, 'utf-8'));
+        // Back-compat: every server persisted before Bedrock support has no
+        // `edition` field on disk at all (it didn't exist yet). Default it
+        // to 'java' — the only edition that could have ever been created or
+        // imported at the time — never inferred as 'bedrock' for an old
+        // record. Also normalizes a missing jarFile (shouldn't happen for a
+        // real Java record, but keeps reads defensive) to '' rather than
+        // undefined so string operations on it never throw.
+        let migrated = false;
+        for (const s of this.servers as any[]) {
+          if (!s.edition) { s.edition = s.serverType === 'bedrock' ? 'bedrock' : 'java'; migrated = true; }
+          if (typeof s.jarFile !== 'string') { s.jarFile = ''; migrated = true; }
+        }
+        if (migrated) this.save();
+      }
     } catch { this.servers = []; }
   }
 
@@ -557,6 +606,33 @@ export class MinecraftManager {
     return versions;
   }
 
+  /** The real, official Bedrock Dedicated Server download links — the exact
+   *  same API minecraft.net/download/server/bedrock's own page calls
+   *  (https://net-secondary.web.minecraft-services.net/api/v1.0/download/links).
+   *  Unlike Java, Mojang/Microsoft don't publish a historical version
+   *  manifest for Bedrock — this endpoint only ever returns the CURRENT
+   *  stable and preview builds, so "Latest Stable"/"Latest Preview" is
+   *  genuinely the full choice, not a simplification of a longer list. */
+  async fetchBedrockVersions(): Promise<{
+    stable: { version: string; url: string };
+    preview: { version: string; url: string } | null;
+  }> {
+    const res = await axios.get('https://net-secondary.web.minecraft-services.net/api/v1.0/download/links', {
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MercyLauncher' },
+    });
+    const links: { downloadType: string; downloadUrl: string }[] = res.data?.result?.links || [];
+    const find = (type: string) => links.find((l) => l.downloadType === type)?.downloadUrl;
+    const stableUrl = find('serverBedrockWindows');
+    const previewUrl = find('serverBedrockPreviewWindows');
+    if (!stableUrl) throw new Error('Could not resolve the official Bedrock Dedicated Server download — Mojang/Microsoft\'s download API may be unavailable right now.');
+    const parseVersion = (url: string) => (url.match(/bedrock-server-([\d.]+)\.zip/i) || [])[1] || 'unknown';
+    return {
+      stable: { version: parseVersion(stableUrl), url: stableUrl },
+      preview: previewUrl ? { version: parseVersion(previewUrl), url: previewUrl } : null,
+    };
+  }
+
   // ── Download + create ───────────────────────────────────────────────────
   private async resolveVanillaJarUrl(version: string): Promise<{ url: string; sha1: string; javaMajor: number | null }> {
     const manifest = await axios.get('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json', { timeout: 10000 });
@@ -595,8 +671,51 @@ export class MinecraftManager {
     });
   }
 
-  /** Creates a fresh server: downloads the real jar, writes eula.txt (only if accepted), generates server.properties. */
+  /** A second download path used ONLY for the Bedrock Dedicated Server zip
+   *  (www.minecraft.net's Akamai-fronted Azure Blob CDN). Verified live,
+   *  reproducibly: axios (via the follow-redirects package it uses
+   *  internally) hangs indefinitely against this specific host until its
+   *  own timeout fires, even with redirects/keep-alive/compression all
+   *  disabled — while Node's built-in `https` module and the global
+   *  `fetch` both complete in under 2 seconds against the exact same URL.
+   *  This is a real, reproduced axios/CDN incompatibility, not a Mojang/
+   *  Microsoft-side problem — piston-meta.mojang.com, fill.papermc.io, and
+   *  net-secondary.web.minecraft-services.net all continue to work fine
+   *  through the existing axios-based downloadFile()/fetchBedrockVersions()
+   *  above, so that method is left completely untouched for Java to avoid
+   *  any regression risk; this is a narrow, additional path used only here. */
+  private downloadFileNative(url: string, destPath: string, onProgress?: (pct: number) => void, redirectsLeft = 5): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const req = https.get(url, { timeout: 30000 }, (res) => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          if (redirectsLeft <= 0) { reject(new Error('Too many redirects downloading the Bedrock server.')); return; }
+          this.downloadFileNative(res.headers.location, destPath, onProgress, redirectsLeft - 1).then(resolve, reject);
+          return;
+        }
+        if (res.statusCode !== 200) { res.resume(); reject(new Error(`Download failed with HTTP ${res.statusCode}.`)); return; }
+        const total = parseInt(String(res.headers['content-length'] || '0'), 10);
+        let received = 0;
+        const writer = fs.createWriteStream(destPath);
+        res.on('data', (chunk: Buffer) => {
+          received += chunk.length;
+          if (onProgress && total) onProgress(Math.round((received / total) * 100));
+        });
+        res.pipe(writer);
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+        res.on('error', reject);
+      });
+      req.on('timeout', () => req.destroy(new Error('Download timed out.')));
+      req.on('error', reject);
+    });
+  }
+
+  /** Creates a fresh server. Dispatches to the Bedrock-specific flow (a
+   *  single .zip download, no JVM, no eula.txt) for serverType 'bedrock';
+   *  everything below this branch is the existing, unchanged Java flow. */
   async createServer(config: MinecraftCreateConfig, onProgress?: (pct: number, message: string) => void): Promise<{ success: boolean; server?: MinecraftServer; error?: string }> {
+    if (config.serverType === 'bedrock') return this.createBedrockServer(config, onProgress);
     try {
       if (!config.acceptedEula) return { success: false, error: 'The Minecraft EULA must be accepted to create a server.' };
       if (config.port < 1 || config.port > 65535) return { success: false, error: 'Port must be between 1 and 65535.' };
@@ -634,7 +753,7 @@ export class MinecraftManager {
       const now = new Date().toISOString();
       const server: MinecraftServer = {
         id: this.generateId(), name: config.name, installPath: config.installPath,
-        version: config.version, serverType: config.serverType, jarFile: jarName,
+        version: config.version, serverType: config.serverType, edition: 'java', jarFile: jarName,
         ramMB: config.ramMB, port: config.port, status: 'stopped', pid: null, startedAt: null,
         autoRestart: false, lastBackup: null, createdAt: now, updatedAt: now,
         requiredJavaMajor: requiredJava, javaPath: config.javaPath || null, lastError: null, installedContent: [],
@@ -648,6 +767,75 @@ export class MinecraftManager {
     }
   }
 
+  /** Real Bedrock server creation: resolves the current build from
+   *  Mojang/Microsoft's own download API, downloads the official .zip,
+   *  extracts it in place, verifies bedrock_server.exe actually exists,
+   *  registers the server, then applies the user's chosen settings on top
+   *  of Mojang's own shipped server.properties via writeProperties() — so
+   *  every property Mojang ships that the wizard doesn't ask about is
+   *  preserved exactly as they defined it, rather than Mercy guessing a
+   *  full Bedrock property set from scratch. */
+  private async createBedrockServer(config: MinecraftCreateConfig, onProgress?: (pct: number, message: string) => void): Promise<{ success: boolean; server?: MinecraftServer; error?: string }> {
+    try {
+      if (config.port < 1 || config.port > 65535) return { success: false, error: 'Port must be between 1 and 65535.' };
+      if (fs.existsSync(config.installPath) && fs.readdirSync(config.installPath).length > 0) {
+        return { success: false, error: 'That folder already has files in it. Choose an empty folder, or use Import for an existing server.' };
+      }
+      fs.mkdirSync(config.installPath, { recursive: true });
+
+      onProgress?.(5, 'Resolving the official Bedrock download…');
+      const links = await this.fetchBedrockVersions();
+      const channel = config.bedrockChannel === 'preview' ? links.preview : links.stable;
+      if (!channel) return { success: false, error: 'The Preview channel is not currently published by Mojang/Microsoft\'s download API. Try Stable instead.' };
+
+      const zipPath = path.join(config.installPath, '_bedrock_download.zip');
+      onProgress?.(10, `Downloading Bedrock Dedicated Server ${channel.version}…`);
+      await this.downloadFileNative(channel.url, zipPath, (pct) => onProgress?.(10 + Math.round(pct * 0.7), `Downloading Bedrock Dedicated Server ${channel.version}…`));
+
+      onProgress?.(82, 'Extracting…');
+      await extractZip(zipPath, { dir: config.installPath });
+      try { fs.unlinkSync(zipPath); } catch {}
+
+      const exePath = path.join(config.installPath, 'bedrock_server.exe');
+      if (!fs.existsSync(exePath)) {
+        return { success: false, error: 'The download completed, but bedrock_server.exe was not found after extracting it — the archive may not match the expected Windows Bedrock Dedicated Server layout.' };
+      }
+
+      const now = new Date().toISOString();
+      const server: MinecraftServer = {
+        id: this.generateId(), name: config.name, installPath: config.installPath,
+        version: channel.version, serverType: 'bedrock', edition: 'bedrock', jarFile: '',
+        ramMB: 0, port: config.port, status: 'stopped', pid: null, startedAt: null,
+        autoRestart: false, lastBackup: null, createdAt: now, updatedAt: now,
+        requiredJavaMajor: null, javaPath: null, lastError: null, installedContent: [],
+      };
+      this.servers.push(server);
+      this.save();
+
+      onProgress?.(92, 'Applying server settings…');
+      const changes: Record<string, string> = { 'server-port': String(config.port) };
+      if (config.motd) changes['server-name'] = config.motd;
+      if (config.gamemode && config.gamemode !== 'spectator') changes['gamemode'] = config.gamemode;
+      if (config.difficulty) changes['difficulty'] = config.difficulty;
+      if (typeof config.maxPlayers === 'number') changes['max-players'] = String(config.maxPlayers);
+      if (typeof config.onlineMode === 'boolean') changes['online-mode'] = String(config.onlineMode);
+      if (typeof config.allowCheats === 'boolean') changes['allow-cheats'] = String(config.allowCheats);
+      if (typeof config.viewDistance === 'number') changes['view-distance'] = String(config.viewDistance);
+      if (typeof config.whitelist === 'boolean') changes['allow-list'] = String(config.whitelist);
+      if (config.seed) changes['level-seed'] = config.seed;
+      this.writeProperties(server.id, changes);
+
+      onProgress?.(100, 'Done');
+      return { success: true, server };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Bedrock server creation failed.' };
+    }
+  }
+
+  /** Java-only default server.properties generator. Bedrock never calls
+   *  this — see createBedrockServer(), which keeps Mojang's own shipped
+   *  server.properties and only overrides the specific keys the wizard
+   *  collected, via the shared writeProperties(). */
   private defaultProperties(port: number, opts: MinecraftWorldOptions = {}): string {
     const lines = [
       '#Minecraft server properties — generated by Mercy Launcher',
@@ -673,22 +861,47 @@ export class MinecraftManager {
   }
 
   // ── Import existing server ──────────────────────────────────────────────
+  /** Real, edition-aware detection. Checked in this order:
+   *   1. bedrock_server.exe present → a genuine Bedrock Dedicated Server
+   *      install, identified by its actual, unique executable — never
+   *      guessed from folder name or any other heuristic.
+   *   2. Otherwise falls through to the existing Java heuristics (a server
+   *      jar, eula.txt, or server.properties) — completely unchanged.
+   *  A folder with neither is correctly rejected for both editions; nothing
+   *  here can misclassify an arbitrary folder as a Minecraft server of
+   *  either kind. */
   async detectExistingServer(dirPath: string): Promise<{
-    valid: boolean; reason?: string; jarFile?: string; version?: string; serverType?: MinecraftServerType;
+    valid: boolean; reason?: string; edition?: MinecraftEdition; jarFile?: string; version?: string; serverType?: MinecraftServerType;
     hasProperties: boolean; hasWorld: boolean; hasEula: boolean; port?: number;
   }> {
     if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
       return { valid: false, reason: 'That path does not exist or is not a folder.', hasProperties: false, hasWorld: false, hasEula: false };
     }
     const entries = fs.readdirSync(dirPath);
+    const hasProperties = entries.includes('server.properties');
+    const hasBedrockExe = entries.some((f) => f.toLowerCase() === 'bedrock_server.exe');
+
+    if (hasBedrockExe) {
+      const worldsDir = path.join(dirPath, 'worlds');
+      const hasWorld = fs.existsSync(worldsDir) && (() => {
+        try { return fs.readdirSync(worldsDir).length > 0; } catch { return false; }
+      })();
+      let port: number | undefined;
+      if (hasProperties) {
+        const props = fs.readFileSync(path.join(dirPath, 'server.properties'), 'utf-8');
+        const m = props.match(/^server-port=(\d+)/m);
+        if (m) port = parseInt(m[1], 10);
+      }
+      return { valid: true, edition: 'bedrock', serverType: 'bedrock', hasProperties, hasWorld, hasEula: false, port };
+    }
+
     const jarFile = entries.find((f) => f.toLowerCase().endsWith('.jar') && !f.toLowerCase().includes('installer'));
     const hasEula = entries.includes('eula.txt');
-    const hasProperties = entries.includes('server.properties');
     const hasWorld = entries.some((f) => {
       try { return fs.statSync(path.join(dirPath, f)).isDirectory() && fs.existsSync(path.join(dirPath, f, 'level.dat')); } catch { return false; }
     });
     if (!jarFile && !hasProperties && !hasEula) {
-      return { valid: false, reason: 'No Minecraft server files (server jar, server.properties, eula.txt) were found in this folder.', hasProperties, hasWorld, hasEula };
+      return { valid: false, reason: 'No Minecraft server files were found in this folder — looked for a Java server jar/eula.txt/server.properties, or bedrock_server.exe for a Bedrock server.', hasProperties, hasWorld, hasEula };
     }
     let serverType: MinecraftServerType = 'vanilla';
     if (jarFile && /paper/i.test(jarFile)) serverType = 'paper';
@@ -698,19 +911,34 @@ export class MinecraftManager {
       const m = props.match(/^server-port=(\d+)/m);
       if (m) port = parseInt(m[1], 10);
     }
-    return { valid: true, jarFile, serverType, hasProperties, hasWorld, hasEula, port };
+    return { valid: true, edition: 'java', jarFile, serverType, hasProperties, hasWorld, hasEula, port };
   }
 
   async importServer(dirPath: string, name: string, ramMB: number): Promise<{ success: boolean; server?: MinecraftServer; error?: string }> {
     const detected = await this.detectExistingServer(dirPath);
-    if (!detected.valid || !detected.jarFile) return { success: false, error: detected.reason || 'Could not find a server jar in that folder.' };
+    if (!detected.valid) return { success: false, error: detected.reason || 'Could not recognize a Minecraft server in that folder.' };
     if (this.servers.some((s) => path.resolve(s.installPath) === path.resolve(dirPath))) {
       return { success: false, error: 'This server is already registered in Mercy Launcher.' };
     }
     const now = new Date().toISOString();
+
+    if (detected.edition === 'bedrock') {
+      const server: MinecraftServer = {
+        id: this.generateId(), name, installPath: dirPath,
+        version: 'unknown', serverType: 'bedrock', edition: 'bedrock', jarFile: '',
+        ramMB: 0, port: detected.port ?? 19132, status: 'stopped', pid: null, startedAt: null,
+        autoRestart: false, lastBackup: null, createdAt: now, updatedAt: now,
+        requiredJavaMajor: null, javaPath: null, lastError: null, installedContent: [],
+      };
+      this.servers.push(server);
+      this.save();
+      return { success: true, server };
+    }
+
+    if (!detected.jarFile) return { success: false, error: 'Could not find a server jar in that folder.' };
     const server: MinecraftServer = {
       id: this.generateId(), name, installPath: dirPath,
-      version: 'unknown', serverType: detected.serverType || 'vanilla', jarFile: detected.jarFile,
+      version: 'unknown', serverType: detected.serverType || 'vanilla', edition: 'java', jarFile: detected.jarFile,
       ramMB, port: detected.port ?? 25565, status: 'stopped', pid: null, startedAt: null,
       autoRestart: false, lastBackup: null, createdAt: now, updatedAt: now,
       // Version is unknown for an imported server, so the real Java
@@ -773,46 +1001,34 @@ export class MinecraftManager {
     return true;
   }
 
+  /** Edition dispatch — the only place that decides HOW a server launches.
+   *  Everything downstream (PID tracking, console buffering, auto-restart,
+   *  crash detection) is shared via wireProcess(); only the spawn call
+   *  itself and the "is it actually up yet" detector differ per edition. */
   async startServer(id: string): Promise<{ success: boolean; error?: string }> {
     const server = this.getServer(id);
     if (!server) return { success: false, error: 'Server not found.' };
     if (this.processes.has(id)) return { success: false, error: 'Server is already running.' };
-    const jarPath = path.join(server.installPath, server.jarFile);
-    if (!fs.existsSync(jarPath)) return { success: false, error: `Server jar not found: ${server.jarFile}` };
+    return server.edition === 'bedrock' ? this.launchBedrockProcess(server) : this.launchJavaProcess(server);
+  }
 
-    // Never spawn an incompatible JVM — this is the hard gate that replaces
-    // the raw UnsupportedClassVersionError crash with a clear, actionable
-    // error before any process is started.
-    const javaCheck = await this.resolveLaunchJava(server);
-    if (!javaCheck.ok || !javaCheck.javaPath) {
-      server.lastError = javaCheck.error || 'No compatible Java runtime available.';
-      server.updatedAt = new Date().toISOString();
-      this.save();
-      return { success: false, error: javaCheck.error || 'No compatible Java runtime available.' };
-    }
-    const javaExe = javaCheck.javaPath;
-
-    this.intentionalStop.delete(id);
-    server.status = 'starting';
-    server.lastError = null;
-    server.updatedAt = new Date().toISOString();
-    this.save();
-    this.broadcast('minecraft:statusChange', { serverId: id, status: 'starting' });
-
-    const proc = spawn(javaExe, [`-Xmx${server.ramMB}M`, `-Xms${Math.min(server.ramMB, 1024)}M`, '-jar', server.jarFile, 'nogui'], {
-      cwd: server.installPath,
-    });
-    this.processes.set(id, proc);
-    server.pid = proc.pid ?? null;
-    server.startedAt = new Date().toISOString();
-    this.save();
+  /** Shared process wiring: console buffering/broadcast, the "just became
+   *  running" status transition (via a caller-supplied line detector so
+   *  each edition can recognize its own real startup line), PID/uptime
+   *  tracking, and crash-triggered auto-restart. Identical for both
+   *  editions per the audit — Bedrock's stdin/stdout/exit behavior is
+   *  process-shaped the same way Java's is; only the spawn command and the
+   *  log lines to look for differ, which the caller provides. */
+  private wireProcess(id: string, proc: ChildProcess, opts: { isRunningLine: (line: string) => boolean; translateError?: (line: string) => string | null }) {
+    const server = this.getServer(id);
+    if (!server) return;
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       for (const line of text.split(/\r?\n/)) {
         if (!line) continue;
         this.appendConsole(id, line);
-        if (/Done \(/.test(line) && server.status !== 'running') {
+        if (opts.isRunningLine(line) && server.status !== 'running') {
           server.status = 'running';
           this.save();
           this.broadcast('minecraft:statusChange', { serverId: id, status: 'running' });
@@ -823,7 +1039,7 @@ export class MinecraftManager {
       for (const line of chunk.toString().split(/\r?\n/)) {
         if (!line) continue;
         this.appendConsole(id, `[ERROR] ${line}`);
-        const friendly = translateClassVersionError(line);
+        const friendly = opts.translateError?.(line);
         if (friendly) {
           this.appendConsole(id, `[Mercy] ${friendly}`);
           server.lastError = friendly;
@@ -879,6 +1095,76 @@ export class MinecraftManager {
       server.status = 'error';
       this.save();
       this.broadcast('minecraft:statusChange', { serverId: id, status: 'error' });
+    });
+  }
+
+  private async launchJavaProcess(server: MinecraftServer): Promise<{ success: boolean; error?: string }> {
+    const id = server.id;
+    const jarPath = path.join(server.installPath, server.jarFile);
+    if (!fs.existsSync(jarPath)) return { success: false, error: `Server jar not found: ${server.jarFile}` };
+
+    // Never spawn an incompatible JVM — this is the hard gate that replaces
+    // the raw UnsupportedClassVersionError crash with a clear, actionable
+    // error before any process is started.
+    const javaCheck = await this.resolveLaunchJava(server);
+    if (!javaCheck.ok || !javaCheck.javaPath) {
+      server.lastError = javaCheck.error || 'No compatible Java runtime available.';
+      server.updatedAt = new Date().toISOString();
+      this.save();
+      return { success: false, error: javaCheck.error || 'No compatible Java runtime available.' };
+    }
+    const javaExe = javaCheck.javaPath;
+
+    this.intentionalStop.delete(id);
+    server.status = 'starting';
+    server.lastError = null;
+    server.updatedAt = new Date().toISOString();
+    this.save();
+    this.broadcast('minecraft:statusChange', { serverId: id, status: 'starting' });
+
+    const proc = spawn(javaExe, [`-Xmx${server.ramMB}M`, `-Xms${Math.min(server.ramMB, 1024)}M`, '-jar', server.jarFile, 'nogui'], {
+      cwd: server.installPath,
+    });
+    this.processes.set(id, proc);
+    server.pid = proc.pid ?? null;
+    server.startedAt = new Date().toISOString();
+    this.save();
+
+    this.wireProcess(id, proc, {
+      isRunningLine: (line) => /Done \(/.test(line),
+      translateError: translateClassVersionError,
+    });
+
+    return { success: true };
+  }
+
+  /** Bedrock never touches Java at all — no resolveLaunchJava(), no JVM
+   *  flags, no jar. bedrock_server.exe is spawned directly with its
+   *  install directory as cwd (matching how the Java path also uses cwd
+   *  for relative asset loads), and its own real startup line
+   *  ("...Server started.", stable across both the old and new Bedrock
+   *  log timestamp formats per Microsoft's own documentation) is what
+   *  flips status to 'running' — never Java's "Done (". */
+  private async launchBedrockProcess(server: MinecraftServer): Promise<{ success: boolean; error?: string }> {
+    const id = server.id;
+    const exePath = path.join(server.installPath, 'bedrock_server.exe');
+    if (!fs.existsSync(exePath)) return { success: false, error: `bedrock_server.exe was not found in ${server.installPath}. The install may be incomplete or corrupted.` };
+
+    this.intentionalStop.delete(id);
+    server.status = 'starting';
+    server.lastError = null;
+    server.updatedAt = new Date().toISOString();
+    this.save();
+    this.broadcast('minecraft:statusChange', { serverId: id, status: 'starting' });
+
+    const proc = spawn(exePath, [], { cwd: server.installPath });
+    this.processes.set(id, proc);
+    server.pid = proc.pid ?? null;
+    server.startedAt = new Date().toISOString();
+    this.save();
+
+    this.wireProcess(id, proc, {
+      isRunningLine: (line) => /server started\.?\s*$/i.test(line.trim()),
     });
 
     return { success: true };
@@ -978,9 +1264,79 @@ export class MinecraftManager {
     return null;
   }
 
+  /** RakNet's fixed 16-byte "offline message data ID" magic number — part
+   *  of the real, public RakNet wire protocol (used by every Bedrock
+   *  client/server and third-party server-status tools), not something
+   *  Mercy invented. Both the Unconnected Ping Mercy sends and the
+   *  Unconnected Pong a real server replies with carry this exact value. */
+  private static readonly RAKNET_MAGIC = Buffer.from([0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0xfd, 0xfd, 0xfd, 0x12, 0x34, 0x56, 0x78]);
+
+  /** Builds a real RakNet "ID_UNCONNECTED_PING" packet: 1-byte message ID
+   *  (0x01), an 8-byte timestamp the server echoes back, the 16-byte magic
+   *  number above, and an 8-byte random "client GUID". This is the exact
+   *  discovery packet the real Minecraft Bedrock client sends to populate
+   *  its server list — not a fabricated probe. */
+  private buildUnconnectedPing(): Buffer {
+    const buf = Buffer.alloc(1 + 8 + 16 + 8);
+    let offset = 0;
+    buf.writeUInt8(0x01, offset); offset += 1;
+    buf.writeBigInt64BE(BigInt(Date.now()), offset); offset += 8;
+    MinecraftManager.RAKNET_MAGIC.copy(buf, offset); offset += 16;
+    crypto.randomBytes(8).copy(buf, offset);
+    return buf;
+  }
+
+  /** A REAL RakNet Unconnected Ping/Pong exchange over raw UDP — the only
+   *  honest way to verify a Bedrock server is actually answering. Bedrock's
+   *  protocol (RakNet) is UDP, so the TCP-based checkPortListening() used
+   *  for Java is structurally incapable of verifying it (a Bedrock server
+   *  doesn't listen on a TCP socket at all — that check would always report
+   *  "not listening" even for a perfectly healthy Bedrock server). This
+   *  sends a real ping and only reports "reachable" if a real Unconnected
+   *  Pong (ID 0x1C, with the same magic number echoed back) is received —
+   *  never inferred from a UDP send() merely not throwing, since UDP is
+   *  connectionless and that would prove nothing. */
+  private checkRakNetReachable(port: number, timeoutMs = 2000): Promise<{ checked: boolean; reachable: boolean | null; note: string }> {
+    return new Promise((resolve) => {
+      let done = false;
+      const socket = dgram.createSocket('udp4');
+      const finish = (result: { checked: boolean; reachable: boolean | null; note: string }) => {
+        if (done) return;
+        done = true;
+        try { socket.close(); } catch {}
+        resolve(result);
+      };
+      const timer = setTimeout(() => {
+        finish({ checked: true, reachable: false, note: 'The server process is running, but did not answer a real RakNet ping on this port within 2 seconds — it may still be loading the world, or something else may be bound to this port.' });
+      }, timeoutMs);
+
+      socket.once('error', (err) => {
+        clearTimeout(timer);
+        finish({ checked: false, reachable: null, note: `Could not perform the RakNet check: ${err.message}.` });
+      });
+
+      socket.once('message', (msg) => {
+        clearTimeout(timer);
+        const looksValid = msg.length >= 35 && msg[0] === 0x1c && msg.subarray(17, 33).equals(MinecraftManager.RAKNET_MAGIC);
+        finish(looksValid
+          ? { checked: true, reachable: true, note: 'Server answered a real RakNet ping — it is reachable and accepting connections.' }
+          : { checked: true, reachable: false, note: 'Received a UDP response on this port, but it was not a valid RakNet reply — something other than Bedrock may be using this port.' });
+      });
+
+      try {
+        socket.send(this.buildUnconnectedPing(), port, '127.0.0.1', (err) => {
+          if (err) { clearTimeout(timer); finish({ checked: false, reachable: null, note: `Could not send the RakNet ping: ${err.message}.` }); }
+        });
+      } catch (e: any) {
+        clearTimeout(timer);
+        finish({ checked: false, reachable: null, note: `Could not perform the RakNet check: ${e?.message || 'unknown error'}.` });
+      }
+    });
+  }
+
   /** Real connection info for the Connect tab — always recomputed from the
-   *  server's CURRENT record and a live port check, never cached, so it
-   *  can't go stale after the user edits the port/version/type. */
+   *  server's CURRENT record and a live reachability check, never cached,
+   *  so it can't go stale after the user edits the port/version/type. */
   async getConnectionInfo(id: string): Promise<MinecraftConnectionInfo | null> {
     const server = this.getServer(id);
     if (!server) return null;
@@ -991,8 +1347,23 @@ export class MinecraftManager {
     // already be accepting connections. Only skipped when there's
     // definitely no process to check (stopped/error).
     const processIsAlive = server.status === 'running' || server.status === 'starting' || server.status === 'stopping';
-    const portListening = processIsAlive ? await this.checkPortListening(server.port) : null;
     const lan = this.getLanAddress();
+
+    if (server.edition === 'bedrock') {
+      const raknet = processIsAlive
+        ? await this.checkRakNetReachable(server.port)
+        : { checked: false, reachable: null, note: 'Server is not running.' };
+      return {
+        serverId: id, serverName: server.name, serverType: server.serverType, version: server.version,
+        edition: 'bedrock', status: server.status, port: server.port,
+        lanAddress: lan ? `${lan}:${server.port}` : null,
+        portListening: null,
+        bedrock: { possible: false, detectedPlugin: null, note: 'Not applicable — this is already a native Bedrock server, so no Geyser bridge is needed.' },
+        raknet,
+      };
+    }
+
+    const portListening = processIsAlive ? await this.checkPortListening(server.port) : null;
 
     // Bedrock is only ever possible through a real installed Geyser plugin
     // (Paper only) — never assumed for a plain Vanilla/Paper server, and
@@ -1015,16 +1386,36 @@ export class MinecraftManager {
       serverId: id, serverName: server.name, serverType: server.serverType, version: server.version,
       edition: 'java', status: server.status, port: server.port,
       lanAddress: lan ? `${lan}:${server.port}` : null,
-      portListening, bedrock,
+      portListening, bedrock, raknet: null,
     };
   }
 
   // ── Players (derived from real console output — no query/RCON assumed) ──
+  /** Edition-aware: Java's console phrases join/leave as "X joined/left the
+   *  game"; Bedrock's phrases it entirely differently ("Player connected:
+   *  X, xuid: ..." / "Player disconnected: X..."), confirmed against
+   *  Bedrock Dedicated Server's own real log output. Matching Java's regex
+   *  against Bedrock's log (or vice versa) would silently match nothing —
+   *  this dispatches by the server's actual edition rather than trying one
+   *  pattern and hoping. */
   private trackPlayerFromLine(id: string, line: string) {
+    const server = this.getServer(id);
+    if (!server) return;
+    const map = this.players.get(id) || new Map<string, KnownPlayer>();
+
+    if (server.edition === 'bedrock') {
+      const connected = line.match(/Player connected:\s*([^,]+),/i);
+      const disconnected = line.match(/Player disconnected:\s*([^,]+)/i);
+      if (!connected && !disconnected) return;
+      if (connected) { const name = connected[1].trim(); map.set(name, { name, online: true, lastSeen: new Date().toISOString() }); }
+      if (disconnected) { const name = disconnected[1].trim(); if (map.has(name)) { const p = map.get(name)!; p.online = false; p.lastSeen = new Date().toISOString(); } }
+      this.players.set(id, map);
+      return;
+    }
+
     const joined = line.match(/: (\w+) joined the game/);
     const left = line.match(/: (\w+) left the game/);
     if (!joined && !left) return;
-    const map = this.players.get(id) || new Map<string, KnownPlayer>();
     if (joined) map.set(joined[1], { name: joined[1], online: true, lastSeen: new Date().toISOString() });
     if (left && map.has(left[1])) { const p = map.get(left[1])!; p.online = false; p.lastSeen = new Date().toISOString(); }
     this.players.set(id, map);

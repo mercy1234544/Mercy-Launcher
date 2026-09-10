@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Blocks, FolderOpen, ArrowLeft, Loader2, CheckCircle2, AlertTriangle, XCircle, ChevronDown } from 'lucide-react';
+import { Blocks, Box, FolderOpen, ArrowLeft, Loader2, CheckCircle2, AlertTriangle, XCircle, ChevronDown } from 'lucide-react';
 import { Panel, SectionHeading, Toggle } from '../components/ui';
 import toast from 'react-hot-toast';
 
+type Edition = 'java' | 'bedrock';
 type ServerType = 'vanilla' | 'paper';
 
 export default function MinecraftServerWizard() {
   const navigate = useNavigate();
+  const [edition, setEdition] = useState<Edition>('java');
   const [name, setName] = useState('My Minecraft Server');
   const [installPath, setInstallPath] = useState('');
   const [serverType, setServerType] = useState<ServerType>('vanilla');
@@ -16,6 +18,16 @@ export default function MinecraftServerWizard() {
   const [ram, setRam] = useState(2048);
   const [port, setPort] = useState(25565);
   const [acceptedEula, setAcceptedEula] = useState(false);
+
+  // Bedrock has no historical version manifest like Java — Mojang/
+  // Microsoft's own download API only ever serves the current stable and
+  // preview builds (see MinecraftManager.fetchBedrockVersions()), so that's
+  // the entire truthful choice: which channel, not which version.
+  const [bedrockLinks, setBedrockLinks] = useState<{ stable: { version: string; url: string }; preview: { version: string; url: string } | null } | null>(null);
+  const [bedrockChannel, setBedrockChannel] = useState<'stable' | 'preview'>('stable');
+  const [loadingBedrock, setLoadingBedrock] = useState(false);
+  const [bedrockError, setBedrockError] = useState<string | null>(null);
+  const [allowCheats, setAllowCheats] = useState(false);
 
   const [vanillaVersions, setVanillaVersions] = useState<{ id: string; type: string }[]>([]);
   const [paperVersions, setPaperVersions] = useState<string[]>([]);
@@ -102,6 +114,27 @@ export default function MinecraftServerWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverType]);
 
+  // Bedrock's real download links (fetched lazily, only once, the first
+  // time Bedrock is actually selected) — see fetchBedrockVersions()'s own
+  // comment on why there's no historical version list to show instead.
+  useEffect(() => {
+    if (edition !== 'bedrock' || bedrockLinks || loadingBedrock) return;
+    if (!window.electronAPI?.minecraft) return;
+    setLoadingBedrock(true);
+    setBedrockError(null);
+    window.electronAPI.minecraft.fetchBedrockVersions()
+      .then(setBedrockLinks)
+      .catch((e: any) => setBedrockError(e?.message || 'Could not reach Mojang/Microsoft\'s Bedrock download API — check your internet connection.'))
+      .finally(() => setLoadingBedrock(false));
+  }, [edition, bedrockLinks, loadingBedrock]);
+
+  // Switching edition resets the port to that edition's real default —
+  // Java's 25565/TCP vs Bedrock's 19132/UDP — rather than silently keeping
+  // whichever default happened to be showing before.
+  useEffect(() => {
+    setPort(edition === 'bedrock' ? 19132 : 25565);
+  }, [edition]);
+
   const browse = async () => {
     const dir = await window.electronAPI?.openDirectory();
     if (dir) setInstallPath(dir);
@@ -111,7 +144,9 @@ export default function MinecraftServerWizard() {
   const autoRuntime = compatibleRuntimes[0] || null;
   const selectedRuntime = (selectedJavaPath ? allRuntimes.find((r) => r.path === selectedJavaPath) : autoRuntime) || null;
   const javaCompatible = requiredJava == null || (selectedRuntime != null && selectedRuntime.major >= requiredJava);
-  const canCreate = name.trim() && installPath && version && port > 0 && port < 65536 && ram >= 512 && acceptedEula && !creating && javaCompatible;
+  const bedrockReady = edition === 'bedrock' ? !!bedrockLinks && (bedrockChannel === 'stable' || !!bedrockLinks.preview) : true;
+  const canCreate = name.trim() && installPath && port > 0 && port < 65536 && !creating && bedrockReady
+    && (edition === 'bedrock' ? true : !!version && ram >= 512 && acceptedEula && javaCompatible);
 
   const handleCreate = async () => {
     if (!canCreate) return;
@@ -119,11 +154,17 @@ export default function MinecraftServerWizard() {
     setProgress({ pct: 0, message: 'Starting…' });
     const cleanup = window.electronAPI.onMinecraftCreateProgress((data) => setProgress(data));
     try {
-      const result = await window.electronAPI.minecraft.create({
-        name: name.trim(), installPath, version, serverType, ramMB: ram, port, acceptedEula, javaPath: selectedJavaPath,
-        seed: seed.trim() || undefined, gamemode, difficulty, hardcore, onlineMode, maxPlayers, motd: motd.trim() || undefined,
-        viewDistance, simulationDistance, pvp, whitelist,
-      });
+      const result = edition === 'bedrock'
+        ? await window.electronAPI.minecraft.create({
+            name: name.trim(), installPath, version: '', serverType: 'bedrock', ramMB: 0, port, acceptedEula: true,
+            bedrockChannel, motd: motd.trim() || undefined, gamemode, difficulty, onlineMode, maxPlayers,
+            viewDistance, whitelist, allowCheats,
+          })
+        : await window.electronAPI.minecraft.create({
+            name: name.trim(), installPath, version, serverType, ramMB: ram, port, acceptedEula, javaPath: selectedJavaPath,
+            seed: seed.trim() || undefined, gamemode, difficulty, hardcore, onlineMode, maxPlayers, motd: motd.trim() || undefined,
+            viewDistance, simulationDistance, pvp, whitelist,
+          });
       if (result.success && result.server) {
         toast.success('Server created');
         navigate(`/minecraft/server/${result.server.id}`);
@@ -160,34 +201,78 @@ export default function MinecraftServerWizard() {
       </Panel>
 
       <Panel>
-        <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3 block">Server Type</label>
+        <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3 block">Minecraft Edition</label>
         <div className="grid grid-cols-2 gap-3">
-          {(['vanilla', 'paper'] as ServerType[]).map((t) => (
-            <button key={t} onClick={() => setServerType(t)}
-              className={`rounded-xl border p-4 text-left transition-all ${serverType === t ? 'border-primary-500/50 bg-primary-500/10' : 'border-overlay-6 bg-overlay-3 hover:bg-overlay-6'}`}>
-              <p className="text-sm font-bold text-surface-100 capitalize">{t}</p>
-              <p className="text-[11px] text-surface-500 mt-1">{t === 'vanilla' ? 'Official Mojang server — no plugins or mods.' : 'High-performance server with plugin support.'}</p>
+          {([
+            { id: 'java' as Edition, label: 'Java Edition', desc: 'Vanilla or Paper, plugin/datapack support, PC-focused.', icon: Blocks },
+            { id: 'bedrock' as Edition, label: 'Bedrock Edition', desc: 'Official Mojang/Microsoft server — cross-platform, no Java required.', icon: Box },
+          ]).map((e) => (
+            <button key={e.id} onClick={() => setEdition(e.id)}
+              className={`rounded-xl border p-4 text-left transition-all ${edition === e.id ? 'border-primary-500/50 bg-primary-500/10' : 'border-overlay-6 bg-overlay-3 hover:bg-overlay-6'}`}>
+              <div className="flex items-center gap-2 mb-1"><e.icon size={15} className="text-primary-300" /><p className="text-sm font-bold text-surface-100">{e.label}</p></div>
+              <p className="text-[11px] text-surface-500">{e.desc}</p>
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-surface-600 mt-3">Fabric, Forge, and NeoForge aren't supported as server types yet — their installers need a separate, more involved setup flow Mercy doesn't run yet. Mods for those loaders can still be browsed in the Marketplace for reference.</p>
       </Panel>
 
-      <Panel>
-        <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">Minecraft Version</label>
-        {loadingVersions ? (
-          <div className="flex items-center gap-2 text-sm text-surface-400 py-2"><Loader2 size={14} className="animate-spin" /> Loading real version list…</div>
-        ) : versionsError ? (
-          <div className="flex items-center gap-2 text-xs text-error py-2"><XCircle size={14} className="shrink-0" /> {versionsError}</div>
-        ) : (
-          <select value={version} onChange={(e) => setVersion(e.target.value)} className="input-field">
-            {(serverType === 'vanilla' ? vanillaVersions.map((v) => v.id) : paperVersions).map((v) => (
-              <option key={v} value={v}>{v}</option>
+      {edition === 'java' && (
+        <Panel>
+          <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3 block">Server Type</label>
+          <div className="grid grid-cols-2 gap-3">
+            {(['vanilla', 'paper'] as ServerType[]).map((t) => (
+              <button key={t} onClick={() => setServerType(t)}
+                className={`rounded-xl border p-4 text-left transition-all ${serverType === t ? 'border-primary-500/50 bg-primary-500/10' : 'border-overlay-6 bg-overlay-3 hover:bg-overlay-6'}`}>
+                <p className="text-sm font-bold text-surface-100 capitalize">{t}</p>
+                <p className="text-[11px] text-surface-500 mt-1">{t === 'vanilla' ? 'Official Mojang server — no plugins or mods.' : 'High-performance server with plugin support.'}</p>
+              </button>
             ))}
-          </select>
-        )}
-      </Panel>
+          </div>
+          <p className="text-[11px] text-surface-600 mt-3">Fabric, Forge, and NeoForge aren't supported as server types yet — their installers need a separate, more involved setup flow Mercy doesn't run yet. Mods for those loaders can still be browsed in the Marketplace for reference.</p>
+        </Panel>
+      )}
 
+      {edition === 'java' ? (
+        <Panel>
+          <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">Minecraft Version</label>
+          {loadingVersions ? (
+            <div className="flex items-center gap-2 text-sm text-surface-400 py-2"><Loader2 size={14} className="animate-spin" /> Loading real version list…</div>
+          ) : versionsError ? (
+            <div className="flex items-center gap-2 text-xs text-error py-2"><XCircle size={14} className="shrink-0" /> {versionsError}</div>
+          ) : (
+            <select value={version} onChange={(e) => setVersion(e.target.value)} className="input-field">
+              {(serverType === 'vanilla' ? vanillaVersions.map((v) => v.id) : paperVersions).map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          )}
+        </Panel>
+      ) : (
+        <Panel>
+          <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">Bedrock Build</label>
+          {loadingBedrock ? (
+            <div className="flex items-center gap-2 text-sm text-surface-400 py-2"><Loader2 size={14} className="animate-spin" /> Checking Mojang/Microsoft's official download API…</div>
+          ) : bedrockError ? (
+            <div className="flex items-center gap-2 text-xs text-error py-2"><XCircle size={14} className="shrink-0" /> {bedrockError}</div>
+          ) : bedrockLinks ? (
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setBedrockChannel('stable')}
+                className={`rounded-xl border p-3 text-left transition-all ${bedrockChannel === 'stable' ? 'border-primary-500/50 bg-primary-500/10' : 'border-overlay-6 bg-overlay-3 hover:bg-overlay-6'}`}>
+                <p className="text-sm font-bold text-surface-100">Latest Stable</p>
+                <p className="text-[11px] font-mono text-surface-500 mt-1">v{bedrockLinks.stable.version}</p>
+              </button>
+              <button onClick={() => bedrockLinks.preview && setBedrockChannel('preview')} disabled={!bedrockLinks.preview}
+                className={`rounded-xl border p-3 text-left transition-all disabled:opacity-40 disabled:cursor-not-allowed ${bedrockChannel === 'preview' ? 'border-primary-500/50 bg-primary-500/10' : 'border-overlay-6 bg-overlay-3 hover:bg-overlay-6'}`}>
+                <p className="text-sm font-bold text-surface-100">Latest Preview</p>
+                <p className="text-[11px] font-mono text-surface-500 mt-1">{bedrockLinks.preview ? `v${bedrockLinks.preview.version}` : 'Not currently published'}</p>
+              </button>
+            </div>
+          ) : null}
+          <p className="text-[11px] text-surface-600 mt-3">Bedrock has no historical version list — Mojang/Microsoft's own download API only ever serves the current build for each channel, resolved fresh at creation time.</p>
+        </Panel>
+      )}
+
+      {edition === 'java' && (
       <Panel>
         <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3 block">Java Compatibility</label>
         <div className="flex items-center justify-between text-sm">
@@ -244,15 +329,19 @@ export default function MinecraftServerWizard() {
           </div>
         )}
       </Panel>
+      )}
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className={edition === 'java' ? 'grid grid-cols-2 gap-4' : ''}>
+        {edition === 'java' && (
+          <Panel>
+            <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">RAM Allocation (MB)</label>
+            <input type="number" min={512} step={512} value={ram} onChange={(e) => setRam(parseInt(e.target.value) || 512)} className="input-field" />
+          </Panel>
+        )}
         <Panel>
-          <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">RAM Allocation (MB)</label>
-          <input type="number" min={512} step={512} value={ram} onChange={(e) => setRam(parseInt(e.target.value) || 512)} className="input-field" />
-        </Panel>
-        <Panel>
-          <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">Port</label>
-          <input type="number" min={1} max={65535} value={port} onChange={(e) => setPort(parseInt(e.target.value) || 25565)} className="input-field" />
+          <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">Port {edition === 'bedrock' && <span className="text-surface-600 normal-case font-normal">(UDP)</span>}</label>
+          <input type="number" min={1} max={65535} value={port} onChange={(e) => setPort(parseInt(e.target.value) || (edition === 'bedrock' ? 19132 : 25565))} className="input-field" />
+          {edition === 'bedrock' && <p className="text-[11px] text-surface-600 mt-2">Bedrock clients connect over UDP, not TCP — make sure any firewall rule for this port allows UDP.</p>}
         </Panel>
       </div>
 
@@ -266,14 +355,16 @@ export default function MinecraftServerWizard() {
         </button>
         {showAdvanced && (
           <div className="grid grid-cols-2 gap-4 mt-4">
-            <div className="col-span-2">
-              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">World Seed (optional)</label>
-              <input value={seed} onChange={(e) => setSeed(e.target.value)} className="input-field text-sm" placeholder="Leave blank for a random world" />
-            </div>
+            {edition === 'java' && (
+              <div className="col-span-2">
+                <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">World Seed (optional)</label>
+                <input value={seed} onChange={(e) => setSeed(e.target.value)} className="input-field text-sm" placeholder="Leave blank for a random world" />
+              </div>
+            )}
             <div>
               <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">Game Mode</label>
               <select value={gamemode} onChange={(e) => setGamemode(e.target.value as any)} className="input-field text-sm py-2">
-                {['survival', 'creative', 'adventure', 'spectator'].map((g) => <option key={g} value={g}>{g}</option>)}
+                {(edition === 'bedrock' ? ['survival', 'creative', 'adventure'] : ['survival', 'creative', 'adventure', 'spectator']).map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
             <div>
@@ -283,7 +374,7 @@ export default function MinecraftServerWizard() {
               </select>
             </div>
             <div className="col-span-2">
-              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">MOTD</label>
+              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">{edition === 'bedrock' ? 'Server Name (shown in server lists)' : 'MOTD'}</label>
               <input value={motd} onChange={(e) => setMotd(e.target.value)} className="input-field text-sm" />
             </div>
             <div>
@@ -294,25 +385,35 @@ export default function MinecraftServerWizard() {
               <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">View Distance</label>
               <input type="number" min={3} max={32} value={viewDistance} onChange={(e) => setViewDistance(parseInt(e.target.value) || 10)} className="input-field text-sm" />
             </div>
-            <div>
-              <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">Simulation Distance</label>
-              <input type="number" min={3} max={32} value={simulationDistance} onChange={(e) => setSimulationDistance(parseInt(e.target.value) || 10)} className="input-field text-sm" />
-            </div>
-            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">PvP</span><Toggle checked={pvp} onChange={setPvp} /></div>
-            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">Online Mode (verify accounts)</span><Toggle checked={onlineMode} onChange={setOnlineMode} /></div>
-            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">Hardcore</span><Toggle checked={hardcore} onChange={setHardcore} /></div>
-            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">Whitelist</span><Toggle checked={whitelist} onChange={setWhitelist} /></div>
+            {edition === 'java' && (
+              <div>
+                <label className="text-[11px] font-semibold text-surface-400 mb-1.5 block">Simulation Distance</label>
+                <input type="number" min={3} max={32} value={simulationDistance} onChange={(e) => setSimulationDistance(parseInt(e.target.value) || 10)} className="input-field text-sm" />
+              </div>
+            )}
+            {edition === 'java' && <div className="flex items-center justify-between"><span className="text-xs text-surface-300">PvP</span><Toggle checked={pvp} onChange={setPvp} /></div>}
+            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">{edition === 'bedrock' ? 'Require Xbox Live sign-in' : 'Online Mode (verify accounts)'}</span><Toggle checked={onlineMode} onChange={setOnlineMode} /></div>
+            {edition === 'java' && <div className="flex items-center justify-between"><span className="text-xs text-surface-300">Hardcore</span><Toggle checked={hardcore} onChange={setHardcore} /></div>}
+            {edition === 'bedrock' && <div className="flex items-center justify-between"><span className="text-xs text-surface-300">Allow Cheats</span><Toggle checked={allowCheats} onChange={setAllowCheats} /></div>}
+            <div className="flex items-center justify-between"><span className="text-xs text-surface-300">{edition === 'bedrock' ? 'Allow-list only' : 'Whitelist'}</span><Toggle checked={whitelist} onChange={setWhitelist} /></div>
           </div>
         )}
       </Panel>
 
-      <Panel className="flex items-center gap-4">
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-surface-100">Accept the Minecraft EULA</p>
-          <p className="text-xs text-surface-500 mt-0.5">Required by Mojang to run a server. <a className="text-primary-400 hover:underline cursor-pointer" onClick={() => window.electronAPI?.openExternal('https://www.minecraft.net/en-us/eula')}>Read the EULA</a></p>
-        </div>
-        <Toggle checked={acceptedEula} onChange={setAcceptedEula} />
-      </Panel>
+      {edition === 'java' && (
+        <Panel className="flex items-center gap-4">
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-surface-100">Accept the Minecraft EULA</p>
+            <p className="text-xs text-surface-500 mt-0.5">Required by Mojang to run a server. <a className="text-primary-400 hover:underline cursor-pointer" onClick={() => window.electronAPI?.openExternal('https://www.minecraft.net/en-us/eula')}>Read the EULA</a></p>
+          </div>
+          <Toggle checked={acceptedEula} onChange={setAcceptedEula} />
+        </Panel>
+      )}
+      {edition === 'bedrock' && (
+        <Panel>
+          <p className="text-xs text-surface-500">Bedrock Dedicated Server has no separate EULA-acceptance file the way Java does — Mojang's <a className="text-primary-400 hover:underline cursor-pointer" onClick={() => window.electronAPI?.openExternal('https://www.minecraft.net/en-us/eula')}>End User License Agreement</a> still applies to running a server, there's just nothing here for Mercy to write.</p>
+        </Panel>
+      )}
 
       {progress && (
         <Panel>

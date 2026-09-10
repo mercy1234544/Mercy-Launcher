@@ -296,6 +296,7 @@ function registerIpcHandlers() {
   ipcMain.handle('minecraft:connectionInfo', (_, id: string) => minecraftManager.getConnectionInfo(id));
   ipcMain.handle('minecraft:fetchVanillaVersions', () => minecraftManager.fetchVanillaVersions());
   ipcMain.handle('minecraft:fetchPaperVersions', () => minecraftManager.fetchPaperVersions());
+  ipcMain.handle('minecraft:fetchBedrockVersions', () => minecraftManager.fetchBedrockVersions());
   ipcMain.handle('minecraft:create', (event, config) =>
     minecraftManager.createServer(config, (pct, message) => event.sender.send('minecraft:createProgress', { pct, message })));
   ipcMain.handle('minecraft:detectExisting', (_, dirPath: string) => minecraftManager.detectExistingServer(dirPath));

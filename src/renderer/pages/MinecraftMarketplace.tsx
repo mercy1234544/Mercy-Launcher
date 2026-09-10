@@ -79,7 +79,7 @@ export default function MinecraftMarketplace() {
           <p className="text-xs text-surface-500">Installing for</p>
           <select value={targetServerId} onChange={(e) => setTarget(e.target.value)} className="input-field text-sm py-1.5 mt-0.5">
             <option value="">Browse only (choose a server to enable installing)</option>
-            {servers.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.serverType === 'paper' ? 'Paper' : 'Vanilla'} {s.version !== 'unknown' ? s.version : ''}</option>)}
+            {servers.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.serverType === 'bedrock' ? 'Bedrock (not supported)' : s.serverType === 'paper' ? 'Paper' : 'Vanilla'} {s.version !== 'unknown' ? s.version : ''}</option>)}
           </select>
         </div>
         {targetServer && (
@@ -180,6 +180,7 @@ function ModDetailModal({ hit, targetServer, onClose }: { hit: MarketplaceHit; t
   // Install button the backend would just reject anyway.
   const compatibility = useMemo(() => {
     if (!targetServer) return null;
+    if (targetServer.serverType === 'bedrock') return { ok: false, reason: 'Marketplace content isn\'t supported for Bedrock servers yet — Java plugins, mods, and datapacks don\'t run on Bedrock.' };
     if (hit.projectType === 'plugin') {
       if (targetServer.serverType !== 'paper') return { ok: false, reason: 'Plugins require a Paper server — this is a Vanilla server.' };
       return { ok: true };

@@ -31,7 +31,7 @@ export default function AllServers() {
 
   const rows: Row[] = [
     ...fivemServers.map((s) => ({ id: s.id, name: s.name, game: 'fivem' as const, status: s.status, sub: `FiveM · ${s.framework}`, path: `/server/${s.id}` })),
-    ...mcServers.map((s) => ({ id: s.id, name: s.name, game: 'minecraft' as const, status: s.status, sub: `Minecraft · ${s.serverType === 'paper' ? 'Paper' : 'Vanilla'}`, path: `/minecraft/server/${s.id}` })),
+    ...mcServers.map((s) => ({ id: s.id, name: s.name, game: 'minecraft' as const, status: s.status, sub: `Minecraft · ${s.serverType === 'bedrock' ? 'Bedrock' : s.serverType === 'paper' ? 'Paper' : 'Vanilla'}`, path: `/minecraft/server/${s.id}` })),
   ];
 
   return (

@@ -103,7 +103,7 @@ export default function MinecraftHub() {
                   <p className="text-sm font-semibold text-surface-100">{s.name}</p>
                   <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[s.status] || 'bg-surface-600'}`} />
                 </div>
-                <p className="text-xs text-surface-500 mt-0.5">{s.version} · {s.serverType === 'paper' ? 'Paper' : 'Vanilla'} · Port {s.port}</p>
+                <p className="text-xs text-surface-500 mt-0.5">{s.version} · {s.serverType === 'bedrock' ? 'Bedrock' : s.serverType === 'paper' ? 'Paper' : 'Vanilla'} · Port {s.port}</p>
               </div>
               <ArrowRight size={14} className="text-surface-600 shrink-0 transition-transform group-hover:translate-x-0.5" />
             </Panel>
@@ -177,16 +177,18 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
           detected.valid ? (
             <div className="space-y-4 mb-5">
               <div className="bg-emerald-500/8 border border-emerald-500/15 rounded-xl p-3 flex items-center gap-2 text-xs text-emerald-300">
-                <CheckCircle2 size={14} className="shrink-0" /> Detected a {detected.serverType === 'paper' ? 'Paper' : 'Vanilla'} server{detected.hasWorld ? ' with a world' : ''}.
+                <CheckCircle2 size={14} className="shrink-0" /> Detected a {detected.edition === 'bedrock' ? 'Bedrock Edition' : detected.serverType === 'paper' ? 'Paper' : 'Vanilla'} server{detected.hasWorld ? ' with a world' : ''}.
               </div>
               <div>
                 <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">Server Name</label>
                 <input value={name} onChange={(e) => setName(e.target.value)} className="input-field" placeholder="Server name" />
               </div>
-              <div>
-                <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">RAM Allocation (MB)</label>
-                <input type="number" min={512} step={512} value={ram} onChange={(e) => setRam(parseInt(e.target.value) || 2048)} className="input-field" />
-              </div>
+              {detected.edition !== 'bedrock' && (
+                <div>
+                  <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">RAM Allocation (MB)</label>
+                  <input type="number" min={512} step={512} value={ram} onChange={(e) => setRam(parseInt(e.target.value) || 2048)} className="input-field" />
+                </div>
+              )}
             </div>
           ) : (
             <div className="bg-amber-500/8 border border-amber-500/15 rounded-xl p-3 flex items-center gap-2 text-xs text-amber-300 mb-5">

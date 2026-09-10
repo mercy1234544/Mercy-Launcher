@@ -74,7 +74,7 @@ export default function MinecraftServerPanel() {
         <SectionHeading
           icon={Blocks} iconClass="bg-emerald-500/15 border-emerald-500/25 text-emerald-300"
           title={server.name}
-          subtitle={`${server.version} · ${server.serverType === 'paper' ? 'Paper' : 'Vanilla'}`}
+          subtitle={server.edition === 'bedrock' ? `${server.version} · Bedrock Edition` : `${server.version} · ${server.serverType === 'paper' ? 'Paper' : 'Vanilla'}`}
           action={
             <div className="flex items-center gap-2">
               <span className={`flex items-center gap-1.5 text-xs font-semibold ${meta.text}`}><span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} /> {meta.label}</span>
@@ -102,7 +102,7 @@ export default function MinecraftServerPanel() {
             { id: 'players', label: 'Players', icon: Users },
             { id: 'backups', label: 'Backups', icon: Archive },
             { id: 'files', label: 'Files', icon: FolderOpen },
-            { id: 'content', label: server.serverType === 'paper' ? 'Mods & Plugins' : 'Datapacks', icon: Puzzle },
+            { id: 'content', label: server.edition === 'bedrock' ? 'Content' : server.serverType === 'paper' ? 'Mods & Plugins' : 'Datapacks', icon: Puzzle },
           ].map((t) => (
             <Tabs.Trigger key={t.id} value={t.id}
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors outline-none ${tab === t.id ? 'bg-primary-600/15 text-primary-300 border border-primary-500/25' : 'text-surface-400 hover:text-surface-200 hover:bg-overlay-4 border border-transparent'}`}>
@@ -144,7 +144,9 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
 
   const [javaCheck, setJavaCheck] = useState<{ ok: boolean; required: number; javaPath: string | null; major: number | null; error?: string } | null>(null);
   const [allRuntimes, setAllRuntimes] = useState<{ path: string; version: string; major: number; source: string }[]>([]);
+  const isBedrock = server.edition === 'bedrock';
   const refreshJava = () => {
+    if (isBedrock) return; // Bedrock never touches Java — nothing to resolve.
     window.electronAPI.minecraft.resolveLaunchJava(server.id).then(setJavaCheck).catch(() => setJavaCheck(null));
     window.electronAPI.minecraft.detectAllJava().then(setAllRuntimes).catch(() => setAllRuntimes([]));
   };
@@ -172,7 +174,9 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
     { icon: Hash, label: 'PID', value: stats?.pid ?? server.pid ?? 'Not available' },
     { icon: Clock, label: 'Uptime', value: fmtUptime(stats?.uptimeMs ?? null) },
     { icon: Cpu, label: 'CPU', value: 'Not available' },
-    { icon: MemoryStick, label: 'RAM Allocated', value: `${server.ramMB} MB` },
+    // Bedrock has no JVM heap to allocate — its memory use isn't tuned via
+    // a RAM setting the way Java's -Xmx is, so this card is meaningless there.
+    ...(isBedrock ? [] : [{ icon: MemoryStick, label: 'RAM Allocated', value: `${server.ramMB} MB` }]),
   ];
 
   return (
@@ -188,7 +192,7 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
           </div>
         </Panel>
       )}
-      <div className="grid grid-cols-4 gap-4">
+      <div className={`grid gap-4 ${cards.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
         {cards.map((c) => (
           <Panel key={c.label} padding="sm">
             <c.icon size={15} className="text-surface-500 mb-2" />
@@ -197,6 +201,7 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
           </Panel>
         ))}
       </div>
+      {!isBedrock && (
       <Panel>
         <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Java Runtime</p>
         {javaCheck && (
@@ -238,13 +243,15 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
           </>
         )}
       </Panel>
+      )}
       <Panel>
         <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Server Details</p>
         <div className="grid grid-cols-2 gap-x-8 gap-y-4">
           {[
-            { label: 'Version', value: server.version }, { label: 'Server Type', value: server.serverType === 'paper' ? 'Paper' : 'Vanilla' },
+            { label: 'Version', value: server.version }, { label: 'Server Type', value: server.serverType === 'bedrock' ? 'Bedrock' : server.serverType === 'paper' ? 'Paper' : 'Vanilla' },
             { label: 'Port', value: String(server.port) }, { label: 'Directory', value: server.installPath },
-            { label: 'Jar File', value: server.jarFile }, { label: 'Created', value: new Date(server.createdAt).toLocaleString() },
+            ...(isBedrock ? [] : [{ label: 'Jar File', value: server.jarFile }]),
+            { label: 'Created', value: new Date(server.createdAt).toLocaleString() },
           ].map((r) => (
             <div key={r.label} className="min-w-0"><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">{r.label}</p><p className="text-sm text-surface-200 font-medium truncate">{r.value}</p></div>
           ))}
@@ -286,11 +293,15 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
     return <Panel className="flex items-center justify-center py-16"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>;
   }
 
+  const isBedrock = info.edition === 'bedrock';
   const statusMeta = STATUS_CONNECT_META[info.status] || STATUS_CONNECT_META.stopped;
   const localAddress = `127.0.0.1:${info.port}`;
-  const instructions = info.serverType === 'paper'
-    ? `This is a Paper server — it's joined exactly like a normal Java Edition server (Paper only adds plugin support on the server side; the client connection is identical).`
-    : `This is a Vanilla Java Edition server.`;
+  const typeLabel = info.serverType === 'bedrock' ? 'Bedrock Edition' : info.serverType === 'paper' ? 'Paper' : 'Vanilla';
+  const instructions = isBedrock
+    ? 'This is a Bedrock Dedicated Server. Bedrock clients (mobile, console, Windows Bedrock, and Java clients bridged via a separate tool) connect differently from Java: use the server address below directly in the Bedrock client\'s "Add Server" screen — there is no server jar or Java client involved.'
+    : info.serverType === 'paper'
+      ? `This is a Paper server — it's joined exactly like a normal Java Edition server (Paper only adds plugin support on the server side; the client connection is identical).`
+      : `This is a Vanilla Java Edition server.`;
 
   return (
     <div className="space-y-4">
@@ -302,7 +313,16 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
             {statusMeta.label}
           </span>
         </div>
-        {info.portListening !== null ? (
+        {isBedrock ? (
+          info.raknet?.checked ? (
+            <p className={`text-xs mt-2 flex items-center gap-1.5 ${info.raknet.reachable ? 'text-success' : 'text-error'}`}>
+              {info.raknet.reachable ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+              {info.raknet.note}
+            </p>
+          ) : info.raknet ? (
+            <p className="text-xs mt-2 text-surface-500 flex items-center gap-1.5"><XCircle size={13} /> {info.raknet.note}</p>
+          ) : null
+        ) : info.portListening !== null ? (
           <p className={`text-xs mt-2 flex items-center gap-1.5 ${info.portListening ? 'text-success' : 'text-error'}`}>
             {info.portListening ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
             {info.portListening
@@ -322,16 +342,16 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
         <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Server Address</p>
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Name</p><p className="text-sm text-surface-200 font-medium">{info.serverName}</p></div>
-          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Type</p><p className="text-sm text-surface-200 font-medium">{info.serverType === 'paper' ? 'Paper' : 'Vanilla'}</p></div>
+          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Type</p><p className="text-sm text-surface-200 font-medium">{typeLabel}</p></div>
           <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Minecraft Version</p><p className="text-sm text-surface-200 font-medium">{info.version}</p></div>
-          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Edition</p><p className="text-sm text-surface-200 font-medium">Java Edition</p></div>
+          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Edition</p><p className="text-sm text-surface-200 font-medium">{isBedrock ? 'Bedrock Edition' : 'Java Edition'}</p></div>
         </div>
 
         <div className="space-y-2">
           <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6">
             <Home size={14} className="text-surface-500 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-surface-500">This computer</p>
+              <p className="text-[10px] text-surface-500">This computer{isBedrock ? ' (UDP)' : ''}</p>
               <p className="text-sm font-mono text-surface-100 truncate">{localAddress}</p>
             </div>
             <button onClick={() => copyToClipboard(localAddress, 'Address')} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors" title="Copy address"><Copy size={13} /></button>
@@ -341,7 +361,7 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
             <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6">
               <Wifi size={14} className="text-primary-400 shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-surface-500">LAN connection — other devices on this network</p>
+                <p className="text-[10px] text-surface-500">LAN connection{isBedrock ? ' (UDP)' : ''} — other devices on this network</p>
                 <p className="text-sm font-mono text-surface-100 truncate">{info.lanAddress}</p>
               </div>
               <button onClick={() => copyToClipboard(info.lanAddress!, 'LAN address')} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors" title="Copy address"><Copy size={13} /></button>
@@ -356,7 +376,7 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
             <Globe size={14} className="shrink-0 mt-0.5 text-surface-500" />
             <span>
               <strong className="text-surface-300">Public/internet access is not configured.</strong> Mercy cannot detect or guarantee this automatically — a public IP alone doesn't mean the port is reachable.
-              To let people outside your network join, forward port <span className="font-mono">{info.port}</span> (TCP) on your router to this computer, or use a tunneling service (e.g. playit.gg, ngrok), then share that address instead.
+              To let people outside your network join, forward port <span className="font-mono">{info.port}</span> ({isBedrock ? 'UDP' : 'TCP'}) on your router to this computer, or use a tunneling service (e.g. playit.gg, ngrok), then share that address instead.
             </span>
           </div>
         </div>
@@ -365,7 +385,9 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
           <button onClick={() => copyToClipboard(info.lanAddress || localAddress, 'IP:Port')} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"><Copy size={12} /> Copy IP:Port</button>
           <button
             onClick={() => copyToClipboard(
-              `Join "${info.serverName}" (${info.serverType === 'paper' ? 'Paper' : 'Vanilla'} ${info.version}):\n1. Open Minecraft Java Edition ${info.version}\n2. Multiplayer → Add Server\n3. Server Address: ${info.lanAddress || localAddress}\n4. Join`,
+              isBedrock
+                ? `Join "${info.serverName}" (Bedrock Edition ${info.version}):\n1. Open Minecraft (Bedrock, any platform)\n2. Play → Servers → Add Server\n3. Server Address: ${(info.lanAddress || localAddress).split(':')[0]}, Port: ${info.port}\n4. Join`
+                : `Join "${info.serverName}" (${typeLabel} ${info.version}):\n1. Open Minecraft Java Edition ${info.version}\n2. Multiplayer → Add Server\n3. Server Address: ${info.lanAddress || localAddress}\n4. Join`,
               'Connection instructions',
             )}
             className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
@@ -376,21 +398,32 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
       <Panel>
         <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">How to Join</p>
         <p className="text-xs text-surface-400 mb-3">{instructions}</p>
-        <ol className="space-y-2 text-sm text-surface-300">
-          <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">1.</span> Open Minecraft: Java Edition, version <strong>{info.version}</strong> (or a compatible version).</li>
-          <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">2.</span> Go to <strong>Multiplayer</strong> → <strong>Add Server</strong>.</li>
-          <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">3.</span> Enter <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{info.lanAddress || localAddress}</span> as the Server Address.</li>
-          <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">4.</span> Select the server and click <strong>Join Server</strong>.</li>
-        </ol>
+        {isBedrock ? (
+          <ol className="space-y-2 text-sm text-surface-300">
+            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">1.</span> Open Minecraft (Bedrock Edition) on any supported platform.</li>
+            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">2.</span> Go to <strong>Play</strong> → <strong>Servers</strong> → <strong>Add Server</strong>.</li>
+            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">3.</span> Enter <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{(info.lanAddress || localAddress).split(':')[0]}</span> as the address and <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{info.port}</span> as the port.</li>
+            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">4.</span> Select the server and join.</li>
+          </ol>
+        ) : (
+          <ol className="space-y-2 text-sm text-surface-300">
+            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">1.</span> Open Minecraft: Java Edition, version <strong>{info.version}</strong> (or a compatible version).</li>
+            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">2.</span> Go to <strong>Multiplayer</strong> → <strong>Add Server</strong>.</li>
+            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">3.</span> Enter <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{info.lanAddress || localAddress}</span> as the Server Address.</li>
+            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">4.</span> Select the server and click <strong>Join Server</strong>.</li>
+          </ol>
+        )}
       </Panel>
 
-      <Panel className={info.bedrock.possible ? 'border-primary-500/20' : ''}>
-        <div className="flex items-center gap-2 mb-2">
-          <Gamepad2 size={14} className={info.bedrock.possible ? 'text-primary-400' : 'text-surface-500'} />
-          <p className="text-xs font-bold text-surface-400 uppercase tracking-wider">Bedrock Edition</p>
-        </div>
-        <p className="text-xs text-surface-400">{info.bedrock.note}</p>
-      </Panel>
+      {!isBedrock && (
+        <Panel className={info.bedrock.possible ? 'border-primary-500/20' : ''}>
+          <div className="flex items-center gap-2 mb-2">
+            <Gamepad2 size={14} className={info.bedrock.possible ? 'text-primary-400' : 'text-surface-500'} />
+            <p className="text-xs font-bold text-surface-400 uppercase tracking-wider">Bedrock Clients via Geyser</p>
+          </div>
+          <p className="text-xs text-surface-400">{info.bedrock.note}</p>
+        </Panel>
+      )}
     </div>
   );
 }
@@ -451,7 +484,7 @@ function ConsoleTab({ server, isRunning }: { server: MinecraftServer; isRunning:
 }
 
 // ── Properties ────────────────────────────────────────────────────────────
-const PROPERTY_HINTS: Record<string, { label: string; type: 'bool' | 'number' | 'select' | 'text'; options?: string[] }> = {
+const JAVA_PROPERTY_HINTS: Record<string, { label: string; type: 'bool' | 'number' | 'select' | 'text'; options?: string[] }> = {
   motd: { label: 'MOTD', type: 'text' },
   gamemode: { label: 'Game Mode', type: 'select', options: ['survival', 'creative', 'adventure', 'spectator'] },
   difficulty: { label: 'Difficulty', type: 'select', options: ['peaceful', 'easy', 'normal', 'hard'] },
@@ -467,7 +500,33 @@ const PROPERTY_HINTS: Record<string, { label: string; type: 'bool' | 'number' | 
   'server-port': { label: 'Server Port', type: 'number' },
 };
 
+// Bedrock's server.properties uses a different (if partially overlapping)
+// key set — no simulation-distance, no Java-style whitelist terminology,
+// its own cheats/permission concepts — sourced from Microsoft's own
+// Bedrock Dedicated Server properties reference, not guessed from Java's.
+// Any key not listed here (including ones from future Bedrock versions)
+// still shows up in the generic "Other Properties" section below, exactly
+// like an unrecognized Java key does — nothing is ever hidden or dropped.
+const BEDROCK_PROPERTY_HINTS: Record<string, { label: string; type: 'bool' | 'number' | 'select' | 'text'; options?: string[] }> = {
+  'server-name': { label: 'Server Name', type: 'text' },
+  gamemode: { label: 'Game Mode', type: 'select', options: ['survival', 'creative', 'adventure'] },
+  difficulty: { label: 'Difficulty', type: 'select', options: ['peaceful', 'easy', 'normal', 'hard'] },
+  'allow-cheats': { label: 'Allow Cheats', type: 'bool' },
+  'max-players': { label: 'Max Players', type: 'number' },
+  'online-mode': { label: 'Require Xbox Live Sign-in', type: 'bool' },
+  'allow-list': { label: 'Allow-list Only', type: 'bool' },
+  'server-port': { label: 'Server Port (IPv4)', type: 'number' },
+  'server-portv6': { label: 'Server Port (IPv6)', type: 'number' },
+  'view-distance': { label: 'View Distance', type: 'number' },
+  'tick-distance': { label: 'Tick Distance', type: 'number' },
+  'player-idle-timeout': { label: 'Player Idle Timeout (minutes)', type: 'number' },
+  'default-player-permission-level': { label: 'Default Player Permission', type: 'select', options: ['visitor', 'member', 'operator'] },
+  'texturepack-required': { label: 'Require Resource Pack', type: 'bool' },
+  'level-name': { label: 'Level Name', type: 'text' },
+};
+
 function PropertiesTab({ server }: { server: MinecraftServer }) {
+  const HINTS = server.edition === 'bedrock' ? BEDROCK_PROPERTY_HINTS : JAVA_PROPERTY_HINTS;
   const [entries, setEntries] = useState<{ key: string; value: string; isComment: boolean; raw: string }[]>([]);
   const [edited, setEdited] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -476,8 +535,8 @@ function PropertiesTab({ server }: { server: MinecraftServer }) {
   const load = () => { setLoading(true); window.electronAPI.minecraft.readProperties(server.id).then((e) => { setEntries(e); setEdited({}); }).finally(() => setLoading(false)); };
   useEffect(() => { load(); }, [server.id]);
 
-  const known = entries.filter((e) => !e.isComment && PROPERTY_HINTS[e.key]);
-  const unknown = entries.filter((e) => !e.isComment && !PROPERTY_HINTS[e.key]);
+  const known = entries.filter((e) => !e.isComment && HINTS[e.key]);
+  const unknown = entries.filter((e) => !e.isComment && !HINTS[e.key]);
 
   const valueOf = (key: string, fallback: string) => edited[key] ?? fallback;
   const setValue = (key: string, value: string) => setEdited((prev) => ({ ...prev, [key]: value }));
@@ -500,7 +559,7 @@ function PropertiesTab({ server }: { server: MinecraftServer }) {
         <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Common Settings</p>
         <div className="grid grid-cols-2 gap-4">
           {known.map(({ key, value }) => {
-            const hint = PROPERTY_HINTS[key];
+            const hint = HINTS[key];
             const current = valueOf(key, value);
             return (
               <div key={key}>
@@ -724,6 +783,18 @@ function ContentTab({ server }: { server: MinecraftServer }) {
 
   const plugins = items.filter((i) => i.kind === 'plugin');
   const datapacks = items.filter((i) => i.kind === 'datapack');
+
+  if (server.edition === 'bedrock') {
+    return (
+      <Panel>
+        <EmptyState
+          icon={Puzzle}
+          title="Marketplace isn't supported for Bedrock yet"
+          description="Bedrock uses a structurally different add-on system (behavior packs and resource packs, not Java plugins/mods/datapacks). Mercy's current Marketplace is built around Modrinth's Java ecosystem and doesn't install Bedrock add-ons — that's a planned future milestone, not something Mercy will pretend to do here."
+        />
+      </Panel>
+    );
+  }
 
   const Row = ({ item }: { item: InstalledContent & { missingOnDisk: boolean } }) => (
     <Panel padding="sm" className="flex items-center gap-3">

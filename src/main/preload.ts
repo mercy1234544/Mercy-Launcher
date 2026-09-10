@@ -82,6 +82,7 @@ const electronAPI = {
     connectionInfo: (id: string) => ipcRenderer.invoke('minecraft:connectionInfo', id),
     fetchVanillaVersions: () => ipcRenderer.invoke('minecraft:fetchVanillaVersions'),
     fetchPaperVersions: () => ipcRenderer.invoke('minecraft:fetchPaperVersions'),
+    fetchBedrockVersions: () => ipcRenderer.invoke('minecraft:fetchBedrockVersions'),
     create: (config: any) => ipcRenderer.invoke('minecraft:create', config),
     detectExisting: (dirPath: string) => ipcRenderer.invoke('minecraft:detectExisting', dirPath),
     import: (dirPath: string, name: string, ramMB: number) => ipcRenderer.invoke('minecraft:import', dirPath, name, ramMB),

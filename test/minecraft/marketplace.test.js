@@ -86,6 +86,17 @@ function mkFakeServer(dir, jarName = 'server.jar') {
   const pluginWrongLoader = classifyForServer('plugin', ['fabric'], 'paper');
   ok('a "plugin" that only lists Fabric (mislabeled/edge case) is rejected on Paper', pluginWrongLoader.installable === false);
 
+  // Bedrock gate — added for the Bedrock milestone. A datapack has NO
+  // serverType check elsewhere in this function (it's a vanilla game
+  // feature, valid for both vanilla and paper), so without this explicit
+  // check first it would incorrectly report itself installable on Bedrock
+  // too. Confirmed rejected here for every content shape, not just datapacks.
+  const datapackBedrock = classifyForServer('datapack', [], 'bedrock');
+  ok('a datapack is REJECTED for a Bedrock server (Bedrock is gated before the datapack no-loader-needed path)', datapackBedrock.installable === false);
+  ok('the Bedrock rejection reason explains why', /bedrock/i.test(datapackBedrock.reason));
+  const pluginBedrock = classifyForServer('plugin', ['bukkit', 'paper', 'spigot'], 'bedrock');
+  ok('a Paper plugin is REJECTED for a Bedrock server too', pluginBedrock.installable === false);
+
   // 2. Content manifest tracking — real persistence via MinecraftManager,
   // surviving a fresh instance the same way theme/settings do on restart.
   const serverDir = path.join(base, 'content-server');
