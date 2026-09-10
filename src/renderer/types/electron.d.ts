@@ -155,12 +155,45 @@ interface ElectronAPI {
     }>;
   };
 
+  assettoCorsa: {
+    getAll: () => Promise<AssettoCorsaServer[]>;
+    get: (id: string) => Promise<AssettoCorsaServer | undefined>;
+    consoleBuffer: (id: string) => Promise<string[]>;
+    delete: (id: string, deleteFiles: boolean) => Promise<{ success: boolean; error?: string }>;
+    create: (config: AcCreateConfig) => Promise<{ success: boolean; server?: AssettoCorsaServer; error?: string }>;
+    update: (id: string, patch: Partial<AcCreateConfig>) => Promise<{ success: boolean; error?: string }>;
+    detectExisting: (dirPath: string) => Promise<{ valid: boolean; reason?: string; hasExecutable?: boolean }>;
+    import: (dirPath: string, name: string, contentRoot: string) => Promise<{ success: boolean; server?: AssettoCorsaServer; error?: string }>;
+    start: (id: string) => Promise<{ success: boolean; error?: string }>;
+    stop: (id: string, force?: boolean) => Promise<boolean>;
+    restart: (id: string) => Promise<boolean>;
+    processStats: (id: string) => Promise<{
+      pid: number | null; uptimeMs: number | null; cpuPercent: number | null; memoryBytes: number | null;
+      metricsAvailable: boolean; metricsError?: string;
+    }>;
+    detectContentRoot: () => Promise<string | null>;
+    detectCars: (contentRoot: string) => Promise<AcCarInfo[]>;
+    detectTracks: (contentRoot: string) => Promise<AcTrackInfo[]>;
+    detectWeatherPresets: (contentRoot: string) => Promise<string[]>;
+    importCarContent: (contentRoot: string, zipPath: string) => Promise<{ success: boolean; error?: string; carId?: string }>;
+    importTrackContent: (contentRoot: string, zipPath: string) => Promise<{ success: boolean; error?: string; trackId?: string }>;
+    listFiles: (id: string, relPath: string) => Promise<{ name: string; path: string; type: 'file' | 'directory'; size: number; modified: string }[] | null>;
+    readFile: (id: string, relPath: string) => Promise<string | null>;
+    writeFile: (id: string, relPath: string, content: string) => Promise<boolean>;
+    createBackup: (id: string) => Promise<{ success: boolean; error?: string }>;
+    listBackups: (id: string) => Promise<{ id: string; serverId: string; name: string; path: string; size: number; createdAt: string }[]>;
+    restoreBackup: (backupId: string) => Promise<{ success: boolean; error?: string }>;
+    deleteBackup: (backupId: string) => Promise<boolean>;
+  };
+
   onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
   onMinecraftStatusChange: (callback: (data: { serverId: string; status: string }) => void) => () => void;
   onMinecraftCreateProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
   onMinecraftMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
   onBedrockMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
   onMinecraftInstallJavaProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
+  onAssettoCorsaConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
+  onAssettoCorsaStatusChange: (callback: (data: { serverId: string; status: string }) => void) => () => void;
 
   resource: {
     scan: (serverPath: string) => Promise<any[]>;
@@ -497,6 +530,37 @@ declare global {
     authorAvatarUrl: string | null; stars: number; forks: number; htmlUrl: string;
     homepageUrl: string | null; license: string | null; topics: string[];
   }
+
+  // ── Assetto Corsa types (mirror src/main/services/AssettoCorsaManager.ts) ──
+  interface AcSessionConfig { enabled: boolean; name: string; timeMinutes: number; laps: number; waitTimeSeconds: number; }
+  interface AcCarEntry { model: string; skin: string; ballastKg: number; restrictor: number; spectatorMode: boolean; }
+  interface AssettoCorsaSessions { practice: AcSessionConfig; qualify: AcSessionConfig; race: AcSessionConfig; }
+  interface AssettoCorsaServer {
+    id: string; name: string; installPath: string; contentRoot: string;
+    track: string; trackLayout: string; cars: AcCarEntry[];
+    maxClients: number; udpPort: number; tcpPort: number; httpPort: number;
+    password: string; adminPassword: string; registerToLobby: boolean;
+    sessions: AssettoCorsaSessions;
+    damageMultiplier: number; fuelRate: number; tyreWearRate: number; allowedTyresOut: number;
+    absAllowed: 0 | 1 | 2; tcAllowed: 0 | 1 | 2;
+    stabilityAllowed: boolean; autoclutchAllowed: boolean; tyreBlanketsAllowed: boolean;
+    legalTyres: string; sunAngle: number; weatherGraphics: string; ambientTemp: number; roadTemp: number;
+    status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
+    pid: number | null; startedAt: string | null; createdAt: string; updatedAt: string; lastError: string | null;
+  }
+  interface AcCreateConfig {
+    name: string; installPath: string; contentRoot: string; track: string; trackLayout?: string; cars: AcCarEntry[];
+    maxClients?: number; udpPort?: number; tcpPort?: number; httpPort?: number;
+    password?: string; adminPassword?: string; registerToLobby?: boolean;
+    sessions?: Partial<AssettoCorsaSessions>;
+    damageMultiplier?: number; fuelRate?: number; tyreWearRate?: number; allowedTyresOut?: number;
+    absAllowed?: 0 | 1 | 2; tcAllowed?: 0 | 1 | 2;
+    stabilityAllowed?: boolean; autoclutchAllowed?: boolean; tyreBlanketsAllowed?: boolean;
+    legalTyres?: string; sunAngle?: number; weatherGraphics?: string; ambientTemp?: number; roadTemp?: number;
+  }
+  interface AcCarInfo { id: string; name: string; brand: string; tags: string[]; skins: string[]; valid: boolean; }
+  interface AcTrackLayoutInfo { layout: string; name: string; }
+  interface AcTrackInfo { id: string; name: string; tags: string[]; layouts: AcTrackLayoutInfo[]; valid: boolean; }
 
   // ── Vehicle Studio types (mirror src/main/services/VehicleStudio.ts) ────────
   interface VSVehicle {

@@ -1,20 +1,22 @@
 import React, { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Server as ServerIcon, ArrowRight, ArrowLeft, Car, Blocks } from 'lucide-react';
+import { Server as ServerIcon, ArrowRight, ArrowLeft, Car, Blocks, FlagTriangleRight } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { useMinecraftStore } from '../stores/useMinecraftStore';
+import { useAssettoCorsaStore } from '../stores/useAssettoCorsaStore';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
 
-// Unified server list across every game with a real hub — FiveM's useAppStore
-// and Minecraft's useMinecraftStore stay separate stores (see their own
-// header comments), this page just reads both and merges the rows for
-// display. Clicking a row hands off to that game's own real server panel.
+// Unified server list across every game with a real hub — FiveM's useAppStore,
+// Minecraft's useMinecraftStore, and Assetto Corsa's useAssettoCorsaStore stay
+// separate stores (see their own header comments), this page just reads all
+// three and merges the rows for display. Clicking a row hands off to that
+// game's own real server panel.
 const STATUS_DOT: Record<string, string> = {
   running: 'bg-emerald-400', starting: 'bg-amber-400', stopping: 'bg-amber-400', stopped: 'bg-surface-600', error: 'bg-red-400',
 };
 
-interface Row { id: string; name: string; game: 'fivem' | 'minecraft'; status: string; sub: string; path: string; }
+interface Row { id: string; name: string; game: 'fivem' | 'minecraft' | 'assettocorsa'; status: string; sub: string; path: string; }
 
 export default function AllServers() {
   const navigate = useNavigate();
@@ -22,16 +24,20 @@ export default function AllServers() {
   const setFivemServers = useAppStore((s) => s.setServers);
   const mcServers = useMinecraftStore((s) => s.servers);
   const setMcServers = useMinecraftStore((s) => s.setServers);
+  const acServers = useAssettoCorsaStore((s) => s.servers);
+  const setAcServers = useAssettoCorsaStore((s) => s.setServers);
 
   useEffect(() => {
     if (!window.electronAPI) return;
     window.electronAPI.server.getAll().then(setFivemServers).catch(() => {});
     window.electronAPI.minecraft?.getAll().then(setMcServers).catch(() => {});
+    window.electronAPI.assettoCorsa?.getAll().then(setAcServers).catch(() => {});
   }, []);
 
   const rows: Row[] = [
     ...fivemServers.map((s) => ({ id: s.id, name: s.name, game: 'fivem' as const, status: s.status, sub: `FiveM · ${s.framework}`, path: `/server/${s.id}` })),
     ...mcServers.map((s) => ({ id: s.id, name: s.name, game: 'minecraft' as const, status: s.status, sub: `Minecraft · ${s.serverType === 'bedrock' ? 'Bedrock' : s.serverType === 'paper' ? 'Paper' : 'Vanilla'}`, path: `/minecraft/server/${s.id}` })),
+    ...acServers.map((s) => ({ id: s.id, name: s.name, game: 'assettocorsa' as const, status: s.status, sub: `Assetto Corsa · ${s.track || 'No track'}`, path: `/assetto-corsa/server/${s.id}` })),
   ];
 
   return (
@@ -46,11 +52,12 @@ export default function AllServers() {
           <EmptyState
             icon={ServerIcon}
             title="No servers yet"
-            description="Create a FiveM or Minecraft server to see it here."
+            description="Create a FiveM, Minecraft, or Assetto Corsa server to see it here."
             action={
               <div className="flex items-center gap-2">
                 <button onClick={() => navigate('/create')} className="btn-secondary text-xs py-2 flex items-center gap-1.5"><Car size={13} /> New FiveM Server</button>
-                <button onClick={() => navigate('/minecraft/create')} className="btn-primary text-xs py-2 flex items-center gap-1.5"><Blocks size={13} /> New Minecraft Server</button>
+                <button onClick={() => navigate('/minecraft/create')} className="btn-secondary text-xs py-2 flex items-center gap-1.5"><Blocks size={13} /> New Minecraft Server</button>
+                <button onClick={() => navigate('/assetto-corsa/create')} className="btn-primary text-xs py-2 flex items-center gap-1.5"><FlagTriangleRight size={13} /> New Assetto Corsa Server</button>
               </div>
             }
           />
@@ -60,7 +67,7 @@ export default function AllServers() {
           {rows.map((r) => (
             <Panel as="button" interactive key={`${r.game}-${r.id}`} onClick={() => navigate(r.path)} className="group w-full flex items-center gap-4">
               <div className="w-10 h-10 rounded-xl bg-overlay-6 border border-overlay-10 flex items-center justify-center shrink-0">
-                {r.game === 'fivem' ? <Car size={17} className="text-orange-300" /> : <Blocks size={17} className="text-emerald-300" />}
+                {r.game === 'fivem' ? <Car size={17} className="text-orange-300" /> : r.game === 'minecraft' ? <Blocks size={17} className="text-emerald-300" /> : <FlagTriangleRight size={17} className="text-rose-300" />}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">

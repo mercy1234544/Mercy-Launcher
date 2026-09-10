@@ -134,6 +134,45 @@ const electronAPI = {
       ipcRenderer.invoke('minecraft:bedrockMarketplace:install', serverId, category, asset, confirmReplaceWorld),
   },
 
+  assettoCorsa: {
+    getAll: () => ipcRenderer.invoke('assettocorsa:getAll'),
+    get: (id: string) => ipcRenderer.invoke('assettocorsa:get', id),
+    consoleBuffer: (id: string) => ipcRenderer.invoke('assettocorsa:consoleBuffer', id),
+    delete: (id: string, deleteFiles: boolean) => ipcRenderer.invoke('assettocorsa:delete', id, deleteFiles),
+    create: (config: any) => ipcRenderer.invoke('assettocorsa:create', config),
+    update: (id: string, patch: any) => ipcRenderer.invoke('assettocorsa:update', id, patch),
+    detectExisting: (dirPath: string) => ipcRenderer.invoke('assettocorsa:detectExisting', dirPath),
+    import: (dirPath: string, name: string, contentRoot: string) => ipcRenderer.invoke('assettocorsa:import', dirPath, name, contentRoot),
+    start: (id: string) => ipcRenderer.invoke('assettocorsa:start', id),
+    stop: (id: string, force?: boolean) => ipcRenderer.invoke('assettocorsa:stop', id, force),
+    restart: (id: string) => ipcRenderer.invoke('assettocorsa:restart', id),
+    processStats: (id: string) => ipcRenderer.invoke('assettocorsa:processStats', id),
+    detectContentRoot: () => ipcRenderer.invoke('assettocorsa:detectContentRoot'),
+    detectCars: (contentRoot: string) => ipcRenderer.invoke('assettocorsa:detectCars', contentRoot),
+    detectTracks: (contentRoot: string) => ipcRenderer.invoke('assettocorsa:detectTracks', contentRoot),
+    detectWeatherPresets: (contentRoot: string) => ipcRenderer.invoke('assettocorsa:detectWeatherPresets', contentRoot),
+    importCarContent: (contentRoot: string, zipPath: string) => ipcRenderer.invoke('assettocorsa:importCarContent', contentRoot, zipPath),
+    importTrackContent: (contentRoot: string, zipPath: string) => ipcRenderer.invoke('assettocorsa:importTrackContent', contentRoot, zipPath),
+    listFiles: (id: string, relPath: string) => ipcRenderer.invoke('assettocorsa:listFiles', id, relPath),
+    readFile: (id: string, relPath: string) => ipcRenderer.invoke('assettocorsa:readFile', id, relPath),
+    writeFile: (id: string, relPath: string, content: string) => ipcRenderer.invoke('assettocorsa:writeFile', id, relPath, content),
+    createBackup: (id: string) => ipcRenderer.invoke('assettocorsa:createBackup', id),
+    listBackups: (id: string) => ipcRenderer.invoke('assettocorsa:listBackups', id),
+    restoreBackup: (backupId: string) => ipcRenderer.invoke('assettocorsa:restoreBackup', backupId),
+    deleteBackup: (backupId: string) => ipcRenderer.invoke('assettocorsa:deleteBackup', backupId),
+  },
+
+  onAssettoCorsaConsole: (callback: (data: { serverId: string; line: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('assettocorsa:console', handler);
+    return () => { ipcRenderer.removeListener('assettocorsa:console', handler); };
+  },
+  onAssettoCorsaStatusChange: (callback: (data: { serverId: string; status: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('assettocorsa:statusChange', handler);
+    return () => { ipcRenderer.removeListener('assettocorsa:statusChange', handler); };
+  },
+
   onMinecraftMarketplaceInstallProgress: (callback: (data: { pct: number; message: string }) => void) => {
     const handler = (_: any, data: any) => callback(data);
     ipcRenderer.on('minecraft:marketplace:installProgress', handler);

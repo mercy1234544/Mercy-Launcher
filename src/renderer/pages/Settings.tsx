@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { useMinecraftStore } from '../stores/useMinecraftStore';
+import { useAssettoCorsaStore } from '../stores/useAssettoCorsaStore';
 import { useLocalAccess } from '../stores/useLocalAccess';
 import { useAppAuth } from '../stores/useAppAuth';
 import { useFavorites } from '../stores/useFavorites';
@@ -77,6 +78,7 @@ export default function Settings() {
   // rely on whatever these shared stores happen to already hold.
   const { servers: fivemServersFromStore, setServers: setFivemServers } = useAppStore();
   const { servers: minecraftServersFromStore, setServers: setMinecraftServers } = useMinecraftStore();
+  const { servers: assettoCorsaServersFromStore, setServers: setAssettoCorsaServers } = useAssettoCorsaStore();
   const [sys, setSys] = useState<SysInfo | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const navigate = useNavigate();
@@ -186,17 +188,20 @@ export default function Settings() {
     const refresh = () => {
       window.electronAPI?.server?.getAll().then(setFivemServers).catch(() => {});
       window.electronAPI?.minecraft?.getAll().then(setMinecraftServers).catch(() => {});
+      window.electronAPI?.assettoCorsa?.getAll().then(setAssettoCorsaServers).catch(() => {});
     };
     refresh();
     const poll = setInterval(refresh, 5000);
     const cleanupFivem = window.electronAPI?.onServerStatusChange?.(refresh);
     const cleanupMinecraft = window.electronAPI?.onMinecraftStatusChange?.(refresh);
-    return () => { clearInterval(poll); cleanupFivem?.(); cleanupMinecraft?.(); };
+    const cleanupAssettoCorsa = window.electronAPI?.onAssettoCorsaStatusChange?.(refresh);
+    return () => { clearInterval(poll); cleanupFivem?.(); cleanupMinecraft?.(); cleanupAssettoCorsa?.(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const running = fivemServersFromStore.filter((s) => s.status === 'running').length
-    + minecraftServersFromStore.filter((s) => s.status === 'running').length;
-  const totalServers = fivemServersFromStore.length + minecraftServersFromStore.length;
+    + minecraftServersFromStore.filter((s) => s.status === 'running').length
+    + assettoCorsaServersFromStore.filter((s) => s.status === 'running').length;
+  const totalServers = fivemServersFromStore.length + minecraftServersFromStore.length + assettoCorsaServersFromStore.length;
   const memUsedPct = sys ? ((sys.totalMem - sys.freeMem) / sys.totalMem) * 100 : 0;
   const diskUsed = sys?.disk ? sys.disk.total - sys.disk.free : 0;
   const diskPct = sys?.disk ? (diskUsed / sys.disk.total) * 100 : 0;
@@ -381,7 +386,7 @@ export default function Settings() {
               <Tabs.Content value="games" className="space-y-4 outline-none">
                 <div className="space-y-3">
                   {GAMES.map((g) => {
-                    const count = g.id === 'fivem' ? fivemServersFromStore.length : g.id === 'minecraft' ? minecraftServersFromStore.length : null;
+                    const count = g.id === 'fivem' ? fivemServersFromStore.length : g.id === 'minecraft' ? minecraftServersFromStore.length : g.id === 'assettocorsa' ? assettoCorsaServersFromStore.length : null;
                     return (
                       <Panel as="button" interactive key={g.id} onClick={() => navigate(g.path)} className="group w-full flex items-center gap-4">
                         <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${g.tintBadge}`}><g.icon size={17} /></div>
@@ -505,7 +510,7 @@ export default function Settings() {
                         <div><p className="text-[11px] text-surface-500">Servers Registered</p><p className="text-xl font-extrabold text-surface-100">{totalServers}</p></div>
                       </div>
                       <UsageBar pct={totalServers > 0 ? 100 : 0} color="bg-gradient-to-r from-purple-600 to-purple-400" />
-                      <p className="text-[10px] text-surface-500 mt-2">{totalServers} server{totalServers !== 1 ? 's' : ''} managed by this app (FiveM + Minecraft)</p>
+                      <p className="text-[10px] text-surface-500 mt-2">{totalServers} server{totalServers !== 1 ? 's' : ''} managed by this app (FiveM + Minecraft + Assetto Corsa)</p>
                     </Panel>
                   </div>
 

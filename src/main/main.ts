@@ -17,6 +17,7 @@ import { VehicleStudio } from './services/VehicleStudio';
 import { VehicleStudioAuth } from './services/VehicleStudioAuth';
 import { SettingsManager } from './services/SettingsManager';
 import { MinecraftManager } from './services/MinecraftManager';
+import { AssettoCorsaManager } from './services/AssettoCorsaManager';
 import { MinecraftMarketplace } from './services/MinecraftMarketplace';
 import { BedrockMarketplace } from './services/BedrockMarketplace';
 import { ThemeManager } from './services/ThemeManager';
@@ -67,6 +68,7 @@ let vehicleStudio: VehicleStudio;
 let vehicleStudioAuth: VehicleStudioAuth;
 let settingsManager: SettingsManager;
 let minecraftManager: MinecraftManager;
+let assettoCorsaManager: AssettoCorsaManager;
 let minecraftMarketplace: MinecraftMarketplace;
 let bedrockMarketplace: BedrockMarketplace;
 let themeManager: ThemeManager;
@@ -160,6 +162,7 @@ function initializeServices() {
   vehicleStudioAuth = new VehicleStudioAuth(userDataPath);
   settingsManager = new SettingsManager();
   minecraftManager = new MinecraftManager(userDataPath);
+  assettoCorsaManager = new AssettoCorsaManager(userDataPath);
   minecraftMarketplace = new MinecraftMarketplace();
   bedrockMarketplace = new BedrockMarketplace(userDataPath);
   themeManager = new ThemeManager(userDataPath);
@@ -373,6 +376,33 @@ function registerIpcHandlers() {
   ipcMain.handle('minecraft:bedrockMarketplace:getReleases', (_, owner: string, repo: string, category) => bedrockMarketplace.getReleases(owner, repo, category));
   ipcMain.handle('minecraft:bedrockMarketplace:install', (event, serverId: string, category, asset, confirmReplaceWorld?: boolean) =>
     bedrockMarketplace.installAsset(minecraftManager, serverId, category, asset, { confirmReplaceWorld }, (pct, message) => event.sender.send('minecraft:bedrockMarketplace:installProgress', { pct, message })));
+
+  // Assetto Corsa — real dedicated server lifecycle (see AssettoCorsaManager.ts's own header comment).
+  ipcMain.handle('assettocorsa:getAll', () => assettoCorsaManager.getAllServers());
+  ipcMain.handle('assettocorsa:get', (_, id: string) => assettoCorsaManager.getServer(id));
+  ipcMain.handle('assettocorsa:consoleBuffer', (_, id: string) => assettoCorsaManager.getConsoleBuffer(id));
+  ipcMain.handle('assettocorsa:delete', (_, id: string, deleteFiles: boolean) => assettoCorsaManager.deleteServer(id, deleteFiles));
+  ipcMain.handle('assettocorsa:create', (_, config) => assettoCorsaManager.createServer(config));
+  ipcMain.handle('assettocorsa:update', (_, id: string, patch) => assettoCorsaManager.updateServer(id, patch));
+  ipcMain.handle('assettocorsa:detectExisting', (_, dirPath: string) => assettoCorsaManager.detectExistingServer(dirPath));
+  ipcMain.handle('assettocorsa:import', (_, dirPath: string, name: string, contentRoot: string) => assettoCorsaManager.importServer(dirPath, name, contentRoot));
+  ipcMain.handle('assettocorsa:start', (_, id: string) => assettoCorsaManager.startServer(id));
+  ipcMain.handle('assettocorsa:stop', (_, id: string, force?: boolean) => assettoCorsaManager.stopServer(id, !!force));
+  ipcMain.handle('assettocorsa:restart', (_, id: string) => assettoCorsaManager.restartServer(id));
+  ipcMain.handle('assettocorsa:processStats', (_, id: string) => assettoCorsaManager.getProcessStats(id));
+  ipcMain.handle('assettocorsa:detectContentRoot', () => assettoCorsaManager.detectDefaultContentRoot());
+  ipcMain.handle('assettocorsa:detectCars', (_, contentRoot: string) => assettoCorsaManager.detectCars(contentRoot));
+  ipcMain.handle('assettocorsa:detectTracks', (_, contentRoot: string) => assettoCorsaManager.detectTracks(contentRoot));
+  ipcMain.handle('assettocorsa:detectWeatherPresets', (_, contentRoot: string) => assettoCorsaManager.detectWeatherPresets(contentRoot));
+  ipcMain.handle('assettocorsa:importCarContent', (_, contentRoot: string, zipPath: string) => assettoCorsaManager.importCarContent(contentRoot, zipPath));
+  ipcMain.handle('assettocorsa:importTrackContent', (_, contentRoot: string, zipPath: string) => assettoCorsaManager.importTrackContent(contentRoot, zipPath));
+  ipcMain.handle('assettocorsa:listFiles', (_, id: string, relPath: string) => assettoCorsaManager.listFiles(id, relPath));
+  ipcMain.handle('assettocorsa:readFile', (_, id: string, relPath: string) => assettoCorsaManager.readServerFile(id, relPath));
+  ipcMain.handle('assettocorsa:writeFile', (_, id: string, relPath: string, content: string) => assettoCorsaManager.writeServerFile(id, relPath, content));
+  ipcMain.handle('assettocorsa:createBackup', (_, id: string) => assettoCorsaManager.createBackup(id));
+  ipcMain.handle('assettocorsa:listBackups', (_, id: string) => assettoCorsaManager.listBackups(id));
+  ipcMain.handle('assettocorsa:restoreBackup', (_, backupId: string) => assettoCorsaManager.restoreBackup(backupId));
+  ipcMain.handle('assettocorsa:deleteBackup', (_, backupId: string) => assettoCorsaManager.deleteBackup(backupId));
 
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());

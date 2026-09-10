@@ -32,6 +32,10 @@ import MinecraftHub from './pages/MinecraftHub';
 import MinecraftServerWizard from './pages/MinecraftServerWizard';
 import MinecraftServerPanel from './pages/MinecraftServerPanel';
 import MinecraftMarketplace from './pages/MinecraftMarketplace';
+import AssettoCorsaHub from './pages/AssettoCorsaHub';
+import AssettoCorsaServerWizard from './pages/AssettoCorsaServerWizard';
+import AssettoCorsaServerPanel from './pages/AssettoCorsaServerPanel';
+import AssettoCorsaContent from './pages/AssettoCorsaContent';
 import Settings from './pages/Settings';
 import AdminPanel from './pages/AdminPanel';
 import VehicleStudio from './pages/VehicleStudio';
@@ -87,7 +91,10 @@ export default function App() {
               <Route path="/minecraft/create" element={<MinecraftServerWizard />} />
               <Route path="/minecraft/server/:id" element={<MinecraftServerPanel />} />
               <Route path="/minecraft/marketplace" element={<MinecraftMarketplace />} />
-              <Route path="/assetto-corsa" element={<ComingSoon />} />
+              <Route path="/assetto-corsa" element={<AssettoCorsaHub />} />
+              <Route path="/assetto-corsa/create" element={<AssettoCorsaServerWizard />} />
+              <Route path="/assetto-corsa/server/:id" element={<AssettoCorsaServerPanel />} />
+              <Route path="/assetto-corsa/content" element={<AssettoCorsaContent />} />
               <Route path="/beamng" element={<ComingSoon />} />
               <Route path="/library" element={<Library />} />
               <Route path="/downloads" element={<Downloads />} />

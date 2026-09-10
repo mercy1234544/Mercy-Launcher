@@ -42,7 +42,7 @@ export const GAMES: GameDef[] = [
     Art: MinecraftArt, tagline: 'Manage your Minecraft servers.',
   },
   {
-    id: 'assettocorsa', label: 'Assetto Corsa', path: '/assetto-corsa', hasRealHub: false,
+    id: 'assettocorsa', label: 'Assetto Corsa', path: '/assetto-corsa', hasRealHub: true,
     icon: FlagTriangleRight, tint: 'text-rose-300', tintBadge: 'bg-rose-500/15 border-rose-500/25 text-rose-300',
     Art: AssettoCorsaArt, tagline: 'Manage your Assetto Corsa servers.',
   },
