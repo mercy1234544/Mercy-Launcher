@@ -6,7 +6,8 @@ import {
   Blocks, ArrowLeft, Play, Square, RotateCcw, Loader2, Terminal, Settings2, Users,
   Archive, FolderOpen, LayoutDashboard, Cpu, MemoryStick, Clock, Hash, Save, Trash2,
   Download, RefreshCw, AlertTriangle, File as FileIcon, Folder, ChevronRight, Copy, Trash,
-  Puzzle, ExternalLink, ShieldAlert, Power, Wifi, CheckCircle2, XCircle, Globe, Home, Gamepad2,
+  Puzzle, ExternalLink, ShieldAlert, Power, Wifi, CheckCircle2, XCircle, Globe, Home, Gamepad2, ChevronDown,
+  Map, Upload, PackageCheck, PackageX, Info,
 } from 'lucide-react';
 import { Panel, SectionHeading, Toggle, EmptyState } from '../components/ui';
 import { useMinecraftStore } from '../stores/useMinecraftStore';
@@ -25,6 +26,24 @@ function fmtUptime(ms: number | null): string {
   const s = Math.floor(ms / 1000);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+// Real, live per-process metrics — never a guessed/estimated value. `stats`
+// is null while the server isn't running at all (nothing to measure);
+// metricsAvailable=false means Windows itself couldn't be queried just now;
+// cpuPercent=null with metricsAvailable=true means a real sample was taken
+// but there's no PRIOR sample yet to diff against (the very first poll after
+// start) — all three are distinct, honestly-labeled states, never conflated.
+function fmtCpu(stats: { cpuPercent: number | null; metricsAvailable: boolean } | null): string {
+  if (!stats) return 'Not available';
+  if (!stats.metricsAvailable) return 'Unavailable';
+  if (stats.cpuPercent == null) return 'Measuring…';
+  return `${stats.cpuPercent.toFixed(1)}%`;
+}
+function fmtMemory(stats: { memoryBytes: number | null; metricsAvailable: boolean } | null): string {
+  if (!stats) return 'Not available';
+  if (!stats.metricsAvailable || stats.memoryBytes == null) return 'Unavailable';
+  return `${(stats.memoryBytes / 1024 / 1024).toFixed(0)} MB`;
 }
 
 export default function MinecraftServerPanel() {
@@ -103,6 +122,8 @@ export default function MinecraftServerPanel() {
             { id: 'backups', label: 'Backups', icon: Archive },
             { id: 'files', label: 'Files', icon: FolderOpen },
             { id: 'content', label: server.edition === 'bedrock' ? 'Content' : server.serverType === 'paper' ? 'Mods & Plugins' : 'Datapacks', icon: Puzzle },
+            { id: 'worlds', label: 'World', icon: Map },
+            ...(server.edition === 'bedrock' ? [{ id: 'packs', label: 'Packs', icon: PackageCheck }] : []),
           ].map((t) => (
             <Tabs.Trigger key={t.id} value={t.id}
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors outline-none ${tab === t.id ? 'bg-primary-600/15 text-primary-300 border border-primary-500/25' : 'text-surface-400 hover:text-surface-200 hover:bg-overlay-4 border border-transparent'}`}>
@@ -118,11 +139,15 @@ export default function MinecraftServerPanel() {
         <Tabs.Content value="overview" className="outline-none"><OverviewTab server={server} onChange={load} /></Tabs.Content>
         <Tabs.Content value="connect" className="outline-none"><ConnectTab server={server} /></Tabs.Content>
         <Tabs.Content value="console" className="outline-none"><ConsoleTab server={server} isRunning={isRunning} /></Tabs.Content>
-        <Tabs.Content value="properties" className="outline-none"><PropertiesTab server={server} /></Tabs.Content>
+        <Tabs.Content value="properties" className="outline-none"><PropertiesTab server={server} onChange={load} /></Tabs.Content>
         <Tabs.Content value="players" className="outline-none"><PlayersTab server={server} isRunning={isRunning} /></Tabs.Content>
         <Tabs.Content value="backups" className="outline-none"><BackupsTab server={server} /></Tabs.Content>
         <Tabs.Content value="files" className="outline-none"><FilesTab server={server} /></Tabs.Content>
         <Tabs.Content value="content" className="outline-none"><ContentTab server={server} /></Tabs.Content>
+        <Tabs.Content value="worlds" className="outline-none"><WorldsTab server={server} isRunning={isRunning} /></Tabs.Content>
+        {server.edition === 'bedrock' && (
+          <Tabs.Content value="packs" className="outline-none"><PacksTab server={server} /></Tabs.Content>
+        )}
         <Tabs.Content value="danger" className="outline-none"><DangerZoneTab server={server} /></Tabs.Content>
       </Tabs.Root>
     </motion.div>
@@ -131,14 +156,25 @@ export default function MinecraftServerPanel() {
 
 // ── Overview ──────────────────────────────────────────────────────────────
 function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: () => void }) {
-  const [stats, setStats] = useState<{ pid: number | null; uptimeMs: number | null } | null>(null);
+  const [stats, setStats] = useState<{
+    pid: number | null; uptimeMs: number | null;
+    cpuPercent: number | null; memoryBytes: number | null;
+    metricsAvailable: boolean; metricsError?: string;
+  } | null>(null);
+  const isRunningNow = server.status === 'running' || server.status === 'starting';
   useEffect(() => {
+    // Only poll while there's an actual process to measure — stopped/error
+    // servers have nothing to query, and polling them would just burn a
+    // PowerShell spawn every tick for no reason. Clearing stats on stop
+    // also means a real "not running" state is shown immediately rather
+    // than the last-seen numbers lingering after the process exits.
+    if (!isRunningNow) { setStats(null); return; }
     let alive = true;
     const poll = () => window.electronAPI.minecraft.processStats(server.id).then((s) => alive && setStats(s)).catch(() => {});
     poll();
-    const t = setInterval(poll, 5000);
+    const t = setInterval(poll, 3000);
     return () => { alive = false; clearInterval(t); };
-  }, [server.id]);
+  }, [server.id, isRunningNow]);
 
   const toggleAutoRestart = async (v: boolean) => { await window.electronAPI.minecraft.setAutoRestart(server.id, v); onChange(); };
 
@@ -173,7 +209,8 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
   const cards = [
     { icon: Hash, label: 'PID', value: stats?.pid ?? server.pid ?? 'Not available' },
     { icon: Clock, label: 'Uptime', value: fmtUptime(stats?.uptimeMs ?? null) },
-    { icon: Cpu, label: 'CPU', value: 'Not available' },
+    { icon: Cpu, label: 'CPU', value: fmtCpu(stats) },
+    { icon: MemoryStick, label: 'Memory Used', value: fmtMemory(stats) },
     // Bedrock has no JVM heap to allocate — its memory use isn't tuned via
     // a RAM setting the way Java's -Xmx is, so this card is meaningless there.
     ...(isBedrock ? [] : [{ icon: MemoryStick, label: 'RAM Allocated', value: `${server.ramMB} MB` }]),
@@ -192,7 +229,7 @@ function OverviewTab({ server, onChange }: { server: MinecraftServer; onChange: 
           </div>
         </Panel>
       )}
-      <div className={`grid gap-4 ${cards.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
+      <div className={`grid gap-4 ${cards.length >= 5 ? 'grid-cols-5' : 'grid-cols-4'}`}>
         {cards.map((c) => (
           <Panel key={c.label} padding="sm">
             <c.icon size={15} className="text-surface-500 mb-2" />
@@ -282,11 +319,14 @@ function copyToClipboard(text: string, label: string) {
 function ConnectTab({ server }: { server: MinecraftServer }) {
   const [info, setInfo] = useState<MinecraftConnectionInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
 
   const load = () => window.electronAPI.minecraft.connectionInfo(server.id).then((i) => { setInfo(i); setLoading(false); }).catch(() => setLoading(false));
   // Recomputed live on every poll and whenever the server's own record
-  // changes (port/version/type edits) — never a cached snapshot, so it
-  // can't go stale after a Properties change or a status transition.
+  // changes (port/version/type edits — PropertiesTab now calls the parent's
+  // onChange() on save, so a port change lands here immediately rather than
+  // waiting for the next 5s tick) — never a cached snapshot, so it can't go
+  // stale after a Properties change or a status transition.
   useEffect(() => { setLoading(true); load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [server.id, server.port, server.version, server.serverType, server.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading || !info) {
@@ -296,133 +336,145 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
   const isBedrock = info.edition === 'bedrock';
   const statusMeta = STATUS_CONNECT_META[info.status] || STATUS_CONNECT_META.stopped;
   const localAddress = `127.0.0.1:${info.port}`;
+  // The one address a normal user should actually use: the LAN address when
+  // one exists (so friends on the same network can join too), falling back
+  // to localhost — same precedence the old Copy IP:Port button already used.
+  // NEVER a fabricated public address — info.lanAddress is null (not a
+  // placeholder) when nothing real was detected, exactly as getConnectionInfo
+  // already guarantees.
+  const primaryAddress = info.lanAddress || localAddress;
   const typeLabel = info.serverType === 'bedrock' ? 'Bedrock Edition' : info.serverType === 'paper' ? 'Paper' : 'Vanilla';
-  const instructions = isBedrock
-    ? 'This is a Bedrock Dedicated Server. Bedrock clients (mobile, console, Windows Bedrock, and Java clients bridged via a separate tool) connect differently from Java: use the server address below directly in the Bedrock client\'s "Add Server" screen — there is no server jar or Java client involved.'
-    : info.serverType === 'paper'
-      ? `This is a Paper server — it's joined exactly like a normal Java Edition server (Paper only adds plugin support on the server side; the client connection is identical).`
-      : `This is a Vanilla Java Edition server.`;
+
+  // Real reachability, from the SAME live checks as before (TCP port-connect
+  // for Java, RakNet Unconnected Ping for Bedrock) — just reduced here to a
+  // single tri-state (true/false/null="nothing to check yet") the primary
+  // panel can show as one line, with the full explanation still available
+  // in the details section below.
+  const reachable = isBedrock ? (info.raknet?.checked ? info.raknet.reachable : null) : info.portListening;
+  const reachabilityNote = isBedrock
+    ? info.raknet?.note ?? null
+    : info.portListening !== null
+      ? (info.portListening
+          ? `Port ${info.port} is listening — verified with a real connection just now.`
+          : info.status === 'starting'
+            ? `Port ${info.port} isn't accepting connections yet — still starting up.`
+            : info.status === 'stopping'
+              ? `Port ${info.port} is no longer accepting connections — shutting down.`
+              : `Port ${info.port} is NOT accepting connections — the process is running but something is wrong.`)
+      : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      {/* PRIMARY: everything a normal Minecraft player needs, one glance. */}
       <Panel>
-        <div className="flex items-center justify-between mb-1">
-          <p className="text-xs font-bold text-surface-400 uppercase tracking-wider">Connection Status</p>
+        <div className="flex items-center justify-between mb-4">
           <span className={`flex items-center gap-1.5 text-xs font-semibold ${statusMeta.className}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${info.status === 'running' ? 'bg-emerald-400' : info.status === 'error' ? 'bg-red-400' : 'bg-surface-600'}`} />
             {statusMeta.label}
           </span>
+          <span className="text-xs text-surface-500">{isBedrock ? 'Bedrock Edition' : typeLabel} · {info.version}</span>
         </div>
+
+        <p className="text-[10px] text-surface-500 uppercase tracking-wider mb-1.5">{isBedrock ? 'Server Address (UDP)' : 'Server Address'}</p>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0 bg-overlay-3 border border-overlay-6 rounded-xl px-4 py-3">
+            <p className="font-mono text-lg font-bold text-surface-100 truncate">{primaryAddress}</p>
+          </div>
+          <button onClick={() => copyToClipboard(primaryAddress, 'Address')} className="btn-primary px-4 py-3 flex items-center gap-1.5 shrink-0"><Copy size={15} /> Copy</button>
+        </div>
+        {!info.lanAddress && (
+          <p className="text-[11px] text-surface-600 mt-1.5">Showing this computer's own address — no LAN network was detected, so this only works for players on this same PC.</p>
+        )}
+
+        <p className="text-[10px] text-surface-500 uppercase tracking-wider mt-4 mb-1.5">How to Join</p>
         {isBedrock ? (
-          info.raknet?.checked ? (
-            <p className={`text-xs mt-2 flex items-center gap-1.5 ${info.raknet.reachable ? 'text-success' : 'text-error'}`}>
-              {info.raknet.reachable ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-              {info.raknet.note}
-            </p>
-          ) : info.raknet ? (
-            <p className="text-xs mt-2 text-surface-500 flex items-center gap-1.5"><XCircle size={13} /> {info.raknet.note}</p>
-          ) : null
-        ) : info.portListening !== null ? (
-          <p className={`text-xs mt-2 flex items-center gap-1.5 ${info.portListening ? 'text-success' : 'text-error'}`}>
-            {info.portListening ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-            {info.portListening
-              ? `Port ${info.port} is listening — verified with a real connection just now.`
-              : info.status === 'starting'
-                ? `Port ${info.port} isn't accepting connections yet — still starting up.`
-                : info.status === 'stopping'
-                  ? `Port ${info.port} is no longer accepting connections — shutting down.`
-                  : `Port ${info.port} is NOT accepting connections — the process is running but something is wrong.`}
-          </p>
+          <ol className="space-y-1 text-sm text-surface-300">
+            <li>1. Open Minecraft (Bedrock) → <strong>Play</strong> → <strong>Servers</strong> → <strong>Add Server</strong></li>
+            <li>2. Address <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{primaryAddress.split(':')[0]}</span>, Port <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{info.port}</span></li>
+            <li>3. Select the server and join</li>
+          </ol>
         ) : (
-          <p className="text-xs mt-2 text-surface-500 flex items-center gap-1.5"><XCircle size={13} /> Connection unavailable — start the server first.</p>
+          <ol className="space-y-1 text-sm text-surface-300">
+            <li>1. Open Minecraft: Java Edition {info.version} → <strong>Multiplayer</strong> → <strong>Add Server</strong></li>
+            <li>2. Server Address: <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{primaryAddress}</span></li>
+            <li>3. Select the server and click <strong>Join Server</strong></li>
+          </ol>
         )}
       </Panel>
 
-      <Panel>
-        <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Server Address</p>
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Name</p><p className="text-sm text-surface-200 font-medium">{info.serverName}</p></div>
-          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Type</p><p className="text-sm text-surface-200 font-medium">{typeLabel}</p></div>
-          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Minecraft Version</p><p className="text-sm text-surface-200 font-medium">{info.version}</p></div>
-          <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Edition</p><p className="text-sm text-surface-200 font-medium">{isBedrock ? 'Bedrock Edition' : 'Java Edition'}</p></div>
-        </div>
+      <button onClick={() => setShowDetails((v) => !v)} className="flex items-center gap-1.5 text-xs font-semibold text-surface-500 hover:text-surface-200 transition-colors px-1">
+        <ChevronDown size={13} className={`transition-transform ${showDetails ? 'rotate-180' : ''}`} /> {showDetails ? 'Hide' : 'Show'} technical details
+      </button>
 
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6">
-            <Home size={14} className="text-surface-500 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] text-surface-500">This computer{isBedrock ? ' (UDP)' : ''}</p>
-              <p className="text-sm font-mono text-surface-100 truncate">{localAddress}</p>
-            </div>
-            <button onClick={() => copyToClipboard(localAddress, 'Address')} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors" title="Copy address"><Copy size={13} /></button>
-          </div>
-
-          {info.lanAddress ? (
-            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6">
-              <Wifi size={14} className="text-primary-400 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-surface-500">LAN connection{isBedrock ? ' (UDP)' : ''} — other devices on this network</p>
-                <p className="text-sm font-mono text-surface-100 truncate">{info.lanAddress}</p>
-              </div>
-              <button onClick={() => copyToClipboard(info.lanAddress!, 'LAN address')} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors" title="Copy address"><Copy size={13} /></button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6 text-xs text-surface-500">
-              <Wifi size={14} className="shrink-0" /> No LAN network address could be detected on this machine.
-            </div>
-          )}
-
-          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-overlay-4 border border-overlay-8 text-xs text-surface-400">
-            <Globe size={14} className="shrink-0 mt-0.5 text-surface-500" />
-            <span>
-              <strong className="text-surface-300">Public/internet access is not configured.</strong> Mercy cannot detect or guarantee this automatically — a public IP alone doesn't mean the port is reachable.
-              To let people outside your network join, forward port <span className="font-mono">{info.port}</span> ({isBedrock ? 'UDP' : 'TCP'}) on your router to this computer, or use a tunneling service (e.g. playit.gg, ngrok), then share that address instead.
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 mt-3">
-          <button onClick={() => copyToClipboard(info.lanAddress || localAddress, 'IP:Port')} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"><Copy size={12} /> Copy IP:Port</button>
-          <button
-            onClick={() => copyToClipboard(
-              isBedrock
-                ? `Join "${info.serverName}" (Bedrock Edition ${info.version}):\n1. Open Minecraft (Bedrock, any platform)\n2. Play → Servers → Add Server\n3. Server Address: ${(info.lanAddress || localAddress).split(':')[0]}, Port: ${info.port}\n4. Join`
-                : `Join "${info.serverName}" (${typeLabel} ${info.version}):\n1. Open Minecraft Java Edition ${info.version}\n2. Multiplayer → Add Server\n3. Server Address: ${info.lanAddress || localAddress}\n4. Join`,
-              'Connection instructions',
+      {/* SECONDARY: the same real detection/data as before, just tucked away
+          so it doesn't compete with the instructions above for attention. */}
+      {showDetails && (
+        <div className="space-y-3">
+          <Panel>
+            <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">Connection Check</p>
+            {reachabilityNote ? (
+              <p className={`text-xs flex items-center gap-1.5 ${reachable ? 'text-success' : 'text-error'}`}>
+                {reachable ? <CheckCircle2 size={13} /> : <XCircle size={13} />} {reachabilityNote}
+              </p>
+            ) : (
+              <p className="text-xs text-surface-500 flex items-center gap-1.5"><XCircle size={13} /> Connection unavailable — start the server first.</p>
             )}
-            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
-          ><Copy size={12} /> Copy Instructions</button>
+          </Panel>
+
+          <Panel>
+            <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">Server Details</p>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Name</p><p className="text-sm text-surface-200 font-medium">{info.serverName}</p></div>
+              <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Type</p><p className="text-sm text-surface-200 font-medium">{typeLabel}</p></div>
+              <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Minecraft Version</p><p className="text-sm text-surface-200 font-medium">{info.version}</p></div>
+              <div><p className="text-[10px] text-surface-500 uppercase tracking-wider mb-0.5">Edition</p><p className="text-sm text-surface-200 font-medium">{isBedrock ? 'Bedrock Edition' : 'Java Edition'}</p></div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6">
+                <Home size={14} className="text-surface-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] text-surface-500">This computer{isBedrock ? ' (UDP)' : ''}</p>
+                  <p className="text-sm font-mono text-surface-100 truncate">{localAddress}</p>
+                </div>
+                <button onClick={() => copyToClipboard(localAddress, 'Address')} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors" title="Copy address"><Copy size={13} /></button>
+              </div>
+
+              {info.lanAddress ? (
+                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6">
+                  <Wifi size={14} className="text-primary-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] text-surface-500">LAN connection{isBedrock ? ' (UDP)' : ''} — other devices on this network</p>
+                    <p className="text-sm font-mono text-surface-100 truncate">{info.lanAddress}</p>
+                  </div>
+                  <button onClick={() => copyToClipboard(info.lanAddress!, 'LAN address')} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors" title="Copy address"><Copy size={13} /></button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-overlay-3 border border-overlay-6 text-xs text-surface-500">
+                  <Wifi size={14} className="shrink-0" /> No LAN network address could be detected on this machine.
+                </div>
+              )}
+
+              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-overlay-4 border border-overlay-8 text-xs text-surface-400">
+                <Globe size={14} className="shrink-0 mt-0.5 text-surface-500" />
+                <span>
+                  <strong className="text-surface-300">Public/internet access is not configured.</strong> Mercy cannot detect or guarantee this automatically — a public IP alone doesn't mean the port is reachable.
+                  To let people outside your network join, forward port <span className="font-mono">{info.port}</span> ({isBedrock ? 'UDP' : 'TCP'}) on your router to this computer, or use a tunneling service (e.g. playit.gg, ngrok), then share that address instead.
+                </span>
+              </div>
+            </div>
+          </Panel>
+
+          {!isBedrock && (
+            <Panel className={info.bedrock.possible ? 'border-primary-500/20' : ''}>
+              <div className="flex items-center gap-2 mb-2">
+                <Gamepad2 size={14} className={info.bedrock.possible ? 'text-primary-400' : 'text-surface-500'} />
+                <p className="text-xs font-bold text-surface-400 uppercase tracking-wider">Bedrock Clients via Geyser</p>
+              </div>
+              <p className="text-xs text-surface-400">{info.bedrock.note}</p>
+            </Panel>
+          )}
         </div>
-      </Panel>
-
-      <Panel>
-        <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">How to Join</p>
-        <p className="text-xs text-surface-400 mb-3">{instructions}</p>
-        {isBedrock ? (
-          <ol className="space-y-2 text-sm text-surface-300">
-            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">1.</span> Open Minecraft (Bedrock Edition) on any supported platform.</li>
-            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">2.</span> Go to <strong>Play</strong> → <strong>Servers</strong> → <strong>Add Server</strong>.</li>
-            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">3.</span> Enter <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{(info.lanAddress || localAddress).split(':')[0]}</span> as the address and <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{info.port}</span> as the port.</li>
-            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">4.</span> Select the server and join.</li>
-          </ol>
-        ) : (
-          <ol className="space-y-2 text-sm text-surface-300">
-            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">1.</span> Open Minecraft: Java Edition, version <strong>{info.version}</strong> (or a compatible version).</li>
-            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">2.</span> Go to <strong>Multiplayer</strong> → <strong>Add Server</strong>.</li>
-            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">3.</span> Enter <span className="font-mono bg-overlay-6 px-1.5 py-0.5 rounded">{info.lanAddress || localAddress}</span> as the Server Address.</li>
-            <li className="flex gap-2"><span className="text-primary-400 font-bold shrink-0">4.</span> Select the server and click <strong>Join Server</strong>.</li>
-          </ol>
-        )}
-      </Panel>
-
-      {!isBedrock && (
-        <Panel className={info.bedrock.possible ? 'border-primary-500/20' : ''}>
-          <div className="flex items-center gap-2 mb-2">
-            <Gamepad2 size={14} className={info.bedrock.possible ? 'text-primary-400' : 'text-surface-500'} />
-            <p className="text-xs font-bold text-surface-400 uppercase tracking-wider">Bedrock Clients via Geyser</p>
-          </div>
-          <p className="text-xs text-surface-400">{info.bedrock.note}</p>
-        </Panel>
       )}
     </div>
   );
@@ -525,7 +577,7 @@ const BEDROCK_PROPERTY_HINTS: Record<string, { label: string; type: 'bool' | 'nu
   'level-name': { label: 'Level Name', type: 'text' },
 };
 
-function PropertiesTab({ server }: { server: MinecraftServer }) {
+function PropertiesTab({ server, onChange }: { server: MinecraftServer; onChange: () => void }) {
   const HINTS = server.edition === 'bedrock' ? BEDROCK_PROPERTY_HINTS : JAVA_PROPERTY_HINTS;
   const [entries, setEntries] = useState<{ key: string; value: string; isComment: boolean; raw: string }[]>([]);
   const [edited, setEdited] = useState<Record<string, string>>({});
@@ -546,7 +598,15 @@ function PropertiesTab({ server }: { server: MinecraftServer }) {
     setSaving(true);
     const result = await window.electronAPI.minecraft.writeProperties(server.id, edited);
     setSaving(false);
-    if (result.success) { toast.success('server.properties saved — restart the server to apply changes'); load(); }
+    if (result.success) {
+      toast.success('server.properties saved — restart the server to apply changes');
+      load();
+      // Refreshes the PARENT's server record too (port/etc.) — without this,
+      // e.g. a changed port stayed stale everywhere outside this tab
+      // (Connect, Server Details, the header) until the next full page
+      // load, even though the registry itself was already updated.
+      onChange();
+    }
     else toast.error(result.error || 'Failed to save');
   };
 
@@ -850,6 +910,208 @@ function ContentTab({ server }: { server: MinecraftServer }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ── World: real, edition-aware export/import (never available while running) ─
+function WorldsTab({ server, isRunning }: { server: MinecraftServer; isRunning: boolean }) {
+  const [info, setInfo] = useState<{ levelName: string; exists: boolean; sizeBytes: number | null; edition: 'java' | 'bedrock' } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [pendingImportPath, setPendingImportPath] = useState<string | null>(null);
+  const [pendingDetectedEdition, setPendingDetectedEdition] = useState<'java' | 'bedrock' | null>(null);
+
+  const load = () => { setLoading(true); window.electronAPI.minecraft.worldInfo(server.id).then(setInfo).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, [server.id]);
+
+  const fmtSize = (b: number | null) => b == null ? 'Unknown size' : b > 1024 * 1024 * 1024 ? `${(b / 1024 / 1024 / 1024).toFixed(2)} GB` : `${(b / 1024 / 1024).toFixed(1)} MB`;
+
+  const doExport = async () => {
+    const defaultPath = `${server.name.replace(/[^a-z0-9-_]/gi, '_')}-${info?.levelName || 'world'}.zip`;
+    const dest = await window.electronAPI.showSaveDialog({ defaultPath, filters: [{ name: 'World Archive', extensions: ['zip'] }] });
+    if (!dest) return;
+    setExporting(true);
+    try {
+      const result = await window.electronAPI.minecraft.exportWorld(server.id, dest);
+      if (result.success) toast.success('World exported'); else toast.error(result.error || 'Export failed');
+    } finally { setExporting(false); }
+  };
+
+  const runImport = async (sourcePath: string, confirmReplace: boolean) => {
+    setImporting(true);
+    try {
+      const result = await window.electronAPI.minecraft.importWorld(server.id, sourcePath, confirmReplace);
+      if (result.success) {
+        toast.success('World imported');
+        setPendingImportPath(null); setPendingDetectedEdition(null);
+        load();
+      } else if (result.needsConfirmation) {
+        setPendingImportPath(sourcePath);
+        setPendingDetectedEdition(result.detectedEdition || null);
+      } else {
+        toast.error(result.error || 'Import failed');
+        setPendingImportPath(null); setPendingDetectedEdition(null);
+      }
+    } finally { setImporting(false); }
+  };
+
+  const doImport = async () => {
+    const src = await window.electronAPI.openFile([{ name: 'World Archive', extensions: ['zip'] }]);
+    if (!src) return;
+    await runImport(src, false);
+  };
+
+  const disabledReason = isRunning ? 'Stop the server before exporting or importing its world.' : null;
+
+  return (
+    <div className="space-y-4">
+      {disabledReason && (
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-overlay-4 border border-overlay-8 text-xs text-surface-400">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" /> {disabledReason}
+        </div>
+      )}
+
+      {pendingImportPath && (
+        <Panel className="border-amber-500/30">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-300">Replace existing world?</p>
+              <p className="text-xs text-surface-400 mt-1">
+                A world ("{info?.levelName}") already exists for this server. Importing will replace it — the current world will be backed up first (visible in the Backups tab) so it isn't lost.
+              </p>
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => { setPendingImportPath(null); setPendingDetectedEdition(null); }} className="btn-secondary text-xs py-1.5 px-3">Cancel</button>
+                <button onClick={() => runImport(pendingImportPath, true)} disabled={importing} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+                  {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Back Up &amp; Replace
+                </button>
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {loading ? (
+        <Panel className="flex items-center justify-center py-10"><Loader2 size={18} className="animate-spin text-primary-400" /></Panel>
+      ) : (
+        <Panel padding="sm" className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-primary-500/15 border border-primary-500/25 flex items-center justify-center shrink-0"><Map size={16} className="text-primary-300" /></div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-surface-100 truncate">{info?.levelName || 'world'}</p>
+            <p className="text-[11px] text-surface-500">
+              {info?.exists ? `${fmtSize(info.sizeBytes)} · ${server.edition === 'bedrock' ? 'Bedrock' : 'Java'} world on disk` : 'No world found on disk yet'}
+            </p>
+          </div>
+        </Panel>
+      )}
+
+      <div className="flex gap-3">
+        <button onClick={doExport} disabled={isRunning || exporting || !info?.exists} className="flex-1 btn-secondary text-xs py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+          {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} {exporting ? 'Exporting…' : 'Export World'}
+        </button>
+        <button onClick={doImport} disabled={isRunning || importing} className="flex-1 btn-primary text-xs py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+          {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {importing ? 'Importing…' : 'Import World'}
+        </button>
+      </div>
+      <p className="text-[11px] text-surface-500">
+        Import only accepts a {server.edition === 'bedrock' ? 'Bedrock (db/ folder)' : 'Java (level.dat)'} world archive — a mismatched edition is refused automatically.
+      </p>
+    </div>
+  );
+}
+
+// ── Bedrock Resource & Behavior Packs (real manifest-based, local-folder) ────
+function PacksTab({ server }: { server: MinecraftServer }) {
+  const [kind, setKind] = useState<'resource_packs' | 'behavior_packs'>('resource_packs');
+  const [packs, setPacks] = useState<{ folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [installing, setInstalling] = useState(false);
+  const [busyFolder, setBusyFolder] = useState<string | null>(null);
+
+  const load = () => { setLoading(true); window.electronAPI.minecraft.listBedrockPacks(server.id, kind).then(setPacks).finally(() => setLoading(false)); };
+  useEffect(() => { load(); }, [server.id, kind]);
+
+  const install = async () => {
+    const src = await window.electronAPI.openFile([{ name: 'Pack Archive', extensions: ['zip', 'mcpack'] }]);
+    if (!src) return;
+    setInstalling(true);
+    try {
+      const result = await window.electronAPI.minecraft.installBedrockPack(server.id, kind, src);
+      if (result.success) { toast.success('Pack installed'); load(); } else toast.error(result.error || 'Install failed');
+    } finally { setInstalling(false); }
+  };
+
+  const toggle = async (pack: typeof packs[number]) => {
+    if (!pack.uuid) return;
+    const versionArr = pack.version.split('.').map((n) => parseInt(n, 10));
+    setBusyFolder(pack.folderName);
+    try {
+      const result = await window.electronAPI.minecraft.setBedrockPackEnabled(server.id, kind, pack.uuid, versionArr, !pack.enabled);
+      if (result.success) load(); else toast.error(result.error || 'Failed to update');
+    } finally { setBusyFolder(null); }
+  };
+
+  const remove = async (pack: typeof packs[number]) => {
+    setBusyFolder(pack.folderName);
+    try {
+      const result = await window.electronAPI.minecraft.removeBedrockPack(server.id, kind, pack.folderName, pack.uuid);
+      if (result.success) { toast.success('Pack removed'); load(); } else toast.error(result.error || 'Failed to remove');
+    } finally { setBusyFolder(null); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1 p-1 rounded-xl bg-overlay-4 border border-overlay-8">
+          {(['resource_packs', 'behavior_packs'] as const).map((k) => (
+            <button key={k} onClick={() => setKind(k)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${kind === k ? 'bg-primary-600/20 text-primary-300' : 'text-surface-400 hover:text-surface-200'}`}>
+              {k === 'resource_packs' ? 'Resource Packs' : 'Behavior Packs'}
+            </button>
+          ))}
+        </div>
+        <button onClick={install} disabled={installing} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5 disabled:opacity-60">
+          {installing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {installing ? 'Installing…' : 'Install Pack'}
+        </button>
+      </div>
+
+      {loading ? (
+        <Panel className="flex items-center justify-center py-10"><Loader2 size={18} className="animate-spin text-primary-400" /></Panel>
+      ) : packs.length === 0 ? (
+        <Panel><EmptyState icon={kind === 'resource_packs' ? PackageCheck : PackageX} title={`No ${kind === 'resource_packs' ? 'resource' : 'behavior'} packs installed`} description="Install a real .zip/.mcpack pack with a valid manifest.json to see it here." /></Panel>
+      ) : (
+        <div className="space-y-2">
+          {packs.map((p) => (
+            <Panel key={p.folderName} padding="sm" className={`flex items-center gap-3 ${!p.valid ? 'border-error/30' : ''}`}>
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${!p.valid ? 'bg-error-bg text-error' : p.enabled ? 'bg-primary-500/15 text-primary-300' : 'bg-overlay-6 text-surface-500'}`}>
+                {p.valid ? <PackageCheck size={15} /> : <PackageX size={15} />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-surface-100 truncate">{p.name} {p.valid && <span className="text-surface-500 font-normal">v{p.version}</span>}</p>
+                <p className="text-[11px] text-surface-500 truncate">
+                  {p.valid ? (p.description || p.folderName) : (p.invalidReason || 'Invalid pack')}
+                </p>
+              </div>
+              {p.valid && (
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${p.enabled ? 'bg-emerald-500/15 text-emerald-300' : 'bg-overlay-6 text-surface-500'}`}>
+                  {p.enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              )}
+              {p.valid && (
+                <button onClick={() => toggle(p)} disabled={busyFolder === p.folderName} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0" title={p.enabled ? 'Disable' : 'Enable'}>
+                  {busyFolder === p.folderName ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
+                </button>
+              )}
+              <button onClick={() => remove(p)} disabled={busyFolder === p.folderName} className="p-1.5 rounded-lg text-surface-500 hover:text-error hover:bg-overlay-6 transition-colors shrink-0"><Trash2 size={13} /></button>
+            </Panel>
+          ))}
+        </div>
+      )}
+      <div className="flex items-start gap-2 p-3 rounded-xl bg-overlay-4 border border-overlay-8 text-xs text-surface-400">
+        <Info size={14} className="shrink-0 mt-0.5" /> Enabling a pack here applies it to this server's active world (world_{kind === 'resource_packs' ? 'resource' : 'behavior'}_packs.json) — a backup of that file is kept automatically before every change.
+      </div>
     </div>
   );
 }

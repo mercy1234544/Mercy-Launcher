@@ -1,6 +1,6 @@
 {
   "name": "fivem-server-builder",
-  "version": "1.88.2",
+  "version": "1.89.0",
   "description": "Mercy Launcher — a centralized game-management hub, starting with a full FiveM server-management ecosystem",
   "main": "dist/main/main.js",
   "scripts": {
@@ -9,11 +9,11 @@
     "dev:renderer": "npx vite",
     "build": "npx tsc -p tsconfig.main.json && npx vite build && node scripts/copy-assets.js",
     "test:vs": "npx tsc -p tsconfig.main.json && node test/vehicle-studio/meta.test.js && node test/vehicle-studio/service.test.js",
-    "test:minecraft": "npx tsc -p tsconfig.main.json && node test/minecraft/service.test.js && node test/minecraft/java-runtime.test.js && node test/minecraft/marketplace.test.js && node test/minecraft/connection.test.js && node test/minecraft/bedrock.test.js && node test/minecraft/import-smoke.test.js",
+    "test:minecraft": "npx tsc -p tsconfig.main.json && node test/minecraft/service.test.js && node test/minecraft/java-runtime.test.js && node test/minecraft/marketplace.test.js && node test/minecraft/connection.test.js && node test/minecraft/bedrock.test.js && node test/minecraft/import-smoke.test.js && node test/minecraft/port-sync.test.js && node test/minecraft/worlds-and-packs.test.js",
     "test:theme": "npx tsc -p tsconfig.main.json && node test/theme/manager.test.js",
     "test:fivem": "npx tsc -p tsconfig.main.json && node test/fivem/marketplace.test.js",
     "test:updater": "npx electron test/updater/quit-and-install-guard.test.js",
-    "test:all": "npm run test:vs && node test/minecraft/service.test.js && node test/minecraft/java-runtime.test.js && node test/minecraft/marketplace.test.js && node test/minecraft/connection.test.js && node test/minecraft/bedrock.test.js && node test/minecraft/import-smoke.test.js && node test/theme/manager.test.js && node test/fivem/marketplace.test.js && npx electron test/updater/quit-and-install-guard.test.js",
+    "test:all": "npm run test:vs && node test/minecraft/service.test.js && node test/minecraft/java-runtime.test.js && node test/minecraft/marketplace.test.js && node test/minecraft/connection.test.js && node test/minecraft/bedrock.test.js && node test/minecraft/import-smoke.test.js && node test/minecraft/port-sync.test.js && node test/minecraft/worlds-and-packs.test.js && node test/theme/manager.test.js && node test/fivem/marketplace.test.js && npx electron test/updater/quit-and-install-guard.test.js",
     "build:exe": "npm run build && npx electron-builder --win --dir --publish never && node scripts/patch-windows-exe.js && npx electron-builder --win --prepackaged releases/win-unpacked --publish never",
     "start": "npx electron .",
     "electron:dev": "npx concurrently -k \"npx vite\" \"npx tsc -p tsconfig.main.json -w\" \"npx wait-on http://localhost:5173 && node scripts/copy-assets.js && npx electron .\""

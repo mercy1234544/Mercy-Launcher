@@ -10,6 +10,7 @@ import {
   Check, RotateCcw, ImagePlus, Trash2, X,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
+import { useMinecraftStore } from '../stores/useMinecraftStore';
 import { useLocalAccess } from '../stores/useLocalAccess';
 import { useAppAuth } from '../stores/useAppAuth';
 import { useFavorites } from '../stores/useFavorites';
@@ -67,7 +68,15 @@ const CATEGORIES = [
 type CategoryId = typeof CATEGORIES[number]['id'];
 
 export default function Settings() {
-  const { servers } = useAppStore();
+  // FiveM's own server store (see useAppStore.ts's own header comment — it's
+  // FiveM-specific despite the generic name) is populated by whichever page
+  // last called server.getAll() (e.g. FiveMHub), so it can be empty/stale if
+  // Settings is opened without ever visiting that hub. "Active Servers" here
+  // must count BOTH games from their real, authoritative registries — the
+  // exact same server.getAll()/minecraft.getAll() calls those hubs use — not
+  // rely on whatever these shared stores happen to already hold.
+  const { servers: fivemServersFromStore, setServers: setFivemServers } = useAppStore();
+  const { servers: minecraftServersFromStore, setServers: setMinecraftServers } = useMinecraftStore();
   const [sys, setSys] = useState<SysInfo | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const navigate = useNavigate();
@@ -165,7 +174,29 @@ export default function Settings() {
     return () => { if (timer.current) clearInterval(timer.current); };
   }, []);
 
-  const running = servers.filter((s) => s.status === 'running').length;
+  // Active Servers must reflect BOTH games' real, current process state —
+  // fetched directly from each game's own authoritative registry
+  // (ServerManager/MinecraftManager, via the same server.getAll()/
+  // minecraft.getAll() IPC calls FiveMHub/MinecraftHub themselves use), not
+  // assumed from whatever these shared stores already happen to hold. A
+  // short poll is the safety net; the real onServerStatusChange/
+  // onMinecraftStatusChange events make start/stop reflect here immediately
+  // without waiting for the next tick.
+  useEffect(() => {
+    const refresh = () => {
+      window.electronAPI?.server?.getAll().then(setFivemServers).catch(() => {});
+      window.electronAPI?.minecraft?.getAll().then(setMinecraftServers).catch(() => {});
+    };
+    refresh();
+    const poll = setInterval(refresh, 5000);
+    const cleanupFivem = window.electronAPI?.onServerStatusChange?.(refresh);
+    const cleanupMinecraft = window.electronAPI?.onMinecraftStatusChange?.(refresh);
+    return () => { clearInterval(poll); cleanupFivem?.(); cleanupMinecraft?.(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const running = fivemServersFromStore.filter((s) => s.status === 'running').length
+    + minecraftServersFromStore.filter((s) => s.status === 'running').length;
+  const totalServers = fivemServersFromStore.length + minecraftServersFromStore.length;
   const memUsedPct = sys ? ((sys.totalMem - sys.freeMem) / sys.totalMem) * 100 : 0;
   const diskUsed = sys?.disk ? sys.disk.total - sys.disk.free : 0;
   const diskPct = sys?.disk ? (diskUsed / sys.disk.total) * 100 : 0;
@@ -350,7 +381,7 @@ export default function Settings() {
               <Tabs.Content value="games" className="space-y-4 outline-none">
                 <div className="space-y-3">
                   {GAMES.map((g) => {
-                    const count = g.id === 'fivem' ? servers.length : null;
+                    const count = g.id === 'fivem' ? fivemServersFromStore.length : g.id === 'minecraft' ? minecraftServersFromStore.length : null;
                     return (
                       <Panel as="button" interactive key={g.id} onClick={() => navigate(g.path)} className="group w-full flex items-center gap-4">
                         <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${g.tintBadge}`}><g.icon size={17} /></div>
@@ -425,7 +456,7 @@ export default function Settings() {
                       <div className="grid grid-cols-3 gap-4">
                         <div>
                           <div className="flex items-center gap-1.5 text-surface-500 mb-1"><ServerIcon size={12} /><span className="text-[10px] uppercase tracking-wider">Owned Servers</span></div>
-                          <p className="text-lg font-extrabold text-surface-100">{servers.length}</p>
+                          <p className="text-lg font-extrabold text-surface-100">{totalServers}</p>
                         </div>
                         <div>
                           <div className="flex items-center gap-1.5 text-surface-500 mb-1"><Star size={12} /><span className="text-[10px] uppercase tracking-wider">Favorites</span></div>
@@ -471,10 +502,10 @@ export default function Settings() {
                     <Panel>
                       <div className="flex items-center gap-3 mb-1">
                         <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/20 flex items-center justify-center"><Database size={17} className="text-purple-400" /></div>
-                        <div><p className="text-[11px] text-surface-500">Servers Registered</p><p className="text-xl font-extrabold text-surface-100">{servers.length}</p></div>
+                        <div><p className="text-[11px] text-surface-500">Servers Registered</p><p className="text-xl font-extrabold text-surface-100">{totalServers}</p></div>
                       </div>
-                      <UsageBar pct={servers.length > 0 ? 100 : 0} color="bg-gradient-to-r from-purple-600 to-purple-400" />
-                      <p className="text-[10px] text-surface-500 mt-2">{servers.length} server{servers.length !== 1 ? 's' : ''} managed by this app</p>
+                      <UsageBar pct={totalServers > 0 ? 100 : 0} color="bg-gradient-to-r from-purple-600 to-purple-400" />
+                      <p className="text-[10px] text-surface-500 mt-2">{totalServers} server{totalServers !== 1 ? 's' : ''} managed by this app (FiveM + Minecraft)</p>
                     </Panel>
                   </div>
 
@@ -492,7 +523,7 @@ export default function Settings() {
                     <Panel>
                       <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-sky-600/20 border border-sky-500/20 flex items-center justify-center"><Activity size={17} className="text-sky-400" /></div>
                         <div><p className="text-[11px] text-surface-500">Active Servers</p><p className="text-xl font-extrabold text-surface-100">{running}</p></div></div>
-                      <UsageBar pct={servers.length ? (running / servers.length) * 100 : 0} color="bg-gradient-to-r from-sky-600 to-sky-400" />
+                      <UsageBar pct={totalServers ? (running / totalServers) * 100 : 0} color="bg-gradient-to-r from-sky-600 to-sky-400" />
                     </Panel>
                   </div>
 

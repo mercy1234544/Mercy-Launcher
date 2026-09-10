@@ -25,6 +25,7 @@ interface ElectronAPI {
 
   openDirectory: () => Promise<string | null>;
   openFile: (filters?: any) => Promise<string | null>;
+  showSaveDialog: (opts: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
   openPath: (path: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
 
@@ -97,7 +98,7 @@ interface ElectronAPI {
     }) => Promise<{ success: boolean; server?: MinecraftServer; error?: string }>;
     detectExisting: (dirPath: string) => Promise<{
       valid: boolean; reason?: string; edition?: 'java' | 'bedrock'; jarFile?: string; version?: string; serverType?: 'vanilla' | 'paper' | 'bedrock';
-      hasProperties: boolean; hasWorld: boolean; hasEula: boolean; port?: number;
+      hasProperties: boolean; hasWorld: boolean; hasEula: boolean; port?: number; ambiguous?: boolean;
     }>;
     import: (dirPath: string, name: string, ramMB: number) => Promise<{ success: boolean; server?: MinecraftServer; error?: string }>;
     start: (id: string) => Promise<{ success: boolean; error?: string }>;
@@ -105,7 +106,11 @@ interface ElectronAPI {
     restart: (id: string) => Promise<boolean>;
     setAutoRestart: (id: string, enabled: boolean) => Promise<boolean>;
     sendCommand: (id: string, command: string) => Promise<boolean>;
-    processStats: (id: string) => Promise<{ pid: number | null; uptimeMs: number | null }>;
+    processStats: (id: string) => Promise<{
+      pid: number | null; uptimeMs: number | null;
+      cpuPercent: number | null; memoryBytes: number | null;
+      metricsAvailable: boolean; metricsError?: string;
+    }>;
     players: (id: string) => Promise<{ name: string; online: boolean; lastSeen: string }[]>;
     readProperties: (id: string) => Promise<{ key: string; value: string; isComment: boolean; raw: string }[]>;
     writeProperties: (id: string, changes: Record<string, string>) => Promise<{ success: boolean; error?: string }>;
@@ -116,6 +121,17 @@ interface ElectronAPI {
     listBackups: (id: string) => Promise<MinecraftBackup[]>;
     restoreBackup: (backupId: string) => Promise<{ success: boolean; error?: string }>;
     deleteBackup: (backupId: string) => Promise<boolean>;
+
+    worldInfo: (id: string) => Promise<{ levelName: string; exists: boolean; sizeBytes: number | null; edition: 'java' | 'bedrock' } | null>;
+    exportWorld: (id: string, destZipPath: string) => Promise<{ success: boolean; error?: string }>;
+    importWorld: (id: string, sourceZipPath: string, confirmReplace?: boolean) => Promise<{ success: boolean; error?: string; needsConfirmation?: boolean; detectedEdition?: 'java' | 'bedrock' }>;
+
+    listBedrockPacks: (id: string, kind: 'resource_packs' | 'behavior_packs') => Promise<{
+      folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean;
+    }[]>;
+    installBedrockPack: (id: string, kind: 'resource_packs' | 'behavior_packs', zipPath: string) => Promise<{ success: boolean; error?: string; folderName?: string }>;
+    setBedrockPackEnabled: (id: string, kind: 'resource_packs' | 'behavior_packs', uuid: string, version: number[], enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+    removeBedrockPack: (id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string, uuid: string | null) => Promise<{ success: boolean; error?: string }>;
   };
 
   minecraftMarketplace: {

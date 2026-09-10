@@ -70,7 +70,7 @@ export default function MinecraftMarketplace() {
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-5 max-w-6xl mx-auto pb-16">
       <div className="flex items-center gap-3">
         <button onClick={() => navigate(preselectServerId ? `/minecraft/server/${preselectServerId}` : '/minecraft')} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors"><ArrowLeft size={16} /></button>
-        <SectionHeading icon={Puzzle} iconClass="bg-emerald-500/15 border-emerald-500/25 text-emerald-300" title="Minecraft Marketplace" subtitle="Real mods, plugins, and datapacks from Modrinth" />
+        <SectionHeading icon={Puzzle} iconClass="bg-emerald-500/15 border-emerald-500/25 text-emerald-300" title="Minecraft Marketplace" subtitle="Real mods, plugins, and datapacks from Modrinth — Java Edition catalog only" />
       </div>
 
       <Panel className="flex items-center gap-3">
@@ -79,15 +79,25 @@ export default function MinecraftMarketplace() {
           <p className="text-xs text-surface-500">Installing for</p>
           <select value={targetServerId} onChange={(e) => setTarget(e.target.value)} className="input-field text-sm py-1.5 mt-0.5">
             <option value="">Browse only (choose a server to enable installing)</option>
-            {servers.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.serverType === 'bedrock' ? 'Bedrock (not supported)' : s.serverType === 'paper' ? 'Paper' : 'Vanilla'} {s.version !== 'unknown' ? s.version : ''}</option>)}
+            {servers.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.serverType === 'bedrock' ? 'Bedrock (catalog not available)' : s.serverType === 'paper' ? 'Paper' : 'Vanilla'} {s.version !== 'unknown' ? s.version : ''}</option>)}
           </select>
         </div>
-        {targetServer && (
+        {targetServer && targetServer.serverType !== 'bedrock' && (
           <span className="text-[11px] text-surface-500 flex items-center gap-1.5 shrink-0"><ShieldCheck size={13} className="text-success" /> Compatibility is checked against this server</span>
         )}
       </Panel>
 
-      <Panel className="space-y-3">
+      {targetServer?.serverType === 'bedrock' && (
+        <Panel>
+          <EmptyState
+            icon={AlertTriangle}
+            title="No Marketplace catalog available for Bedrock"
+            description="Mercy's Marketplace is built on Modrinth, which only hosts Java Edition content (mods, plugins, datapacks). There is no equivalent legitimate, publicly-accessible catalog API for Bedrock add-ons that Mercy can honestly plug in here, so rather than show Java results that could never install on this server, Bedrock resource packs and behavior packs are managed directly from this server's own Packs tab instead."
+          />
+        </Panel>
+      )}
+
+      {targetServer?.serverType !== 'bedrock' && <Panel className="space-y-3">
         <div className="relative">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search mods, plugins, datapacks…" className="input-field pl-9" />
@@ -108,9 +118,9 @@ export default function MinecraftMarketplace() {
             {LOADERS.map((l) => <option key={l} value={l}>{l || 'Any loader/platform'}</option>)}
           </select>
         </div>
-      </Panel>
+      </Panel>}
 
-      {loading ? (
+      {targetServer?.serverType === 'bedrock' ? null : loading ? (
         <Panel className="flex items-center justify-center py-16"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>
       ) : error ? (
         <Panel><EmptyState icon={AlertTriangle} title="Couldn't load Marketplace results" description={error} /></Panel>

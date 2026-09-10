@@ -254,6 +254,11 @@ function registerIpcHandlers() {
     return result.filePaths[0] || null;
   });
 
+  ipcMain.handle('dialog:showSaveDialog', async (_, opts: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => {
+    const result = await dialog.showSaveDialog(mainWindow!, { defaultPath: opts?.defaultPath, filters: opts?.filters });
+    return result.canceled ? null : (result.filePath || null);
+  });
+
   // Shell
   ipcMain.handle('shell:openPath', (_, path) => shell.openPath(path));
   ipcMain.handle('shell:openExternal', (_, url) => shell.openExternal(url));
@@ -335,6 +340,18 @@ function registerIpcHandlers() {
   ipcMain.handle('minecraft:listBackups', (_, id: string) => minecraftManager.listBackups(id));
   ipcMain.handle('minecraft:restoreBackup', (_, backupId: string) => minecraftManager.restoreBackup(backupId));
   ipcMain.handle('minecraft:deleteBackup', (_, backupId: string) => minecraftManager.deleteBackup(backupId));
+
+  // Worlds — real, edition-aware import/export (see MinecraftManager.ts).
+  ipcMain.handle('minecraft:worldInfo', (_, id: string) => minecraftManager.getWorldInfo(id));
+  ipcMain.handle('minecraft:exportWorld', (_, id: string, destZipPath: string) => minecraftManager.exportWorld(id, destZipPath));
+  ipcMain.handle('minecraft:importWorld', (_, id: string, sourceZipPath: string, confirmReplace?: boolean) => minecraftManager.importWorld(id, sourceZipPath, !!confirmReplace));
+
+  // Bedrock resource/behavior packs — real local-folder mechanism (Java has
+  // no equivalent; see MinecraftManager.ts's own comment on why).
+  ipcMain.handle('minecraft:listBedrockPacks', (_, id: string, kind: 'resource_packs' | 'behavior_packs') => minecraftManager.listBedrockPacks(id, kind));
+  ipcMain.handle('minecraft:installBedrockPack', (_, id: string, kind: 'resource_packs' | 'behavior_packs', zipPath: string) => minecraftManager.installBedrockPack(id, kind, zipPath));
+  ipcMain.handle('minecraft:setBedrockPackEnabled', (_, id: string, kind: 'resource_packs' | 'behavior_packs', uuid: string, version: number[], enabled: boolean) => minecraftManager.setBedrockPackEnabled(id, kind, uuid, version, enabled));
+  ipcMain.handle('minecraft:removeBedrockPack', (_, id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string, uuid: string | null) => minecraftManager.removeBedrockPack(id, kind, folderName, uuid));
 
   // Marketplace (Modrinth) — mod/plugin/datapack browsing and real install.
   ipcMain.handle('minecraft:marketplace:search', (_, opts) => minecraftMarketplace.search(opts));

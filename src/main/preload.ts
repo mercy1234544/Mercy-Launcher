@@ -29,6 +29,7 @@ const electronAPI = {
   // Dialog
   openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   openFile: (filters?: any) => ipcRenderer.invoke('dialog:openFile', filters),
+  showSaveDialog: (opts: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => ipcRenderer.invoke('dialog:showSaveDialog', opts),
 
   // Shell
   openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path),
@@ -102,6 +103,15 @@ const electronAPI = {
     listBackups: (id: string) => ipcRenderer.invoke('minecraft:listBackups', id),
     restoreBackup: (backupId: string) => ipcRenderer.invoke('minecraft:restoreBackup', backupId),
     deleteBackup: (backupId: string) => ipcRenderer.invoke('minecraft:deleteBackup', backupId),
+
+    worldInfo: (id: string) => ipcRenderer.invoke('minecraft:worldInfo', id),
+    exportWorld: (id: string, destZipPath: string) => ipcRenderer.invoke('minecraft:exportWorld', id, destZipPath),
+    importWorld: (id: string, sourceZipPath: string, confirmReplace?: boolean) => ipcRenderer.invoke('minecraft:importWorld', id, sourceZipPath, confirmReplace),
+
+    listBedrockPacks: (id: string, kind: 'resource_packs' | 'behavior_packs') => ipcRenderer.invoke('minecraft:listBedrockPacks', id, kind),
+    installBedrockPack: (id: string, kind: 'resource_packs' | 'behavior_packs', zipPath: string) => ipcRenderer.invoke('minecraft:installBedrockPack', id, kind, zipPath),
+    setBedrockPackEnabled: (id: string, kind: 'resource_packs' | 'behavior_packs', uuid: string, version: number[], enabled: boolean) => ipcRenderer.invoke('minecraft:setBedrockPackEnabled', id, kind, uuid, version, enabled),
+    removeBedrockPack: (id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string, uuid: string | null) => ipcRenderer.invoke('minecraft:removeBedrockPack', id, kind, folderName, uuid),
   },
 
   minecraftMarketplace: {

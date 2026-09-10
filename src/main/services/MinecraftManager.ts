@@ -270,6 +270,11 @@ export class MinecraftManager {
   private players: Map<string, Map<string, KnownPlayer>> = new Map();
   private intentionalStop: Set<string> = new Set();
   private restartTracker: Map<string, RestartTracker> = new Map();
+  /** Last real CPU-time sample per server, used to derive a CPU% from the
+   *  delta between two samples (see getProcessStats()) — never a fabricated
+   *  or estimated number. Cleared whenever the process isn't running so a
+   *  stale sample from a previous run can never be diffed against a new one. */
+  private resourceSamples: Map<string, { cpuMs: number; sampledAt: number }> = new Map();
 
   private javaRuntimesDir: string;
 
@@ -416,6 +421,7 @@ export class MinecraftManager {
     this.consoleBuffers.delete(id);
     this.players.delete(id);
     this.restartTracker.delete(id);
+    this.resourceSamples.delete(id);
     this.save();
     return { success: true };
   }
@@ -872,7 +878,7 @@ export class MinecraftManager {
    *  either kind. */
   async detectExistingServer(dirPath: string): Promise<{
     valid: boolean; reason?: string; edition?: MinecraftEdition; jarFile?: string; version?: string; serverType?: MinecraftServerType;
-    hasProperties: boolean; hasWorld: boolean; hasEula: boolean; port?: number;
+    hasProperties: boolean; hasWorld: boolean; hasEula: boolean; port?: number; ambiguous?: boolean;
   }> {
     if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
       return { valid: false, reason: 'That path does not exist or is not a folder.', hasProperties: false, hasWorld: false, hasEula: false };
@@ -880,6 +886,12 @@ export class MinecraftManager {
     const entries = fs.readdirSync(dirPath);
     const hasProperties = entries.includes('server.properties');
     const hasBedrockExe = entries.some((f) => f.toLowerCase() === 'bedrock_server.exe');
+    const props = hasProperties ? fs.readFileSync(path.join(dirPath, 'server.properties'), 'utf-8') : '';
+    // These two keys only ever appear in a Bedrock Dedicated Server's
+    // server.properties — Java's own property set has no equivalents —
+    // so their presence is a real (not folder-name-based) edition signal
+    // even when bedrock_server.exe itself isn't present in the folder.
+    const hasBedrockOnlyProps = hasProperties && (/^server-portv6=/m.test(props) || /^texturepack-required=/m.test(props));
 
     if (hasBedrockExe) {
       const worldsDir = path.join(dirPath, 'worlds');
@@ -888,7 +900,6 @@ export class MinecraftManager {
       })();
       let port: number | undefined;
       if (hasProperties) {
-        const props = fs.readFileSync(path.join(dirPath, 'server.properties'), 'utf-8');
         const m = props.match(/^server-port=(\d+)/m);
         if (m) port = parseInt(m[1], 10);
       }
@@ -897,17 +908,42 @@ export class MinecraftManager {
 
     const jarFile = entries.find((f) => f.toLowerCase().endsWith('.jar') && !f.toLowerCase().includes('installer'));
     const hasEula = entries.includes('eula.txt');
-    const hasWorld = entries.some((f) => {
+    const hasJavaWorld = entries.some((f) => {
       try { return fs.statSync(path.join(dirPath, f)).isDirectory() && fs.existsSync(path.join(dirPath, f, 'level.dat')); } catch { return false; }
     });
-    if (!jarFile && !hasProperties && !hasEula) {
+    const hasBedrockWorld = (() => {
+      const worldsDir = path.join(dirPath, 'worlds');
+      if (!fs.existsSync(worldsDir)) return false;
+      try { return fs.readdirSync(worldsDir).some((w) => fs.existsSync(path.join(worldsDir, w, 'db'))); } catch { return false; }
+    })();
+    const hasWorld = hasJavaWorld || hasBedrockWorld;
+
+    if (!jarFile && !hasProperties && !hasEula && !hasWorld) {
       return { valid: false, reason: 'No Minecraft server files were found in this folder — looked for a Java server jar/eula.txt/server.properties, or bedrock_server.exe for a Bedrock server.', hasProperties, hasWorld, hasEula };
     }
+
+    // No server jar and no bedrock_server.exe: there is no real executable
+    // signature for either edition. If we found genuine Bedrock-only
+    // property keys or a Bedrock-shaped world (worlds/<name>/db), it's
+    // still identifiable as Bedrock (missing its binary). Otherwise this is
+    // truly ambiguous — refuse to guess (never assume Java by default) and
+    // report it so the caller can ask the user to choose explicitly.
+    if (!jarFile) {
+      if (hasBedrockOnlyProps || hasBedrockWorld) {
+        let port: number | undefined;
+        if (hasProperties) { const m = props.match(/^server-port=(\d+)/m); if (m) port = parseInt(m[1], 10); }
+        return { valid: false, edition: 'bedrock', reason: 'This looks like a Bedrock Edition server folder, but bedrock_server.exe is missing — it cannot be imported without the actual Bedrock server executable.', hasProperties, hasWorld, hasEula, port };
+      }
+      if (hasEula || hasJavaWorld) {
+        return { valid: false, edition: 'java', reason: 'This looks like a Java Edition server folder, but no server .jar file was found — it cannot be imported without the actual server jar.', hasProperties, hasWorld, hasEula };
+      }
+      return { valid: false, ambiguous: true, reason: 'Could not tell whether this is a Java or Bedrock server — no server .jar, no bedrock_server.exe, and no edition-specific signature was found in this folder.', hasProperties, hasWorld, hasEula };
+    }
+
     let serverType: MinecraftServerType = 'vanilla';
-    if (jarFile && /paper/i.test(jarFile)) serverType = 'paper';
+    if (/paper/i.test(jarFile)) serverType = 'paper';
     let port: number | undefined;
     if (hasProperties) {
-      const props = fs.readFileSync(path.join(dirPath, 'server.properties'), 'utf-8');
       const m = props.match(/^server-port=(\d+)/m);
       if (m) port = parseInt(m[1], 10);
     }
@@ -1050,6 +1086,7 @@ export class MinecraftManager {
 
     proc.on('exit', (code, signal) => {
       this.processes.delete(id);
+      this.resourceSamples.delete(id); // never diff a stale CPU-time sample against this server's next run
       const wasIntentional = this.intentionalStop.has(id);
       this.intentionalStop.delete(id);
       const current = this.getServer(id);
@@ -1221,10 +1258,73 @@ export class MinecraftManager {
     return true;
   }
 
-  getProcessStats(id: string): { pid: number | null; uptimeMs: number | null } {
+  /** Queries Windows' own real per-process metrics via PowerShell's
+   *  Get-Process — the same reliable, built-in mechanism Task Manager and
+   *  Resource Monitor are built on, rather than a browser-only guess (which
+   *  has no way to see an arbitrary OS process's CPU/memory at all).
+   *  TotalProcessorTime is CUMULATIVE CPU time since the process started
+   *  (not a percentage), by design — getProcessStats() below diffs two
+   *  samples to derive a real, non-fabricated CPU%. WorkingSet64 is real,
+   *  current physical memory (RSS), not estimated. Returns null (not a
+   *  guessed value) if the process can't be queried for any reason. */
+  private queryProcessMetrics(pid: number): Promise<{ cpuMs: number; memoryBytes: number } | null> {
+    return new Promise((resolve) => {
+      execFile('powershell', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `Get-Process -Id ${pid} -ErrorAction Stop | Select-Object @{N='cpuMs';E={$_.TotalProcessorTime.TotalMilliseconds}}, @{N='mem';E={$_.WorkingSet64}} | ConvertTo-Json -Compress`,
+      ], { timeout: 5000, windowsHide: true }, (err, stdout) => {
+        if (err || !stdout?.trim()) return resolve(null);
+        try {
+          const parsed = JSON.parse(stdout.trim());
+          if (typeof parsed.cpuMs !== 'number' || typeof parsed.mem !== 'number') return resolve(null);
+          resolve({ cpuMs: parsed.cpuMs, memoryBytes: parsed.mem });
+        } catch { resolve(null); }
+      });
+    });
+  }
+
+  /** Real PID/uptime (unchanged) plus real, live per-process CPU%/memory —
+   *  never invented or estimated. CPU% is derived from the delta between
+   *  this call's real cumulative-CPU-time sample and the previous call's
+   *  (normalized across all logical cores, matching modern Task Manager's
+   *  convention), so the FIRST call after a server starts (or after a gap
+   *  in polling) has no prior sample to diff against and honestly reports
+   *  cpuPercent: null rather than a made-up number — the renderer shows
+   *  this as "Measuring…" for one tick. metricsAvailable is false (with a
+   *  reason) if Windows itself couldn't be queried, e.g. the process
+   *  already exited between the status check and the query. */
+  async getProcessStats(id: string): Promise<{
+    pid: number | null; uptimeMs: number | null;
+    cpuPercent: number | null; memoryBytes: number | null;
+    metricsAvailable: boolean; metricsError?: string;
+  }> {
     const server = this.getServer(id);
-    if (!server || !server.pid || !server.startedAt) return { pid: null, uptimeMs: null };
-    return { pid: server.pid, uptimeMs: Date.now() - new Date(server.startedAt).getTime() };
+    if (!server || !server.pid || !server.startedAt || !this.processes.has(id)) {
+      this.resourceSamples.delete(id);
+      return { pid: null, uptimeMs: null, cpuPercent: null, memoryBytes: null, metricsAvailable: false };
+    }
+    const pid = server.pid;
+    const uptimeMs = Date.now() - new Date(server.startedAt).getTime();
+
+    const raw = await this.queryProcessMetrics(pid);
+    if (!raw) {
+      this.resourceSamples.delete(id);
+      return { pid, uptimeMs, cpuPercent: null, memoryBytes: null, metricsAvailable: false, metricsError: 'Could not read process metrics from Windows.' };
+    }
+
+    const now = Date.now();
+    const prev = this.resourceSamples.get(id);
+    this.resourceSamples.set(id, { cpuMs: raw.cpuMs, sampledAt: now });
+
+    let cpuPercent: number | null = null;
+    if (prev && now > prev.sampledAt) {
+      const deltaCpuMs = raw.cpuMs - prev.cpuMs;
+      const deltaWallMs = now - prev.sampledAt;
+      const cores = os.cpus().length || 1;
+      cpuPercent = Math.max(0, Math.min(100, (deltaCpuMs / (deltaWallMs * cores)) * 100));
+    }
+
+    return { pid, uptimeMs, cpuPercent, memoryBytes: raw.memoryBytes, metricsAvailable: true };
   }
 
   // ── Connection info ──────────────────────────────────────────────────────
@@ -1637,4 +1737,408 @@ export class MinecraftManager {
   }
 
   isRunning(id: string): boolean { return this.processes.has(id); }
+
+  // ── Security: shared archive-extraction guards ──────────────────────────
+  // Both world import and pack install extract an untrusted zip into a
+  // temp dir first (never straight into the server) and run this before
+  // touching anything else. extract-zip/yauzl already normalizes entry
+  // paths (real zip-slip protection), but this is defense in depth: every
+  // extracted entry must resolve strictly inside `root`, and none may be a
+  // symlink/junction (neither a Minecraft world nor a resource/behavior
+  // pack legitimately needs one — Windows zip extraction doesn't normally
+  // create them, but this closes the door regardless of platform).
+  private assertNoTraversal(root: string) {
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (!isPathInside(full, root)) throw new Error('Archive contained an entry outside the expected extraction directory.');
+        const lst = fs.lstatSync(full);
+        if (lst.isSymbolicLink()) throw new Error('Archive contained a symlink/junction, which is not allowed.');
+        if (entry.isDirectory()) walk(full);
+      }
+    };
+    walk(root);
+  }
+
+  private checkArchiveSize(zipPath: string, maxBytes: number, label: string) {
+    const size = fs.statSync(zipPath).size;
+    if (size > maxBytes) throw new Error(`${label} is too large (${(size / 1024 / 1024).toFixed(0)} MB, max ${(maxBytes / 1024 / 1024).toFixed(0)} MB).`);
+  }
+
+  // ── Worlds (real import/export, edition-aware) ───────────────────────────
+  private readonly MAX_WORLD_ARCHIVE_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
+  private readonly MAX_PACK_ARCHIVE_BYTES = 500 * 1024 * 1024; // 500MB
+
+  /** Real per-edition world location — Java's level-name folder sits
+   *  directly under the server root; Bedrock's sits under worlds/. Reads
+   *  the raw property (not getLevelName(), which is Java-only-shaped and
+   *  used by Marketplace datapack placement — this needs the correct
+   *  per-edition default instead of always falling back to "world"). */
+  private getWorldPaths(server: MinecraftServer): { dir: string; levelName: string } {
+    let levelName = '';
+    try { levelName = this.readProperties(server.id).find((p) => p.key === 'level-name')?.value?.trim() || ''; } catch {}
+    if (!levelName) levelName = server.edition === 'bedrock' ? 'Bedrock level' : 'world';
+    const dir = server.edition === 'bedrock' ? path.join(server.installPath, 'worlds', levelName) : path.join(server.installPath, levelName);
+    return { dir, levelName };
+  }
+
+  /** Real, signature-based edition detection for an extracted world folder
+   *  — never a filename/extension guess. Bedrock worlds use LevelDB (a
+   *  real "db" subfolder); Java worlds never have one and instead have a
+   *  binary-NBT level.dat directly in the world folder. Checks the
+   *  extraction root itself first, then one level of subdirectories (a
+   *  zip commonly has the world as a single top-level folder). */
+  private findWorldRoot(extractDir: string): { root: string; edition: MinecraftEdition } | null {
+    const check = (dir: string): MinecraftEdition | null => {
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return null;
+      const entries = fs.readdirSync(dir);
+      if (entries.includes('db') && fs.statSync(path.join(dir, 'db')).isDirectory()) return 'bedrock';
+      if (entries.includes('level.dat')) return 'java';
+      return null;
+    };
+    const direct = check(extractDir);
+    if (direct) return { root: extractDir, edition: direct };
+    for (const entry of fs.readdirSync(extractDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const sub = path.join(extractDir, entry.name);
+      const found = check(sub);
+      if (found) return { root: sub, edition: found };
+    }
+    return null;
+  }
+
+  getWorldInfo(id: string): { levelName: string; exists: boolean; sizeBytes: number | null; edition: MinecraftEdition } | null {
+    const server = this.getServer(id);
+    if (!server) return null;
+    const { dir, levelName } = this.getWorldPaths(server);
+    const exists = fs.existsSync(dir);
+    let sizeBytes: number | null = null;
+    if (exists) {
+      try {
+        let total = 0;
+        const walk = (d: string) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else total += fs.statSync(p).size; } };
+        walk(dir);
+        sizeBytes = total;
+      } catch {}
+    }
+    return { levelName, exists, sizeBytes, edition: server.edition };
+  }
+
+  /** Exports JUST the world folder (never the whole server) as a real,
+   *  externally-usable zip — the world keeps its own folder name as the
+   *  zip's top-level entry so re-importing it (here or in real Minecraft)
+   *  is unambiguous. Refuses while running, matching restoreBackup()'s
+   *  existing safety precedent, so the copy can never be read mid-write. */
+  async exportWorld(id: string, destZipPath: string): Promise<{ success: boolean; error?: string }> {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+    if (this.processes.has(id)) return { success: false, error: 'Stop the server before exporting its world.' };
+    const { dir, levelName } = this.getWorldPaths(server);
+    if (!fs.existsSync(dir)) return { success: false, error: `No world found (looked for "${levelName}").` };
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const output = fs.createWriteStream(destZipPath);
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        output.on('close', resolve);
+        archive.on('error', reject);
+        archive.pipe(output);
+        archive.directory(dir, levelName);
+        archive.finalize();
+      });
+      return { success: true };
+    } catch (e: any) {
+      try { if (fs.existsSync(destZipPath)) fs.unlinkSync(destZipPath); } catch {}
+      return { success: false, error: e?.message || 'World export failed.' };
+    }
+  }
+
+  /** Real import: extracts to a secure temp dir under userData first (never
+   *  straight into the server), validates it's a genuine world via its real
+   *  on-disk signature, refuses an edition mismatch outright, and requires
+   *  explicit confirmation (needsConfirmation) before replacing an existing
+   *  world — which itself gets a real backup (registered in the same
+   *  backup index the Backups tab already shows) before being touched. */
+  async importWorld(id: string, sourceZipPath: string, confirmReplace = false): Promise<{ success: boolean; error?: string; needsConfirmation?: boolean; detectedEdition?: MinecraftEdition }> {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+    if (this.processes.has(id)) return { success: false, error: 'Stop the server before importing a world.' };
+    if (!fs.existsSync(sourceZipPath)) return { success: false, error: 'Selected file does not exist.' };
+
+    let tmpRoot = '';
+    try {
+      this.checkArchiveSize(sourceZipPath, this.MAX_WORLD_ARCHIVE_BYTES, 'World archive');
+      tmpRoot = path.join(this.userDataPath, 'tmp', `world-import-${id}-${Date.now()}`);
+      fs.mkdirSync(tmpRoot, { recursive: true });
+      await extractZip(sourceZipPath, { dir: tmpRoot });
+      this.assertNoTraversal(tmpRoot);
+
+      const found = this.findWorldRoot(tmpRoot);
+      if (!found) return { success: false, error: 'Could not find a recognizable Minecraft world in that archive (no level.dat or Bedrock db/ folder).' };
+      if (found.edition !== server.edition) {
+        return {
+          success: false,
+          detectedEdition: found.edition,
+          error: `This is a ${found.edition === 'bedrock' ? 'Bedrock' : 'Java'} world, but this server is ${server.edition === 'bedrock' ? 'Bedrock' : 'Java'} Edition — refusing to install a mismatched world.`,
+        };
+      }
+
+      const { dir: targetDir, levelName } = this.getWorldPaths(server);
+      const worldAlreadyExists = fs.existsSync(targetDir);
+      if (worldAlreadyExists && !confirmReplace) {
+        return { success: false, needsConfirmation: true, detectedEdition: found.edition, error: `A world ("${levelName}") already exists for this server. Importing will replace it.` };
+      }
+
+      if (worldAlreadyExists) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupName = `${server.name.replace(/[^a-z0-9-_]/gi, '_')}-world-preimport-${timestamp}`;
+        const backupPath = path.join(this.backupsDir, `${backupName}.zip`);
+        await new Promise<void>((resolve, reject) => {
+          const output = fs.createWriteStream(backupPath);
+          const archive = archiver('zip', { zlib: { level: 6 } });
+          output.on('close', resolve);
+          archive.on('error', reject);
+          archive.pipe(output);
+          archive.directory(targetDir, levelName);
+          archive.finalize();
+        });
+        const stats = fs.statSync(backupPath);
+        const list = this.loadBackupIndex();
+        list.push({ id: this.generateId(), serverId: id, name: backupName, path: backupPath, size: stats.size, createdAt: new Date().toISOString() });
+        this.saveBackupIndex(list);
+        fs.rmSync(targetDir, { recursive: true, force: true });
+      }
+
+      fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+      fs.cpSync(found.root, targetDir, { recursive: true });
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'World import failed.' };
+    } finally {
+      if (tmpRoot) { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {} }
+    }
+  }
+
+  // ── Bedrock Resource/Behavior Packs (real, local-folder mechanism) ───────
+  // Java has no server-side equivalent of a local pack folder — a Java
+  // server delivers exactly one resource pack via a URL its own clients
+  // download from (the resource-pack/resource-pack-sha1 server.properties
+  // keys, already editable generically via Properties). Pretending Java has
+  // the same local-folder pack system as Bedrock would be dishonest, so
+  // this section is Bedrock-only by design, not an oversight.
+  /** Mojang's own shipped manifest.json files (e.g. the default "chemistry"
+   *  packs bundled with every Bedrock Dedicated Server download) use `//`
+   *  and `/* *\/` comments, which are valid in Bedrock's JSONC-flavored
+   *  manifests but not in strict JSON. Strips them (respecting string
+   *  literals so a `//` inside a quoted value is left alone) before
+   *  JSON.parse, so genuinely valid, real Mojang-shipped manifests aren't
+   *  misreported as invalid. */
+  private stripJsonComments(input: string): string {
+    let out = '';
+    let inString = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+    for (let i = 0; i < input.length; i++) {
+      const c = input[i];
+      const next = input[i + 1];
+      if (inLineComment) {
+        if (c === '\n') { inLineComment = false; out += c; }
+        continue;
+      }
+      if (inBlockComment) {
+        if (c === '*' && next === '/') { inBlockComment = false; i++; }
+        continue;
+      }
+      if (inString) {
+        out += c;
+        if (c === '\\') { out += next; i++; continue; }
+        if (c === '"') inString = false;
+        continue;
+      }
+      if (c === '"') { inString = true; out += c; continue; }
+      if (c === '/' && next === '/') { inLineComment = true; i++; continue; }
+      if (c === '/' && next === '*') { inBlockComment = true; i++; continue; }
+      out += c;
+    }
+    return out;
+  }
+
+  private parseBedrockManifestFile(filePath: string): any {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    try { return JSON.parse(raw); } catch { return JSON.parse(this.stripJsonComments(raw)); }
+  }
+
+  /** Finds a genuine manifest.json (with a real, valid header.uuid + a
+   *  3-number header.version — never assumed from the archive/file name)
+   *  at the extraction root or one level of subdirectories. */
+  private findManifestRoot(extractDir: string): { root: string; manifest: any } | null {
+    const tryDir = (dir: string): any | null => {
+      const p = path.join(dir, 'manifest.json');
+      if (!fs.existsSync(p)) return null;
+      try {
+        const m = this.parseBedrockManifestFile(p);
+        if (!this.isValidBedrockManifest(m)) return null;
+        return m;
+      } catch { return null; }
+    };
+    const direct = tryDir(extractDir);
+    if (direct) return { root: extractDir, manifest: direct };
+    for (const entry of fs.readdirSync(extractDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const sub = path.join(extractDir, entry.name);
+      const m = tryDir(sub);
+      if (m) return { root: sub, manifest: m };
+    }
+    return null;
+  }
+
+  private isValidBedrockManifest(m: any): boolean {
+    const uuid = m?.header?.uuid;
+    const version = m?.header?.version;
+    const validUuid = typeof uuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
+    const validVersion = Array.isArray(version) && version.length === 3 && version.every((n: any) => Number.isInteger(n));
+    return validUuid && validVersion;
+  }
+
+  private bedrockActivationFile(server: MinecraftServer, kind: 'resource_packs' | 'behavior_packs'): string {
+    const { dir } = this.getWorldPaths(server);
+    return path.join(dir, kind === 'resource_packs' ? 'world_resource_packs.json' : 'world_behavior_packs.json');
+  }
+
+  private readBedrockActivation(server: MinecraftServer, kind: 'resource_packs' | 'behavior_packs'): { pack_id: string; version: number[] }[] {
+    try {
+      const raw = fs.readFileSync(this.bedrockActivationFile(server, kind), 'utf-8');
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  }
+
+  /** Lists real installed packs by scanning resource_packs/behavior_packs
+   *  and reading each folder's own manifest.json — never assumes a pack is
+   *  active just because its folder exists; "enabled" is cross-referenced
+   *  against the world's own real world_resource_packs.json/
+   *  world_behavior_packs.json activation list. */
+  listBedrockPacks(id: string, kind: 'resource_packs' | 'behavior_packs'): {
+    folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean;
+  }[] {
+    const server = this.getServer(id);
+    if (!server || server.edition !== 'bedrock') return [];
+    const packsDir = path.join(server.installPath, kind);
+    if (!fs.existsSync(packsDir)) return [];
+    const activation = this.readBedrockActivation(server, kind);
+
+    const results: ReturnType<MinecraftManager['listBedrockPacks']> = [];
+    for (const entry of fs.readdirSync(packsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const folderName = entry.name;
+      const manifestPath = path.join(packsDir, folderName, 'manifest.json');
+      if (!fs.existsSync(manifestPath)) {
+        results.push({ folderName, uuid: null, name: folderName, version: 'unknown', description: '', valid: false, invalidReason: 'No manifest.json found.', enabled: false });
+        continue;
+      }
+      try {
+        const manifest = this.parseBedrockManifestFile(manifestPath);
+        if (!this.isValidBedrockManifest(manifest)) {
+          results.push({ folderName, uuid: typeof manifest?.header?.uuid === 'string' ? manifest.header.uuid : null, name: manifest?.header?.name || folderName, version: 'unknown', description: manifest?.header?.description || '', valid: false, invalidReason: 'manifest.json has no valid header.uuid/header.version.', enabled: false });
+          continue;
+        }
+        const uuid = manifest.header.uuid as string;
+        const versionArr = manifest.header.version as number[];
+        const enabled = activation.some((a) => a.pack_id === uuid && Array.isArray(a.version) && a.version.length === 3 && a.version.every((n, i) => n === versionArr[i]));
+        results.push({ folderName, uuid, name: manifest.header.name || folderName, version: versionArr.join('.'), description: manifest.header.description || '', valid: true, enabled });
+      } catch {
+        results.push({ folderName, uuid: null, name: folderName, version: 'unknown', description: '', valid: false, invalidReason: 'manifest.json is not valid JSON.', enabled: false });
+      }
+    }
+    return results;
+  }
+
+  /** Real install: extract to a secure temp dir, validate a genuine
+   *  manifest.json exists, then move into place — never overwriting an
+   *  unrelated existing folder (a name collision gets a numbered suffix
+   *  instead). */
+  async installBedrockPack(id: string, kind: 'resource_packs' | 'behavior_packs', zipPath: string): Promise<{ success: boolean; error?: string; folderName?: string }> {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+    if (server.edition !== 'bedrock') return { success: false, error: 'This server is not Bedrock Edition.' };
+    if (!fs.existsSync(zipPath)) return { success: false, error: 'Selected file does not exist.' };
+
+    let tmpRoot = '';
+    try {
+      this.checkArchiveSize(zipPath, this.MAX_PACK_ARCHIVE_BYTES, 'Pack archive');
+      tmpRoot = path.join(this.userDataPath, 'tmp', `pack-import-${id}-${Date.now()}`);
+      fs.mkdirSync(tmpRoot, { recursive: true });
+      await extractZip(zipPath, { dir: tmpRoot });
+      this.assertNoTraversal(tmpRoot);
+
+      const found = this.findManifestRoot(tmpRoot);
+      if (!found) return { success: false, error: 'Could not find a valid manifest.json (with a real header.uuid and header.version) in that archive.' };
+
+      const packsDir = path.join(server.installPath, kind);
+      fs.mkdirSync(packsDir, { recursive: true });
+      const baseName = (found.manifest.header.name || path.basename(zipPath, path.extname(zipPath))).replace(/[^a-z0-9-_ .]/gi, '_').trim() || 'pack';
+      let folderName = baseName;
+      let targetDir = path.join(packsDir, folderName);
+      let suffix = 2;
+      while (fs.existsSync(targetDir)) { folderName = `${baseName} (${suffix})`; targetDir = path.join(packsDir, folderName); suffix++; }
+
+      fs.cpSync(found.root, targetDir, { recursive: true });
+      return { success: true, folderName };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Pack install failed.' };
+    } finally {
+      if (tmpRoot) { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {} }
+    }
+  }
+
+  /** Enables/disables ONE pack by editing only its own entry in the real
+   *  world_resource_packs.json/world_behavior_packs.json — backed up first,
+   *  every other entry left untouched (never a blind full rewrite). */
+  setBedrockPackEnabled(id: string, kind: 'resource_packs' | 'behavior_packs', uuid: string, version: number[], enabled: boolean): { success: boolean; error?: string } {
+    const server = this.getServer(id);
+    if (!server || server.edition !== 'bedrock') return { success: false, error: 'Not a Bedrock server.' };
+    const { dir: worldDir } = this.getWorldPaths(server);
+    fs.mkdirSync(worldDir, { recursive: true });
+    const file = this.bedrockActivationFile(server, kind);
+    let list = this.readBedrockActivation(server, kind);
+    try { if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`); } catch {}
+
+    const idx = list.findIndex((e) => e.pack_id === uuid);
+    if (enabled) {
+      if (idx === -1) list.push({ pack_id: uuid, version });
+      else list[idx] = { pack_id: uuid, version };
+    } else if (idx !== -1) {
+      list.splice(idx, 1);
+    }
+
+    try {
+      fs.writeFileSync(file, JSON.stringify(list, null, 2));
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Failed to update pack activation.' };
+    }
+  }
+
+  /** Removes a pack's folder and strips any matching activation entries —
+   *  every other pack's own folder and activation entry is left untouched. */
+  removeBedrockPack(id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string, uuid: string | null): { success: boolean; error?: string } {
+    const server = this.getServer(id);
+    if (!server || server.edition !== 'bedrock') return { success: false, error: 'Not a Bedrock server.' };
+    const packsRoot = path.resolve(path.join(server.installPath, kind));
+    const packDir = path.resolve(path.join(packsRoot, folderName));
+    if (!isPathInside(packDir, packsRoot)) return { success: false, error: 'Invalid pack folder.' };
+    try {
+      if (fs.existsSync(packDir)) fs.rmSync(packDir, { recursive: true, force: true });
+      if (uuid) {
+        const file = this.bedrockActivationFile(server, kind);
+        if (fs.existsSync(file)) {
+          const list = this.readBedrockActivation(server, kind);
+          const next = list.filter((e) => e.pack_id !== uuid);
+          if (next.length !== list.length) { try { fs.copyFileSync(file, `${file}.bak`); } catch {} fs.writeFileSync(file, JSON.stringify(next, null, 2)); }
+        }
+      }
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Failed to remove pack.' };
+    }
+  }
 }

@@ -45,6 +45,29 @@ const ok = (name, cond) => { if (cond) { pass++; } else { fail++; console.log(' 
     ok('detectExistingServer reads the real port from server.properties', detected.port === 25601);
     ok('detectExistingServer sees the real jar filename', detected.jarFile === 'server.jar');
 
+    // ── 3b. Ambiguous-edition detection — a folder with only a properties
+    // file (no jar, no bedrock_server.exe, no Bedrock-only property keys,
+    // no world) must never be silently guessed as Java; it must be reported
+    // ambiguous/invalid so the UI shows an honest "can't tell" state rather
+    // than a false-positive green "Detected a Vanilla server" checkmark.
+    const ambiguousDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mercy-mc-import-smoke-ambiguous-'));
+    fs.writeFileSync(path.join(ambiguousDir, 'server.properties'), 'server-port=25602\n');
+    const detectedAmbiguous = await mgr.detectExistingServer(ambiguousDir);
+    ok('3b. a properties-only folder with no jar/exe is NOT silently classified as Java', detectedAmbiguous.valid === false);
+    ok('3c. it is explicitly flagged ambiguous rather than defaulted to an edition', detectedAmbiguous.ambiguous === true);
+    fs.rmSync(ambiguousDir, { recursive: true, force: true });
+
+    // ── 3d. A folder with real Bedrock-only property keys (server-portv6 /
+    // texturepack-required) but no bedrock_server.exe must be identified as
+    // Bedrock (missing its binary) — not falsely called ambiguous, and never
+    // guessed as Java either.
+    const bedrockNoExeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mercy-mc-import-smoke-bedrock-noexe-'));
+    fs.writeFileSync(path.join(bedrockNoExeDir, 'server.properties'), 'server-port=19132\nserver-portv6=19133\ntexturepack-required=false\n');
+    const detectedBedrockNoExe = await mgr.detectExistingServer(bedrockNoExeDir);
+    ok('3e. real Bedrock-only property keys correctly identify the edition even without bedrock_server.exe', detectedBedrockNoExe.edition === 'bedrock');
+    ok('3f. still refuses to import since the actual server executable is missing', detectedBedrockNoExe.valid === false);
+    fs.rmSync(bedrockNoExeDir, { recursive: true, force: true });
+
     // ── 4. Import completes — same call the dialog's "Import Server" button makes.
     const importResult = await mgr.importServer(fixtureDir, 'Tiny Import Smoke Test', 512);
     ok('4. importServer succeeds', importResult.success === true && !!importResult.server);

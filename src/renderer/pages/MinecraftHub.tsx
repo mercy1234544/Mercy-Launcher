@@ -15,6 +15,7 @@ export default function MinecraftHub() {
   const { servers, setServers } = useMinecraftStore();
   const [loading, setLoading] = useState(true);
   const [showImport, setShowImport] = useState(false);
+  const [editionFilter, setEditionFilter] = useState<'all' | 'java' | 'bedrock'>('all');
 
   const load = async () => {
     if (!window.electronAPI?.minecraft) { setLoading(false); return; }
@@ -23,6 +24,9 @@ export default function MinecraftHub() {
   useEffect(() => { load(); }, []);
 
   const running = servers.filter((s) => s.status === 'running').length;
+  const javaCount = servers.filter((s) => s.edition !== 'bedrock').length;
+  const bedrockCount = servers.filter((s) => s.edition === 'bedrock').length;
+  const visibleServers = servers.filter((s) => editionFilter === 'all' || (editionFilter === 'bedrock' ? s.edition === 'bedrock' : s.edition !== 'bedrock'));
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-6 max-w-6xl mx-auto">
@@ -80,6 +84,21 @@ export default function MinecraftHub() {
         </Panel>
       </div>
 
+      {!loading && servers.length > 0 && (
+        <div className="flex gap-1 p-1 rounded-xl bg-overlay-4 border border-overlay-8 w-fit">
+          {([
+            { id: 'all' as const, label: `All (${servers.length})` },
+            { id: 'java' as const, label: `Java Edition (${javaCount})` },
+            { id: 'bedrock' as const, label: `Bedrock Edition (${bedrockCount})` },
+          ]).map((t) => (
+            <button key={t.id} onClick={() => setEditionFilter(t.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${editionFilter === t.id ? 'bg-primary-600/20 text-primary-300' : 'text-surface-400 hover:text-surface-200'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading ? (
         <Panel className="flex items-center justify-center py-12"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>
       ) : servers.length === 0 ? (
@@ -87,7 +106,7 @@ export default function MinecraftHub() {
           <EmptyState
             icon={Blocks}
             title="No Minecraft servers yet"
-            description="Create a new Vanilla or Paper server, or import one you already have running."
+            description="Create a new Java or Bedrock Edition server, or import one you already have running."
             action={
               <div className="flex items-center gap-2">
                 <button onClick={() => setShowImport(true)} className="btn-secondary text-xs py-2 flex items-center gap-1.5"><FolderInput size={13} /> Import</button>
@@ -96,15 +115,22 @@ export default function MinecraftHub() {
             }
           />
         </Panel>
+      ) : visibleServers.length === 0 ? (
+        <Panel padding="lg">
+          <EmptyState icon={Blocks} title={`No ${editionFilter === 'bedrock' ? 'Bedrock' : 'Java'} Edition servers`} description="Switch the filter above, or create one of this edition." />
+        </Panel>
       ) : (
         <div className="space-y-3">
-          {servers.map((s) => (
+          {visibleServers.map((s) => (
             <Panel as="button" interactive key={s.id} onClick={() => navigate(`/minecraft/server/${s.id}`)} className="group w-full flex items-center gap-4">
               <div className="w-10 h-10 rounded-xl bg-overlay-6 border border-overlay-10 flex items-center justify-center shrink-0"><Blocks size={17} className="text-emerald-300" /></div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold text-surface-100">{s.name}</p>
                   <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[s.status] || 'bg-surface-600'}`} />
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${s.edition === 'bedrock' ? 'bg-blue-500/15 text-blue-300' : 'bg-amber-500/15 text-amber-300'}`}>
+                    {s.edition === 'bedrock' ? 'Bedrock' : 'Java'}
+                  </span>
                 </div>
                 <p className="text-xs text-surface-500 mt-0.5">{s.version} · {s.serverType === 'bedrock' ? 'Bedrock' : s.serverType === 'paper' ? 'Paper' : 'Vanilla'} · Port {s.port}</p>
               </div>
@@ -195,7 +221,10 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
             </div>
           ) : (
             <div className="bg-amber-500/8 border border-amber-500/15 rounded-xl p-3 flex items-center gap-2 text-xs text-amber-300 mb-5">
-              <AlertTriangle size={14} className="shrink-0" /> {detected.reason}
+              <AlertTriangle size={14} className="shrink-0" />
+              {detected.ambiguous
+                ? "Couldn't tell if this is a Java or Bedrock server — no server jar, no bedrock_server.exe, and no edition-specific signature found. Pick a folder that includes the actual server executable."
+                : detected.reason}
             </div>
           )
         )}
