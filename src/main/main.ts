@@ -34,6 +34,24 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+// Guards against calling autoUpdater.quitAndInstall() more than once for the
+// same downloaded update. electron-updater's own dedup flag
+// (quitAndInstallCalled) gets reset to false by a second/racing call before
+// the first call's install actually completes (see BaseUpdater.quitAndInstall
+// in electron-updater — the `else { this.quitAndInstallCalled = false }`
+// branch), which then lets its OWN autoInstallOnAppQuit quit-hook ALSO fire
+// and spawn a second, independent installer process concurrently with the
+// first. Two NSIS installers racing to overwrite the same install directory
+// is what actually caused the v1.88.0 update-loop bug: the large app.asar
+// (slowest file to write, and the one app.getVersion() reads) could lose
+// that race and stay on the old version even though smaller/faster files
+// (the exe's version resource) won it — so the "updated" app kept reporting
+// its old version and re-downloading the same release forever. Guarding
+// here, once, at the single real entry point of every install trigger,
+// makes this robust to ANY current or future call site (the main-process
+// auto-install timer, the updater:install IPC handler, a manual "Install"
+// button) rather than patching just one of them.
+let updateInstallTriggered = false;
 let serverManager: ServerManager;
 let fiveMMarketplace: FiveMMarketplace;
 let resourceScanner: ResourceScanner;
@@ -1340,6 +1358,22 @@ async function importVehiclePack(opts: { sourcePath: string; serverPath: string;
 }
 
 // ─── Auto Updater Setup ─────────────────────────────────────────────────────
+/** The ONE place that ever calls autoUpdater.quitAndInstall(). Every trigger
+ *  (the auto-install timer below, the manual updater:install IPC handler)
+ *  must go through this, so a second/racing call is a plain no-op here in
+ *  OUR code — never reaching electron-updater's quitAndInstall() a second
+ *  time, which is what caused the real double-installer race (see
+ *  updateInstallTriggered's own comment above). */
+function triggerQuitAndInstall() {
+  if (updateInstallTriggered) {
+    console.log('[AutoUpdater] Install already triggered for this update — ignoring duplicate request.');
+    return;
+  }
+  updateInstallTriggered = true;
+  console.log('[AutoUpdater] Quitting and installing...');
+  autoUpdater.quitAndInstall(false, true);
+}
+
 function setupAutoUpdater() {
   autoUpdater.autoDownload = settingsManager.get('autoUpdate');
   autoUpdater.autoInstallOnAppQuit = true;
@@ -1385,10 +1419,7 @@ function setupAutoUpdater() {
       version: info.version,
     });
     // Auto-restart after a short delay to let the renderer show the status
-    setTimeout(() => {
-      console.log('[AutoUpdater] Quitting and installing...');
-      autoUpdater.quitAndInstall(false, true);
-    }, 3000);
+    setTimeout(triggerQuitAndInstall, 3000);
   });
 
   autoUpdater.on('error', (err) => {
@@ -1444,9 +1475,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('updater:install', () => {
     // Give the IPC response time to reach the renderer before quitting
-    setTimeout(() => {
-      autoUpdater.quitAndInstall(false, true);
-    }, 500);
+    setTimeout(triggerQuitAndInstall, 500);
   });
 
   ipcMain.handle('updater:getVersion', () => {

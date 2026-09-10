@@ -71,11 +71,13 @@ export default function SplashScreen({ onComplete }: SplashScreenProps) {
           break;
 
         case 'ready':
+          // Installing/restarting is triggered once, centrally, by the main
+          // process's own update-downloaded handler — calling install()
+          // again from here raced against it (both firing for the same
+          // downloaded update) and could leave the install partially
+          // applied. This just reflects that status in the UI.
           setUpdatePhase('installing');
           setStatusText(`Update v${data.version || newVersion} ready — restarting...`);
-          setTimeout(() => {
-            window.electronAPI.appUpdater.install();
-          }, 1500);
           break;
 
         case 'current':
