@@ -1,14 +1,22 @@
-// Supabase client for the accounts + script-access system.
+// Supabase client for the accounts + friends/presence system.
 //
-// OWNER SETUP: paste your project's values below (Supabase → Project Settings →
-// API). The anon key is meant to be public — security is enforced by the Row
-// Level Security policies in supabase/schema.sql, not by hiding this key.
-// Until these are filled in, isSupabaseConfigured() is false and the whole
-// account/login UI stays hidden, so the app behaves exactly as before.
+// OWNER SETUP: copy .env.example to .env at the repo root and fill in your
+// project's real values (Supabase → Project Settings → API) — see that file
+// for exactly which variables are required. Vite only exposes env vars
+// prefixed VITE_ to renderer code, and .env/.env.local are already
+// gitignored, so real credentials never get hardcoded or committed. The
+// anon key is meant to be public regardless — security is enforced by the
+// Row Level Security policies in supabase/schema.sql and
+// supabase/friends_presence_schema.sql, not by hiding this key.
+//
+// Until real values are supplied, these fall back to the same placeholder
+// sentinel this file always used, so isSupabaseConfigured() stays false and
+// the whole account/friends/presence UI stays in its existing honest
+// "not deployed yet" state — unchanged local-dev behavior.
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-export const SUPABASE_URL = 'PASTE_YOUR_SUPABASE_URL_HERE';
-export const SUPABASE_ANON_KEY = 'PASTE_YOUR_SUPABASE_ANON_KEY_HERE';
+export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'PASTE_YOUR_SUPABASE_URL_HERE';
+export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'PASTE_YOUR_SUPABASE_ANON_KEY_HERE';
 
 export function isSupabaseConfigured(): boolean {
   return !SUPABASE_URL.startsWith('PASTE') && !SUPABASE_ANON_KEY.startsWith('PASTE');

@@ -20,6 +20,7 @@ import { MinecraftManager } from './services/MinecraftManager';
 import { AssettoCorsaManager } from './services/AssettoCorsaManager';
 import { GameScanner } from './services/GameScanner';
 import { PresenceManager } from './services/PresenceManager';
+import { ConnectionNegotiator } from './services/connection/ConnectionNegotiator';
 import { MinecraftMarketplace } from './services/MinecraftMarketplace';
 import { BedrockMarketplace } from './services/BedrockMarketplace';
 import { ThemeManager } from './services/ThemeManager';
@@ -424,6 +425,23 @@ function registerIpcHandlers() {
   ipcMain.handle('presence:getFriends', () => presenceManager.getFriends());
   ipcMain.handle('presence:getSettings', () => presenceManager.getPresenceSettings());
   ipcMain.handle('presence:setSettings', (_, s: { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean }) => presenceManager.setPresenceSettings(s));
+
+  // Real cross-computer join infrastructure — Minecraft first (see
+  // ConnectionNegotiator.ts). Reuses MinecraftManager's own real
+  // lanAddress/portListening/raknet detection; never re-derives it.
+  // relayConfigured reflects whether a real Mercy relay/signaling URL has
+  // actually been supplied — there is none by default, so this is honest
+  // about relay unavailability rather than assuming one exists.
+  const connectionNegotiator = new ConnectionNegotiator();
+  ipcMain.handle('presence:createJoinToken', (_, serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string } | null) =>
+    presenceManager.createJoinToken(serverId, mercyGameId, ttlMs, endpoint));
+  ipcMain.handle('connection:negotiateMinecraftEndpoint', async (_, serverId: string) => {
+    const info = await minecraftManager.getConnectionInfo(serverId);
+    if (!info) return null;
+    const lanAddress = info.lanAddress ? info.lanAddress.split(':').slice(0, -1).join(':') : null;
+    const portListening = info.edition === 'bedrock' ? (info.raknet?.reachable ?? null) : info.portListening;
+    return connectionNegotiator.planHostEndpoint({ lanAddress, port: info.port, portListening }, !!process.env.MERCY_RELAY_WS_URL);
+  });
 
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());

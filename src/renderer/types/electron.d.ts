@@ -201,6 +201,11 @@ interface ElectronAPI {
     getFriends: () => Promise<FriendPresence[]>;
     getSettings: () => Promise<PresenceSettings>;
     setSettings: (s: PresenceSettings) => Promise<void>;
+    createJoinToken: (serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string } | null) => Promise<string>;
+  };
+
+  connection: {
+    negotiateMinecraftEndpoint: (serverId: string) => Promise<EndpointPlan | null>;
   };
 
   onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
@@ -599,6 +604,12 @@ declare global {
   interface LocalPresence { status: PresenceStatus; visibility: PresenceVisibility; activity: LocalActivity | null; }
   interface FriendPresence { displayName: string; status: PresenceStatus; activity: LocalActivity | null; joinable: boolean; }
   interface PresenceSettings { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean; }
+
+  // ── Connection negotiation types (mirror
+  // src/main/services/connection/ConnectionNegotiator.ts) ────────────────────
+  type EndpointStrategy = 'lan-direct' | 'upnp-direct' | 'relay';
+  interface EndpointCandidate { strategy: EndpointStrategy; address: string; note: string; }
+  interface EndpointPlan { candidates: EndpointCandidate[]; relayAvailable: boolean; unavailableExplanation: string | null; }
 
   // ── Vehicle Studio types (mirror src/main/services/VehicleStudio.ts) ────────
   interface VSVehicle {

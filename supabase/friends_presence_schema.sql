@@ -91,7 +91,12 @@ create table if not exists public.join_requests (
   host_id       uuid not null references public.profiles(id) on delete cascade,
   server_id     text not null references public.servers(id) on delete cascade,
   status        text not null default 'pending' check (status in ('pending','authorized','denied','expired')),
-  token         text,                                    -- set by the host once authorized; opaque to everyone else
+  token         text,                                    -- set by the host once authorized; opaque HMAC credential, verified later by the host/relay — never decoded by the requester
+  -- The real "host:port" (+ which strategy produced it — lan-direct /
+  -- upnp-direct / relay, see ConnectionNegotiator.ts) the requester should
+  -- actually try. Separate from `token` on purpose: this is what the
+  -- requester needs to see; `token` is what the host/relay verifies later.
+  endpoint      jsonb,
   created_at    timestamptz not null default now(),
   expires_at    timestamptz,
   constraint no_self_join check (requester_id <> host_id)
@@ -264,7 +269,7 @@ begin
   return req;
 end; $$;
 
-create or replace function public.respond_to_join_request(request_id uuid, approve boolean, p_token text default null)
+create or replace function public.respond_to_join_request(request_id uuid, approve boolean, p_token text default null, p_endpoint jsonb default null)
 returns void language plpgsql security definer set search_path = public as $$
 declare req public.join_requests;
 begin
@@ -273,7 +278,9 @@ begin
   if req.host_id <> auth.uid() then raise exception 'Only the server''s real host may respond to a join request.'; end if;
   if req.status <> 'pending' then raise exception 'This request is no longer pending.'; end if;
   update public.join_requests
-    set status = case when approve then 'authorized' else 'denied' end, token = case when approve then p_token else null end
+    set status = case when approve then 'authorized' else 'denied' end,
+        token = case when approve then p_token else null end,
+        endpoint = case when approve then p_endpoint else null end
     where id = request_id;
 end; $$;
 

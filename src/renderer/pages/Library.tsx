@@ -151,9 +151,13 @@ const PRIVACY_TOGGLES: { key: 'appearOnline' | 'showCurrentGame' | 'showCurrentS
 // honest "not deployed yet" state below — it is not hidden or faked once a
 // real project IS configured; the exact same code path handles both. ─────
 function FriendsPresenceSection() {
-  const { connection, friends, incoming, outgoing, settings, loading, addFriendError, init, teardown, addFriend, accept, decline, remove, updateSettings, join } = useFriendsPresence();
+  const {
+    connection, friends, incoming, outgoing, incomingJoinRequests, outgoingJoinRequests, settings, loading, addFriendError,
+    init, teardown, addFriend, accept, decline, remove, updateSettings, join, approveJoin, declineJoin,
+  } = useFriendsPresence();
   const [addUsername, setAddUsername] = useState('');
   const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   useEffect(() => { init(); return () => teardown(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -170,8 +174,17 @@ function FriendsPresenceSection() {
     try {
       const result = await join(friend.serverId);
       if (result.error) toast.error(result.error);
-      else toast('Join authorized — direct connection isn\'t implemented yet, so nothing will actually connect.', { icon: 'ℹ️' });
+      else toast('Join request sent — waiting for the host to approve.', { icon: 'ℹ️' });
     } finally { setJoiningId(null); }
+  };
+
+  const handleApproveJoin = async (request: typeof incomingJoinRequests[number]) => {
+    setApprovingId(request.id);
+    try {
+      const result = await approveJoin(request);
+      if (result.error) toast.error(result.error);
+      else toast('Join approved — a real connection endpoint was negotiated and sent to your friend.', { icon: 'ℹ️' });
+    } finally { setApprovingId(null); }
   };
 
   return (
@@ -222,6 +235,36 @@ function FriendsPresenceSection() {
           {outgoing.length > 0 && (
             <p className="text-[11px] text-surface-500 mb-3">Pending: {outgoing.map((r) => r.toUsername).join(', ')}</p>
           )}
+
+          {incomingJoinRequests.length > 0 && (
+            <div className="space-y-2 mb-3">
+              {incomingJoinRequests.map((r) => (
+                <div key={r.id} className="flex items-center gap-3 rounded-xl border border-primary-500/30 bg-primary-500/10 px-4 py-2.5">
+                  <p className="flex-1 text-sm text-surface-100"><span className="font-semibold">{r.requesterUsername}</span> wants to join <span className="font-semibold">{r.serverId}</span></p>
+                  <button onClick={() => handleApproveJoin(r)} disabled={approvingId === r.id} className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1">
+                    {approvingId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Accept
+                  </button>
+                  <button onClick={() => declineJoin(r.id)} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1"><X size={12} /> Decline</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {outgoingJoinRequests.filter((r) => r.status !== 'denied' && r.status !== 'expired').map((r) => (
+            <div key={r.id} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-2.5 mb-3">
+              {r.status === 'pending' ? (
+                <p className="flex-1 text-xs text-surface-400"><Loader2 size={12} className="inline animate-spin mr-1.5" /> Waiting for the host to approve your join request for {r.serverId}…</p>
+              ) : (
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-surface-100">Approved — try connecting to:</p>
+                  {r.endpoint ? (
+                    <p className="text-xs font-mono text-primary-300 mt-0.5">{r.endpoint.address} <span className="text-surface-500">({r.endpoint.strategy})</span></p>
+                  ) : (
+                    <p className="text-[11px] text-warning mt-0.5">No connection endpoint could be negotiated — the host may need a Mercy relay, which isn't deployed yet.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
 
           {friends.length === 0 ? (
             <p className="text-xs text-surface-500 py-4">No friends yet — add one by username above.</p>

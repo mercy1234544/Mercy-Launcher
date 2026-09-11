@@ -144,13 +144,50 @@ export async function requestJoin(serverId: string): Promise<{ data?: { id: stri
   } catch (e) { return { error: friendlyError(e) }; }
 }
 
-export async function respondToJoinRequest(requestId: string, approve: boolean, token?: string): Promise<{ error?: string; notConfigured?: boolean }> {
+export async function respondToJoinRequest(
+  requestId: string, approve: boolean, token?: string, endpoint?: { strategy: string; address: string } | null,
+): Promise<{ error?: string; notConfigured?: boolean }> {
   if (!supabase) return { notConfigured: true };
   try {
-    const { error } = await supabase.rpc('respond_to_join_request', { request_id: requestId, approve, p_token: token ?? null });
+    const { error } = await supabase.rpc('respond_to_join_request', {
+      request_id: requestId, approve, p_token: token ?? null, p_endpoint: endpoint ?? null,
+    });
     if (error) return { error: friendlyError(error) };
     return {};
   } catch (e) { return { error: friendlyError(e) }; }
+}
+
+export interface JoinRequestRow {
+  id: string; requesterId: string; requesterUsername: string; hostId: string; serverId: string;
+  status: 'pending' | 'authorized' | 'denied' | 'expired';
+  endpoint: { strategy: string; address: string } | null;
+  createdAt: string;
+}
+
+/** Real join requests where I'm the HOST (people asking to join MY server)
+ *  and where I'm the REQUESTER (my own outstanding/resolved requests) — a
+ *  single query since RLS's own "parties read join requests" policy
+ *  already scopes rows to exactly these two roles for the caller. */
+export async function listJoinRequests(): Promise<ServiceResult<{ incoming: JoinRequestRow[]; outgoing: JoinRequestRow[] }>> {
+  if (!supabase) return { data: { incoming: [], outgoing: [] }, notConfigured: true };
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { data: { incoming: [], outgoing: [] } };
+    const { data, error } = await supabase.from('join_requests')
+      .select('id, status, endpoint, created_at, requester_id, host_id, server_id, profiles!join_requests_requester_id_fkey(username)')
+      .order('created_at', { ascending: false }).limit(20);
+    if (error) return { data: { incoming: [], outgoing: [] }, error: friendlyError(error) };
+    const rows: JoinRequestRow[] = (data || []).map((r: any) => ({
+      id: r.id, requesterId: r.requester_id, requesterUsername: r.profiles?.username || 'Unknown', hostId: r.host_id,
+      serverId: r.server_id, status: r.status, endpoint: r.endpoint, createdAt: r.created_at,
+    }));
+    return {
+      data: {
+        incoming: rows.filter((r) => r.hostId === user.id && r.status === 'pending'),
+        outgoing: rows.filter((r) => r.requesterId === user.id),
+      },
+    };
+  } catch (e) { return { data: { incoming: [], outgoing: [] }, error: friendlyError(e) }; }
 }
 
 /** Real-time friend updates (Phase 14) — subscribes to changes on the
@@ -168,6 +205,7 @@ export function subscribeToFriendsUpdates(onChange: () => void): () => void {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'servers' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests' }, onChange)
     .subscribe();
   return () => { supabase?.removeChannel(channel); };
 }

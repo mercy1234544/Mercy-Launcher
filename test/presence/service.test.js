@@ -112,6 +112,14 @@ function fixtureManager(servers) { return { getAllServers: () => servers }; }
     ok('the SAME token is rejected the second time — real single-use enforcement, not just signature/expiry checks', secondUse.valid === false && /already been used/i.test(secondUse.reason));
     ok('plain verifyJoinToken (no consumption) still reports a used token as cryptographically valid — consumption is a separate, deliberate step', idlePresence.verifyJoinToken(reuseToken).valid === true);
 
+    // ── Real negotiated endpoint carried in the token (cross-computer join) ─
+    const endpointToken = idlePresence.createJoinToken('server-mc-1', 'minecraft', 5000, { strategy: 'lan-direct', address: '192.168.1.50:25565' });
+    const endpointVerified = idlePresence.verifyJoinToken(endpointToken);
+    ok('a token minted with a real negotiated endpoint carries it in the verified payload', endpointVerified.payload?.endpoint?.address === '192.168.1.50:25565' && endpointVerified.payload?.endpoint?.strategy === 'lan-direct');
+    const noEndpointToken = idlePresence.createJoinToken('server-mc-1', 'minecraft', 5000);
+    const noEndpointVerified = idlePresence.verifyJoinToken(noEndpointToken);
+    ok('omitting the endpoint (no usable connection negotiated) never fabricates one — payload has no endpoint key at all', !('endpoint' in (noEndpointVerified.payload || {})));
+
     // ── Connectivity assessment (Parts 10-13, 20): real, honest, per-case ─
     const lan = assessConnectivity({ hasLanAddress: true, realtimeReachable: true });
     ok('LAN-reachable server assesses as lan-direct', lan.strategy === 'lan-direct');
