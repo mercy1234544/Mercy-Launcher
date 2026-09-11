@@ -120,9 +120,18 @@ const PLATFORM_LABELS: Record<DetectionPlatform, string> = {
 // safely enumerable generically). Add a game by appending one entry.
 export const KNOWN_GAMES: KnownGameDef[] = [
   {
+    // Real FiveM installs place FiveM.exe directly under
+    // %LOCALAPPDATA%\FiveM\ — verified against an actual real install on
+    // this machine. The previous path assumed an extra "FiveM Application
+    // Data" subfolder that doesn't actually exist in the current FiveM
+    // client layout, which is the real reason FiveM was never detected
+    // (nothing to do with GTA V — the two have always been fully separate
+    // KNOWN_GAMES entries with no cross-reference between them). The old
+    // subfolder path is kept as a second candidate for anyone still on an
+    // older install layout that did use it.
     id: 'fivem', name: 'FiveM', mercyGameId: 'fivem', mercyStatus: 'supported',
     executableRelPath: 'FiveM.exe',
-    directPaths: ['%LOCALAPPDATA%\\FiveM\\FiveM Application Data'],
+    directPaths: ['%LOCALAPPDATA%\\FiveM', '%LOCALAPPDATA%\\FiveM\\FiveM Application Data'],
   },
   {
     id: 'minecraft-launcher', name: 'Minecraft Launcher', mercyGameId: 'minecraft', mercyStatus: 'supported',

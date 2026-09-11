@@ -1,83 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Car, LayoutGrid, Package, ArrowRight, Gamepad2, Search, Loader2, Play, ExternalLink, Users, Lock } from 'lucide-react';
-import { useAppStore } from '../stores/useAppStore';
+import { LayoutGrid, Gamepad2, Search, Loader2, Play, ExternalLink, Users, Lock } from 'lucide-react';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
-import { GAMES, getGame } from '../config/games';
+import { getGame } from '../config/games';
 import toast from 'react-hot-toast';
 
-// Unified Library shell across every game hub. FiveM shows REAL numbers pulled
-// from the servers already loaded by ServerManager; the other games show an
-// honest "Coming soon" state rather than invented content, per the Mercy
-// Launcher rule against faking installed-content data.
-type Filter = 'all' | 'fivem' | 'minecraft' | 'assetto' | 'beamng';
-const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'All' }, { id: 'fivem', label: 'FiveM' }, { id: 'minecraft', label: 'Minecraft' },
-  { id: 'assetto', label: 'Assetto Corsa' }, { id: 'beamng', label: 'BeamNG.drive' },
-];
-
+// The Library is ONE unified list of games detected on this PC, plus a
+// Friends/Now Playing section — deliberately NOT a category-navigation
+// page. There is no per-game filter/tab (Steam/FiveM/Minecraft/etc.);
+// every detected game gets exactly one real row in DetectedGamesSection
+// below regardless of platform or Mercy support status, and Mercy support
+// is shown as a plain badge on that same row rather than as a separate
+// section a user has to switch into.
 export default function Library() {
-  const navigate = useNavigate();
-  const { servers, setServers } = useAppStore();
-  const [filter, setFilter] = useState<Filter>('all');
-
-  useEffect(() => {
-    if (!window.electronAPI) return;
-    window.electronAPI.server.getAll().then(setServers).catch(() => {});
-  }, []);
-
-  const totalResources = servers.reduce((sum, s) => sum + s.resourceCount, 0);
-  const showFivem = filter === 'all' || filter === 'fivem';
-  // 'assettocorsa' in the shared game registry vs this page's own short
-  // 'assetto' filter id — only place the two need reconciling.
-  const filterIdFor = (gameId: string): Filter => (gameId === 'assettocorsa' ? 'assetto' : (gameId as Filter));
-  const comingSoonGames = GAMES.filter((g) => !g.hasRealHub && (filter === 'all' || filter === filterIdFor(g.id)));
-
   return (
     <div className="p-7 max-w-6xl mx-auto space-y-6">
-      <SectionHeading icon={LayoutGrid} title="Library" subtitle="All your installed content, across every game." />
-
-      <div className="flex flex-wrap gap-1.5">
-        {FILTERS.map((f) => (
-          <button key={f.id} onClick={() => setFilter(f.id)}
-            className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all duration-150 ${filter === f.id ? 'bg-primary-500/15 text-primary-200 border-primary-500/30' : 'bg-overlay-3 text-surface-300 border-overlay-6 hover:bg-overlay-6'}`}>
-            {f.label}
-          </button>
-        ))}
-      </div>
+      <SectionHeading icon={LayoutGrid} title="Library" subtitle="Games on this PC, and who's playing." />
 
       <DetectedGamesSection />
 
       <FriendsPresenceSection />
-
-      {showFivem && (
-        <Panel>
-          <div className="flex items-center gap-2 mb-3">
-            <Car size={16} className="text-orange-300" /><p className="text-sm font-bold text-surface-100">FiveM</p>
-          </div>
-          {servers.length === 0 ? (
-            <p className="text-xs text-surface-500 py-4">No servers yet — create or import one to see its resources here.</p>
-          ) : (
-            <div className="flex items-center justify-between rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-3">
-              <div className="flex items-center gap-3">
-                <Package size={16} className="text-amber-300" />
-                <div><p className="text-sm font-semibold text-surface-100">{totalResources.toLocaleString()} resources</p><p className="text-[11px] text-surface-500">across {servers.length} server{servers.length !== 1 ? 's' : ''}</p></div>
-              </div>
-              <button onClick={() => navigate('/servers')} className="btn-secondary text-xs py-1.5 flex items-center gap-1.5">Open My Servers <ArrowRight size={12} /></button>
-            </div>
-          )}
-        </Panel>
-      )}
-
-      {comingSoonGames.map((g) => (
-        <Panel key={g.id}>
-          <div className="flex items-center gap-2 mb-2">
-            <g.icon size={16} className={g.tint} /><p className="text-sm font-bold text-surface-100">{g.label}</p>
-            <span className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-overlay-6 text-surface-500 border border-overlay-10">Soon</span>
-          </div>
-          <p className="text-xs text-surface-500">No content yet — this hub isn't built yet.</p>
-        </Panel>
-      ))}
     </div>
   );
 }

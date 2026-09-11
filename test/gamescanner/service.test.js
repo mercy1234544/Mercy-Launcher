@@ -96,6 +96,30 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     ok('FiveM is detected as its own real, separate entry (not merged with GTA V)', !!fivemEntry && fivemEntry.platform === 'direct');
     ok('GTA V (Steam) is detected as a DIFFERENT entry from FiveM, never claiming FiveM is installed because GTA V is', gta5Entries.every((g) => g.mercyGameId !== 'fivem'));
     ok('GTA V appears via BOTH Steam and Epic as two distinct real installs, never merged into one', gta5Entries.length === 2 && new Set(gta5Entries.map((g) => g.platform)).size === 2);
+    ok('FiveM\'s launch target is the real FiveM.exe, never GTA5.exe or a Rockstar/Steam path', fivemEntry.executablePath === path.join(fivemRoot, 'FiveM.exe') && !/gta5/i.test(fivemEntry.executablePath));
+    ok('FiveM\'s install path is its own real folder, distinct from every GTA V install path', !gta5Entries.some((g) => g.installPath === fivemEntry.installPath));
+
+    // ── FiveM must NEVER be inferred merely because GTA V exists ──────────
+    // A scan where GTA V is genuinely installed (Steam) but NO real FiveM
+    // installation exists anywhere must report GTA V alone — never a
+    // fabricated FiveM entry.
+    const fixtureKnownNoFiveMInstall = [...fixtureKnown]; // fixtureKnown's own FiveM entry has directPaths: [] (see setup above) — genuinely unresolvable
+    const scannerNoFiveM = new GameScanner(userDataRoot, {
+      steamPathOverride: steamRoot, knownGames: fixtureKnownNoFiveMInstall, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
+    const resultsNoFiveM = await scannerNoFiveM.scan();
+    ok('GTA V alone (no real FiveM install anywhere) never causes a fabricated FiveM entry', resultsNoFiveM.some((g) => g.name === 'Grand Theft Auto V') && !resultsNoFiveM.some((g) => g.mercyGameId === 'fivem'));
+
+    // ── Real bug fix regression: the actual shipped KNOWN_GAMES entry for
+    // FiveM must check the real install location (%LOCALAPPDATA%\FiveM),
+    // not only the old, incorrect "FiveM Application Data" subfolder that
+    // doesn't exist in current FiveM installs — this is the literal fix,
+    // locked in against the real production config, not just a fixture. ──
+    const { KNOWN_GAMES } = require(path.resolve(__dirname, '../../dist/main/services/GameScanner.js'));
+    const realFivemDef = KNOWN_GAMES.find((g) => g.id === 'fivem');
+    ok('the real KNOWN_GAMES FiveM entry checks the real %LOCALAPPDATA%\\FiveM install location', realFivemDef?.directPaths?.includes('%LOCALAPPDATA%\\FiveM'));
 
     // ── GOG: generic registry-subkey enumeration ──────────────────────────
     const gogFixture = { 'GOGGAME-12345': { gameName: 'A Real GOG Game', path: path.join(base, 'gog-game-1') } };
