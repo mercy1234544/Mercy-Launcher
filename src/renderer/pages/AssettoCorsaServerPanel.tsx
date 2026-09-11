@@ -42,6 +42,8 @@ export default function AssettoCorsaServerPanel() {
   const [server, setServer] = useState<AssettoCorsaServer | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState('overview');
+  const [runtimeRequired, setRuntimeRequired] = useState(false);
+  const [settingUpRuntime, setSettingUpRuntime] = useState(false);
 
   const load = async () => {
     if (!id) return;
@@ -49,6 +51,11 @@ export default function AssettoCorsaServerPanel() {
     if (s) setServer(s);
   };
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!id) return;
+    window.electronAPI.assettoCorsa.getServerReadiness(id).then((r) => { if (r) setRuntimeRequired(!r.executablePresent); });
+  }, [id, server?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!id) return;
@@ -67,7 +74,32 @@ export default function AssettoCorsaServerPanel() {
   const meta = STATUS_META[server.status] || STATUS_META.stopped;
   const isRunning = server.status === 'running' || server.status === 'starting';
 
-  const handleStart = async () => { setBusy(true); const r = await window.electronAPI.assettoCorsa.start(server.id); if (!r.success) toast.error(r.error || 'Failed to start'); setBusy(false); load(); };
+  const handleStart = async () => {
+    setBusy(true);
+    const r = await window.electronAPI.assettoCorsa.start(server.id);
+    if (!r.success) {
+      if (r.runtimeRequired) setRuntimeRequired(true);
+      else toast.error(r.error || 'Failed to start');
+    } else {
+      setRuntimeRequired(false);
+    }
+    setBusy(false);
+    load();
+  };
+
+  const handleSelectRuntimeFolder = async () => {
+    const dir = await window.electronAPI.openDirectory();
+    if (!dir) return;
+    setSettingUpRuntime(true);
+    try {
+      const result = await window.electronAPI.assettoCorsa.setRuntimePath(dir);
+      if (!result.success) { toast.error(result.error || 'That folder is not a valid Assetto Corsa dedicated-server install.'); return; }
+      const copyResult = await window.electronAPI.assettoCorsa.ensureRuntimeFilesPresent(server.id);
+      if (!copyResult.success) { toast.error(copyResult.error || 'Could not set up this server with the runtime.'); return; }
+      toast.success('Assetto Corsa dedicated-server runtime configured');
+      setRuntimeRequired(false);
+    } finally { setSettingUpRuntime(false); }
+  };
   const handleStop = async () => { setBusy(true); await window.electronAPI.assettoCorsa.stop(server.id, false); setBusy(false); load(); };
   const handleForceStop = async () => { setBusy(true); await window.electronAPI.assettoCorsa.stop(server.id, true); setBusy(false); load(); };
   const handleRestart = async () => { setBusy(true); await window.electronAPI.assettoCorsa.restart(server.id); setBusy(false); load(); };
@@ -96,6 +128,24 @@ export default function AssettoCorsaServerPanel() {
           }
         />
       </div>
+
+      {runtimeRequired && (
+        <Panel className="border-amber-500/30">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center shrink-0"><AlertTriangle size={18} className="text-amber-400" /></div>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-300">Assetto Corsa Dedicated Server Runtime Required</p>
+              <p className="text-xs text-surface-400 mt-1">
+                This server has been configured, but the real Assetto Corsa dedicated-server files (acServer.exe) have not been installed/configured yet.
+                If you already own a legitimate Assetto Corsa dedicated-server installation, point Mercy at it — the files will be copied into this server automatically.
+              </p>
+              <button onClick={handleSelectRuntimeFolder} disabled={settingUpRuntime} className="btn-primary text-xs py-2 px-4 mt-3 flex items-center gap-1.5">
+                {settingUpRuntime ? <Loader2 size={13} className="animate-spin" /> : <FolderOpen size={13} />} Select Runtime Folder
+              </button>
+            </div>
+          </div>
+        </Panel>
+      )}
 
       <Tabs.Root value={tab} onValueChange={setTab}>
         <Tabs.List className="flex flex-wrap gap-1 mb-4" aria-label="Server management">

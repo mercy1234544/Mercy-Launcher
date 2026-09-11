@@ -261,6 +261,7 @@ function iniBool01(sections: Record<string, Record<string, string>>, section: st
 export class AssettoCorsaManager {
   private dataFile: string;
   private backupsDir: string;
+  private runtimeFile: string;
   private servers: AssettoCorsaServer[] = [];
   private processes: Map<string, ChildProcess> = new Map();
   private consoleBuffers: Map<string, string[]> = new Map();
@@ -271,6 +272,7 @@ export class AssettoCorsaManager {
     const dataDir = path.join(userDataPath, 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     this.dataFile = path.join(dataDir, 'assettocorsa-servers.json');
+    this.runtimeFile = path.join(dataDir, 'assettocorsa-runtime.json');
     this.backupsDir = path.join(userDataPath, 'assettocorsa-backups');
     if (!fs.existsSync(this.backupsDir)) fs.mkdirSync(this.backupsDir, { recursive: true });
     this.load();
@@ -284,6 +286,132 @@ export class AssettoCorsaManager {
 
   private save() {
     try { fs.writeFileSync(this.dataFile, JSON.stringify(this.servers, null, 2)); } catch {}
+  }
+
+  // ── Dedicated-server RUNTIME (Part 9) — a real, one-time-configured
+  // location holding the legitimate Assetto Corsa dedicated-server files
+  // (acServer.exe and its own companion files), distinct from any single
+  // server's own configuration. Never fabricated, never downloaded — the
+  // user points Mercy at their own real, legally-obtained install (typically
+  // Steam's "Assetto Corsa Dedicated Server" app, or a copy of one). Kept as
+  // its own small JSON file (not part of the servers array) since it's
+  // shared across every server, not per-server state. ─────────────────────
+  getRuntimePath(): string | null {
+    try {
+      if (!fs.existsSync(this.runtimeFile)) return null;
+      const { runtimePath } = JSON.parse(fs.readFileSync(this.runtimeFile, 'utf-8'));
+      return typeof runtimePath === 'string' && runtimePath ? runtimePath : null;
+    } catch { return null; }
+  }
+
+  /** Real validation only — checks the REAL executable actually exists at
+   *  the given folder. Never assumes, never creates a fake acServer.exe. */
+  validateRuntimeFolder(dirPath: string): { valid: boolean; error?: string } {
+    if (!dirPath || !fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
+      return { valid: false, error: 'That folder does not exist.' };
+    }
+    const exePath = path.join(dirPath, this.executableName());
+    if (!fs.existsSync(exePath)) {
+      return { valid: false, error: `${this.executableName()} was not found in that folder. Select the folder containing your real Assetto Corsa dedicated-server installation.` };
+    }
+    return { valid: true };
+  }
+
+  setRuntimePath(dirPath: string): { success: boolean; error?: string } {
+    const check = this.validateRuntimeFolder(dirPath);
+    if (!check.valid) return { success: false, error: check.error };
+    try {
+      fs.writeFileSync(this.runtimeFile, JSON.stringify({ runtimePath: dirPath }, null, 2));
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Could not save the runtime location.' };
+    }
+  }
+
+  /** Real, honest per-server readiness check — used both by startServer()
+   *  itself (so a start attempt fails for the same reasons this reports)
+   *  and by the renderer to show a real setup screen instead of a cryptic
+   *  error the first time a server is started. Never fabricates readiness:
+   *  every field reflects something actually checked on disk/network just
+   *  now, not cached or assumed. */
+  async getServerReadiness(id: string): Promise<{
+    ready: boolean;
+    runtimeConfigured: boolean;
+    executablePresent: boolean;
+    configPresent: boolean;
+    contentValid: boolean;
+    contentError?: string;
+    portAvailable: boolean;
+    portError?: string;
+  } | null> {
+    const server = this.getServer(id);
+    if (!server) return null;
+    const runtimeConfigured = !!this.getRuntimePath();
+    const executablePresent = fs.existsSync(path.join(server.installPath, this.executableName()));
+    const configPresent = fs.existsSync(path.join(server.installPath, 'cfg', 'server_cfg.ini')) && fs.existsSync(path.join(server.installPath, 'cfg', 'entry_list.ini'));
+
+    let contentValid = true, contentError: string | undefined;
+    if (server.contentRoot) {
+      const trackCheck = this.validateTrack(server.contentRoot, server.track, server.trackLayout);
+      if (!trackCheck.valid) { contentValid = false; contentError = trackCheck.error; }
+      for (const car of server.cars) {
+        if (!contentValid) break;
+        const carCheck = this.validateCar(server.contentRoot, car.model);
+        if (!carCheck.valid) { contentValid = false; contentError = carCheck.error; }
+      }
+    }
+
+    const portFree = this.processes.has(id) ? true : await this.isUdpPortFree(server.udpPort);
+    const portAvailable = portFree;
+    const portError = portFree ? undefined : `UDP port ${server.udpPort} is already in use by another program on this computer.`;
+
+    return {
+      ready: executablePresent && configPresent && contentValid && portAvailable,
+      runtimeConfigured, executablePresent, configPresent, contentValid, contentError, portAvailable, portError,
+    };
+  }
+
+  /** Real, best-effort population of a server's own folder from the
+   *  configured runtime — copies the runtime's own real top-level files
+   *  (the executable and its actual companion files) into the server's
+   *  installPath, never the runtime's own `content/` folder (that's the
+   *  large, already-shared car/track data referenced separately via
+   *  contentRoot — copying it here would be exactly the unnecessary GB-scale
+   *  duplication Part 10 warns against). Never overwrites a file that's
+   *  already really there (e.g. this server's own cfg/ is left alone). */
+  ensureRuntimeFilesPresent(id: string): { success: boolean; error?: string } {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+    if (fs.existsSync(path.join(server.installPath, this.executableName()))) return { success: true };
+    const runtimePath = this.getRuntimePath();
+    if (!runtimePath) return { success: false, error: 'No Assetto Corsa dedicated-server runtime is configured yet.' };
+    const check = this.validateRuntimeFolder(runtimePath);
+    if (!check.valid) return { success: false, error: `The configured runtime is no longer valid: ${check.error}` };
+    try {
+      fs.mkdirSync(server.installPath, { recursive: true });
+      for (const entry of fs.readdirSync(runtimePath, { withFileTypes: true })) {
+        if (entry.isDirectory() && entry.name.toLowerCase() === 'content') continue; // shared via contentRoot, never duplicated
+        const dest = path.join(server.installPath, entry.name);
+        if (fs.existsSync(dest)) continue; // never overwrite something already really there
+        fs.cpSync(path.join(runtimePath, entry.name), dest, { recursive: true });
+      }
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Could not copy the runtime files into this server.' };
+    }
+  }
+
+  /** Real OS-level check — tries to bind the port ourselves; EADDRINUSE
+   *  means something else genuinely already holds it. Symmetric to
+   *  waitForUdpPortBound()'s own real bind-probe technique, just checking
+   *  the opposite condition before a start rather than confirming one after. */
+  private isUdpPortFree(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const probe = dgram.createSocket('udp4');
+      probe.once('error', (err: any) => { probe.close(); resolve(err?.code !== 'EADDRINUSE'); });
+      probe.once('listening', () => { probe.close(); resolve(true); });
+      try { probe.bind(port); } catch { resolve(true); }
+    });
   }
 
   private generateId(): string {
@@ -786,14 +914,26 @@ export class AssettoCorsaManager {
     });
   }
 
-  async startServer(id: string): Promise<{ success: boolean; error?: string }> {
+  async startServer(id: string): Promise<{ success: boolean; error?: string; runtimeRequired?: boolean }> {
     const server = this.getServer(id);
     if (!server) return { success: false, error: 'Server not found.' };
     if (this.processes.has(id)) return { success: false, error: 'Server is already running.' };
 
+    // Real pre-start checklist (Part 9): runtime, then config, then content,
+    // then port — each a real check, never assumed from a prior success.
+    this.ensureRuntimeFilesPresent(id); // best-effort; the exe check right after is the real gate
     const exePath = path.join(server.installPath, this.executableName());
     if (!fs.existsSync(exePath)) {
-      return { success: false, error: `${this.executableName()} was not found in ${server.installPath}. Copy the real Assetto Corsa dedicated server files into this folder first.` };
+      const runtimeConfigured = !!this.getRuntimePath();
+      return {
+        success: false, runtimeRequired: true,
+        error: runtimeConfigured
+          ? `${this.executableName()} still isn't present in this server's own folder even after checking the configured runtime — the runtime folder may no longer be valid.`
+          : `This server has been configured, but the Assetto Corsa dedicated-server runtime has not been installed/configured yet.`,
+      };
+    }
+    if (!fs.existsSync(path.join(server.installPath, 'cfg', 'server_cfg.ini')) || !fs.existsSync(path.join(server.installPath, 'cfg', 'entry_list.ini'))) {
+      return { success: false, error: 'This server\'s configuration files (cfg/server_cfg.ini, cfg/entry_list.ini) are missing.' };
     }
     if (server.contentRoot) {
       const trackCheck = this.validateTrack(server.contentRoot, server.track, server.trackLayout);
@@ -802,6 +942,9 @@ export class AssettoCorsaManager {
         const carCheck = this.validateCar(server.contentRoot, car.model);
         if (!carCheck.valid) return { success: false, error: carCheck.error };
       }
+    }
+    if (!(await this.isUdpPortFree(server.udpPort))) {
+      return { success: false, error: `UDP port ${server.udpPort} is already in use by another program on this computer. Stop that program or change this server's port.` };
     }
 
     this.intentionalStop.delete(id);

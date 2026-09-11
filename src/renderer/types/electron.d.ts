@@ -125,13 +125,24 @@ interface ElectronAPI {
     worldInfo: (id: string) => Promise<{ levelName: string; exists: boolean; sizeBytes: number | null; edition: 'java' | 'bedrock' } | null>;
     exportWorld: (id: string, destZipPath: string) => Promise<{ success: boolean; error?: string }>;
     importWorld: (id: string, sourceZipPath: string, confirmReplace?: boolean) => Promise<{ success: boolean; error?: string; needsConfirmation?: boolean; detectedEdition?: 'java' | 'bedrock' }>;
+    openWorldFolder: (id: string) => Promise<{ success: boolean; error?: string }>;
 
     listBedrockPacks: (id: string, kind: 'resource_packs' | 'behavior_packs') => Promise<{
-      folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean;
+      folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean; installedViaMercy: boolean;
     }[]>;
     installBedrockPack: (id: string, kind: 'resource_packs' | 'behavior_packs', zipPath: string) => Promise<{ success: boolean; error?: string; folderName?: string }>;
     setBedrockPackEnabled: (id: string, kind: 'resource_packs' | 'behavior_packs', uuid: string, version: number[], enabled: boolean) => Promise<{ success: boolean; error?: string }>;
     removeBedrockPack: (id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string, uuid: string | null) => Promise<{ success: boolean; error?: string }>;
+    openPackFolder: (id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string) => Promise<{ success: boolean; error?: string }>;
+
+    detectContent: (id: string, filePath: string) => Promise<{
+      kind: 'world' | 'resource_pack' | 'behavior_pack' | 'addon' | 'datapack' | 'structure' | 'schematic' | 'function' | 'unsupported';
+      label: string; compatible: boolean; reason?: string;
+    }>;
+    storeStructure: (id: string, filePath: string) => Promise<{ success: boolean; error?: string; content?: InstalledContent }>;
+    storeFunction: (id: string, filePath: string) => Promise<{ success: boolean; error?: string; content?: InstalledContent }>;
+    installLocalDatapack: (id: string, zipPath: string) => Promise<{ success: boolean; error?: string; content?: InstalledContent }>;
+    installBedrockAddon: (id: string, zipPath: string) => Promise<{ success: boolean; error?: string; installedResourcePack?: string; installedBehaviorPack?: string }>;
   };
 
   minecraftMarketplace: {
@@ -164,7 +175,7 @@ interface ElectronAPI {
     update: (id: string, patch: Partial<AcCreateConfig>) => Promise<{ success: boolean; error?: string }>;
     detectExisting: (dirPath: string) => Promise<{ valid: boolean; reason?: string; hasExecutable?: boolean }>;
     import: (dirPath: string, name: string, contentRoot: string) => Promise<{ success: boolean; server?: AssettoCorsaServer; error?: string }>;
-    start: (id: string) => Promise<{ success: boolean; error?: string }>;
+    start: (id: string) => Promise<{ success: boolean; error?: string; runtimeRequired?: boolean }>;
     stop: (id: string, force?: boolean) => Promise<boolean>;
     restart: (id: string) => Promise<boolean>;
     processStats: (id: string) => Promise<{
@@ -184,6 +195,14 @@ interface ElectronAPI {
     listBackups: (id: string) => Promise<{ id: string; serverId: string; name: string; path: string; size: number; createdAt: string }[]>;
     restoreBackup: (backupId: string) => Promise<{ success: boolean; error?: string }>;
     deleteBackup: (backupId: string) => Promise<boolean>;
+    getRuntimePath: () => Promise<string | null>;
+    validateRuntimeFolder: (dirPath: string) => Promise<{ valid: boolean; error?: string }>;
+    setRuntimePath: (dirPath: string) => Promise<{ success: boolean; error?: string }>;
+    getServerReadiness: (id: string) => Promise<{
+      ready: boolean; runtimeConfigured: boolean; executablePresent: boolean; configPresent: boolean;
+      contentValid: boolean; contentError?: string; portAvailable: boolean; portError?: string;
+    } | null>;
+    ensureRuntimeFilesPresent: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
 
   games: {
@@ -504,8 +523,8 @@ declare global {
   }
   interface InstalledContent {
     id: string;
-    kind: 'plugin' | 'datapack';
-    source: 'modrinth';
+    kind: 'plugin' | 'datapack' | 'structure' | 'function' | 'schematic';
+    source: 'modrinth' | 'local';
     projectId: string;
     projectName: string;
     versionId: string;

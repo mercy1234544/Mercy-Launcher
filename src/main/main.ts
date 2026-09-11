@@ -365,13 +365,35 @@ function registerIpcHandlers() {
   ipcMain.handle('minecraft:worldInfo', (_, id: string) => minecraftManager.getWorldInfo(id));
   ipcMain.handle('minecraft:exportWorld', (_, id: string, destZipPath: string) => minecraftManager.exportWorld(id, destZipPath));
   ipcMain.handle('minecraft:importWorld', (_, id: string, sourceZipPath: string, confirmReplace?: boolean) => minecraftManager.importWorld(id, sourceZipPath, !!confirmReplace));
+  ipcMain.handle('minecraft:openWorldFolder', (_, id: string) => {
+    const dir = minecraftManager.getWorldFolderPath(id);
+    if (!dir) return { success: false, error: 'No world folder was found on disk for this server.' };
+    shell.openPath(dir);
+    return { success: true };
+  });
 
   // Bedrock resource/behavior packs — real local-folder mechanism (Java has
   // no equivalent; see MinecraftManager.ts's own comment on why).
   ipcMain.handle('minecraft:listBedrockPacks', (_, id: string, kind: 'resource_packs' | 'behavior_packs') => minecraftManager.listBedrockPacks(id, kind));
   ipcMain.handle('minecraft:installBedrockPack', (_, id: string, kind: 'resource_packs' | 'behavior_packs', zipPath: string) => minecraftManager.installBedrockPack(id, kind, zipPath));
+  ipcMain.handle('minecraft:installBedrockAddon', (_, id: string, zipPath: string) => minecraftManager.installBedrockAddon(id, zipPath));
   ipcMain.handle('minecraft:setBedrockPackEnabled', (_, id: string, kind: 'resource_packs' | 'behavior_packs', uuid: string, version: number[], enabled: boolean) => minecraftManager.setBedrockPackEnabled(id, kind, uuid, version, enabled));
   ipcMain.handle('minecraft:removeBedrockPack', (_, id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string, uuid: string | null) => minecraftManager.removeBedrockPack(id, kind, folderName, uuid));
+  // "Open Pack" (Part 2) — validated, main-process path resolution; never
+  // opens a renderer-supplied path directly.
+  ipcMain.handle('minecraft:openPackFolder', (_, id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string) => {
+    const dir = minecraftManager.getPackFolderPath(id, kind, folderName);
+    if (!dir) return { success: false, error: 'That pack folder no longer exists on disk.' };
+    shell.openPath(dir);
+    return { success: true };
+  });
+
+  // Content Center (Parts 3-8) — real structure/schematic/function storage
+  // and local datapack install, plus read-only drag-drop detection.
+  ipcMain.handle('minecraft:detectContent', (_, id: string, filePath: string) => minecraftManager.detectMinecraftContent(id, filePath));
+  ipcMain.handle('minecraft:storeStructure', (_, id: string, filePath: string) => minecraftManager.storeStructure(id, filePath));
+  ipcMain.handle('minecraft:storeFunction', (_, id: string, filePath: string) => minecraftManager.storeFunction(id, filePath));
+  ipcMain.handle('minecraft:installLocalDatapack', (_, id: string, zipPath: string) => minecraftManager.installLocalDatapack(id, zipPath));
 
   // Marketplace (Modrinth) — mod/plugin/datapack browsing and real install.
   ipcMain.handle('minecraft:marketplace:search', (_, opts) => minecraftMarketplace.search(opts));
@@ -417,6 +439,13 @@ function registerIpcHandlers() {
   ipcMain.handle('assettocorsa:listBackups', (_, id: string) => assettoCorsaManager.listBackups(id));
   ipcMain.handle('assettocorsa:restoreBackup', (_, backupId: string) => assettoCorsaManager.restoreBackup(backupId));
   ipcMain.handle('assettocorsa:deleteBackup', (_, backupId: string) => assettoCorsaManager.deleteBackup(backupId));
+  // Dedicated-server runtime (Part 9) — one real, user-configured location
+  // for the actual acServer.exe install, distinct from any server's config.
+  ipcMain.handle('assettocorsa:getRuntimePath', () => assettoCorsaManager.getRuntimePath());
+  ipcMain.handle('assettocorsa:validateRuntimeFolder', (_, dirPath: string) => assettoCorsaManager.validateRuntimeFolder(dirPath));
+  ipcMain.handle('assettocorsa:setRuntimePath', (_, dirPath: string) => assettoCorsaManager.setRuntimePath(dirPath));
+  ipcMain.handle('assettocorsa:getServerReadiness', (_, id: string) => assettoCorsaManager.getServerReadiness(id));
+  ipcMain.handle('assettocorsa:ensureRuntimeFilesPresent', (_, id: string) => assettoCorsaManager.ensureRuntimeFilesPresent(id));
 
   // Game Library — real, read-only game detection (see GameScanner.ts's own header comment).
   ipcMain.handle('games:scan', () => gameScanner.scan());

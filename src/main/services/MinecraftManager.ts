@@ -117,8 +117,15 @@ export interface MinecraftCreateConfig extends MinecraftWorldOptions {
 
 export interface InstalledContent {
   id: string;
-  kind: 'plugin' | 'datapack';
-  source: 'modrinth';
+  /** 'structure'/'function'/'schematic' are real, locally-imported content
+   *  Mercy STORES for the user (see storeStructure/storeFunction/
+   *  installLocalDatapack below) — never claimed as "installed into the
+   *  world", since none of those formats can be safely auto-applied that
+   *  way (see each method's own header for the real mechanism). */
+  kind: 'plugin' | 'datapack' | 'structure' | 'function' | 'schematic';
+  /** 'local' = imported directly from a file the user provided, never
+   *  downloaded — 'modrinth' is unchanged, existing behavior. */
+  source: 'modrinth' | 'local';
   projectId: string;
   projectName: string;
   versionId: string;
@@ -2044,6 +2051,19 @@ export class MinecraftManager {
     return found;
   }
 
+  /** Written into every pack folder Mercy itself places — the real,
+   *  verifiable signal listBedrockPacks() uses to distinguish "a user
+   *  actually installed this through Mercy" from everything else sitting in
+   *  resource_packs/behavior_packs (Mojang's own bundled system packs, or
+   *  something a user copied in by hand outside Mercy). Never guessed from
+   *  folder-name heuristics or a hardcoded list of Mojang pack UUIDs this
+   *  file has no way to keep accurate. */
+  private static readonly MERCY_PACK_MARKER = '.mercy-installed.json';
+
+  private markMercyInstalled(packDir: string): void {
+    try { fs.writeFileSync(path.join(packDir, MinecraftManager.MERCY_PACK_MARKER), JSON.stringify({ installedAt: new Date().toISOString() })); } catch {}
+  }
+
   /** Shared "place a validated manifest folder into resource_packs/
    *  behavior_packs" step used by both a single-pack install and a
    *  multi-pack add-on install — one real copy/naming implementation, never
@@ -2062,6 +2082,7 @@ export class MinecraftManager {
     let suffix = 2;
     while (fs.existsSync(targetDir)) { folderName = `${baseName} (${suffix})`; targetDir = path.join(packsDir, folderName); suffix++; }
     fs.cpSync(foundRoot, targetDir, { recursive: true });
+    this.markMercyInstalled(targetDir);
     return { folderName };
   }
 
@@ -2092,7 +2113,7 @@ export class MinecraftManager {
    *  against the world's own real world_resource_packs.json/
    *  world_behavior_packs.json activation list. */
   listBedrockPacks(id: string, kind: 'resource_packs' | 'behavior_packs'): {
-    folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean;
+    folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean; installedViaMercy: boolean;
   }[] {
     const server = this.getServer(id);
     if (!server || server.edition !== 'bedrock') return [];
@@ -2105,9 +2126,10 @@ export class MinecraftManager {
       if (!entry.isDirectory()) continue;
       const folderName = entry.name;
       const packDir = path.join(packsDir, folderName);
+      const installedViaMercy = fs.existsSync(path.join(packDir, MinecraftManager.MERCY_PACK_MARKER));
       const manifestPath = path.join(packDir, 'manifest.json');
       if (!fs.existsSync(manifestPath)) {
-        results.push({ folderName, uuid: null, name: folderName, version: 'unknown', description: '', valid: false, invalidReason: 'No manifest.json found.', enabled: false });
+        results.push({ folderName, uuid: null, name: folderName, version: 'unknown', description: '', valid: false, invalidReason: 'No manifest.json found.', enabled: false, installedViaMercy });
         continue;
       }
       try {
@@ -2118,7 +2140,7 @@ export class MinecraftManager {
             name: this.resolveBedrockDisplayString(packDir, manifest?.header?.name, folderName),
             version: 'unknown',
             description: this.resolveBedrockDisplayString(packDir, manifest?.header?.description, ''),
-            valid: false, invalidReason: 'manifest.json has no valid header.uuid/header.version.', enabled: false,
+            valid: false, invalidReason: 'manifest.json has no valid header.uuid/header.version.', enabled: false, installedViaMercy,
           });
           continue;
         }
@@ -2129,14 +2151,37 @@ export class MinecraftManager {
           folderName, uuid,
           name: this.resolveBedrockDisplayString(packDir, manifest.header.name, folderName),
           version: versionArr.join('.'),
+          installedViaMercy,
           description: this.resolveBedrockDisplayString(packDir, manifest.header.description, ''),
           valid: true, enabled,
         });
       } catch {
-        results.push({ folderName, uuid: null, name: folderName, version: 'unknown', description: '', valid: false, invalidReason: 'manifest.json is not valid JSON.', enabled: false });
+        results.push({ folderName, uuid: null, name: folderName, version: 'unknown', description: '', valid: false, invalidReason: 'manifest.json is not valid JSON.', enabled: false, installedViaMercy });
       }
     }
     return results;
+  }
+
+  /** Real, validated path lookup for a pack already listed by
+   *  listBedrockPacks() — never trusts a renderer-supplied absolute path.
+   *  Returns null if the folder genuinely doesn't exist (a pack the user
+   *  removed on disk outside Mercy, or a stale reference). */
+  getPackFolderPath(id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string): string | null {
+    const server = this.getServer(id);
+    if (!server) return null;
+    const packDir = path.join(server.installPath, kind, folderName);
+    // Real containment check — folderName must resolve to a direct child of
+    // the real packs directory, never an escape via "..".
+    if (path.dirname(packDir) !== path.join(server.installPath, kind)) return null;
+    return fs.existsSync(packDir) ? packDir : null;
+  }
+
+  /** Real, validated path lookup for this server's actual world folder. */
+  getWorldFolderPath(id: string): string | null {
+    const server = this.getServer(id);
+    if (!server) return null;
+    const { dir } = this.getWorldPaths(server);
+    return fs.existsSync(dir) ? dir : null;
   }
 
   /** Real install: extract to a secure temp dir, validate a genuine
@@ -2213,6 +2258,261 @@ export class MinecraftManager {
       return { success: true, installedResourcePack, installedBehaviorPack };
     } catch (e: any) {
       return { success: false, error: e?.message || 'Add-on install failed.' };
+    } finally {
+      if (tmpRoot) { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {} }
+    }
+  }
+
+  // ── Structures / Schematics / Functions (Parts 6-7) ─────────────────────
+  // These formats are deliberately handled as STORAGE, never as "installed
+  // into the world" — none of them can be safely auto-applied:
+  //  - Bedrock .mcstructure: real, binary structure data, but actually
+  //    placing one requires either a structure block in-game or being
+  //    referenced from a behavior pack's own content — Mercy has no safe,
+  //    general way to do either automatically for an arbitrary loose file.
+  //  - Java .schem/.schematic: the real WorldEdit/Sponge schematic formats.
+  //    Bedrock CANNOT read these at all (never implied otherwise); even on
+  //    Java, applying one requires the WorldEdit plugin's own /schematic
+  //    load + //paste commands in-game — Mercy stores the real file so it's
+  //    available to do that, but never pretends to have placed it.
+  //  - .mcfunction: a real Minecraft function file, but it only actually
+  //    runs when it lives inside a behavior pack's functions/ folder
+  //    (Bedrock) or a datapack's data/<namespace>/functions/ folder (Java)
+  //    and is referenced/called from there — Mercy stores a loose one
+  //    honestly rather than guessing which existing pack/datapack it
+  //    belongs in and silently modifying that pack's own contents.
+  private readonly MERCY_CONTENT_DIR = 'mercy-content';
+
+  /** Real, content-based validation — never trusts the extension alone. */
+  private looksLikeGzip(filePath: string): boolean {
+    try {
+      const fd = fs.openSync(filePath, 'r');
+      const buf = Buffer.alloc(2);
+      fs.readSync(fd, buf, 0, 2, 0);
+      fs.closeSync(fd);
+      return buf[0] === 0x1f && buf[1] === 0x8b; // real gzip magic bytes
+    } catch { return false; }
+  }
+
+  private looksLikeBedrockStructure(filePath: string): boolean {
+    try {
+      const fd = fs.openSync(filePath, 'r');
+      const buf = Buffer.alloc(1);
+      const n = fs.readSync(fd, buf, 0, 1, 0);
+      fs.closeSync(fd);
+      // Real Bedrock .mcstructure files are little-endian NBT starting with
+      // a TAG_Compound (0x0A) root tag — a real, if minimal, signature
+      // check rather than trusting the extension alone.
+      return n === 1 && buf[0] === 0x0a;
+    } catch { return false; }
+  }
+
+  private isLikelyTextFile(filePath: string, maxBytes = 65536): boolean {
+    try {
+      const buf = fs.readFileSync(filePath);
+      const sample = buf.subarray(0, maxBytes);
+      for (const byte of sample) if (byte === 0) return false; // a NUL byte never appears in real plain text
+      return true;
+    } catch { return false; }
+  }
+
+  /** Stores a real, validated structure/schematic file for this server —
+   *  edition-checked against what the format can even mean (a Bedrock
+   *  server storing a .schem file would be misleading, since Bedrock can
+   *  never consume that format at all). Never claims installation into the
+   *  world — see this section's own header. */
+  storeStructure(id: string, filePath: string): { success: boolean; error?: string; content?: InstalledContent } {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+    if (!fs.existsSync(filePath)) return { success: false, error: 'Selected file does not exist.' };
+    const ext = path.extname(filePath).toLowerCase();
+
+    if (ext === '.mcstructure') {
+      if (server.edition !== 'bedrock') return { success: false, error: '.mcstructure files are a Bedrock Edition format — this is a Java server.' };
+      if (!this.looksLikeBedrockStructure(filePath)) return { success: false, error: 'This does not look like a real .mcstructure file (missing the expected NBT structure signature).' };
+    } else if (ext === '.schem' || ext === '.schematic') {
+      if (server.edition !== 'java') return { success: false, error: `${ext} schematics are a Java Edition (WorldEdit) format — Bedrock cannot read this format at all.` };
+      if (!this.looksLikeGzip(filePath)) return { success: false, error: `This does not look like a real ${ext} file (missing the expected compressed-NBT signature).` };
+    } else {
+      return { success: false, error: `"${ext || 'this file type'}" is not a recognized structure/schematic format.` };
+    }
+
+    const relDir = path.join(this.MERCY_CONTENT_DIR, 'structures');
+    const originalFileName = path.basename(filePath);
+    let relPath = path.join(relDir, originalFileName);
+    let targetAbs = this.resolveWithinServer(id, relPath);
+    if (!targetAbs) return { success: false, error: 'Could not resolve a safe storage location inside this server.' };
+    if (fs.existsSync(targetAbs)) {
+      const base = path.basename(originalFileName, ext);
+      let suffix = 2;
+      do { relPath = path.join(relDir, `${base} (${suffix})${ext}`); targetAbs = this.resolveWithinServer(id, relPath)!; suffix++; } while (fs.existsSync(targetAbs));
+    }
+    fs.mkdirSync(path.dirname(targetAbs), { recursive: true });
+    fs.copyFileSync(filePath, targetAbs);
+    const fileName = path.basename(relPath); // the REAL on-disk name, after any dedup suffix
+
+    const record: InstalledContent = {
+      id: this.generateId(), kind: ext === '.mcstructure' ? 'structure' : 'schematic', source: 'local',
+      projectId: '', projectName: fileName, versionId: '', versionNumber: '',
+      fileName, relPath, sha1: '', size: fs.statSync(targetAbs).size,
+      enabled: true, installedAt: new Date().toISOString(), dependencies: [],
+    };
+    this.addInstalledContent(id, record);
+    return { success: true, content: record };
+  }
+
+  /** Stores a real, validated loose .mcfunction file — see this section's
+   *  own header for why this is storage, not installation. */
+  storeFunction(id: string, filePath: string): { success: boolean; error?: string; content?: InstalledContent } {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+    if (!fs.existsSync(filePath)) return { success: false, error: 'Selected file does not exist.' };
+    if (path.extname(filePath).toLowerCase() !== '.mcfunction') return { success: false, error: 'Only .mcfunction files are supported here.' };
+    if (!this.isLikelyTextFile(filePath)) return { success: false, error: 'This does not look like a real, plain-text .mcfunction file.' };
+
+    const relDir = path.join(this.MERCY_CONTENT_DIR, 'functions');
+    const originalFileName = path.basename(filePath);
+    let relPath = path.join(relDir, originalFileName);
+    let targetAbs = this.resolveWithinServer(id, relPath);
+    if (!targetAbs) return { success: false, error: 'Could not resolve a safe storage location inside this server.' };
+    if (fs.existsSync(targetAbs)) {
+      const base = path.basename(originalFileName, '.mcfunction');
+      let suffix = 2;
+      do { relPath = path.join(relDir, `${base} (${suffix}).mcfunction`); targetAbs = this.resolveWithinServer(id, relPath)!; suffix++; } while (fs.existsSync(targetAbs));
+    }
+    fs.mkdirSync(path.dirname(targetAbs), { recursive: true });
+    fs.copyFileSync(filePath, targetAbs);
+    const fileName = path.basename(relPath); // the REAL on-disk name, after any dedup suffix
+
+    const record: InstalledContent = {
+      id: this.generateId(), kind: 'function', source: 'local',
+      projectId: '', projectName: fileName, versionId: '', versionNumber: '',
+      fileName, relPath, sha1: '', size: fs.statSync(targetAbs).size,
+      enabled: true, installedAt: new Date().toISOString(), dependencies: [],
+    };
+    this.addInstalledContent(id, record);
+    return { success: true, content: record };
+  }
+
+  /** Real local datapack install — Java only, mirrors
+   *  MinecraftMarketplace.installContent()'s own real placement convention
+   *  (world/datapacks/, via the same resolveWithinServer safety this file
+   *  already exposes for it) but sourced from a file the user provided
+   *  directly instead of a Modrinth download. Validates a genuine
+   *  pack.mcmeta at the archive root before installing anything. */
+  async installLocalDatapack(id: string, zipPath: string): Promise<{ success: boolean; error?: string; content?: InstalledContent }> {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+    if (server.edition !== 'java') return { success: false, error: 'Datapacks are a Java Edition feature.' };
+    if (!fs.existsSync(zipPath)) return { success: false, error: 'Selected file does not exist.' };
+
+    let tmpRoot = '';
+    try {
+      this.checkArchiveSize(zipPath, this.MAX_PACK_ARCHIVE_BYTES, 'Datapack archive');
+      tmpRoot = path.join(this.userDataPath, 'tmp', `datapack-import-${id}-${Date.now()}`);
+      fs.mkdirSync(tmpRoot, { recursive: true });
+      await extractZip(zipPath, { dir: tmpRoot });
+      this.assertNoTraversal(tmpRoot);
+
+      // A real datapack root has pack.mcmeta directly inside it — check the
+      // extraction root itself, then one level of subdirectories (a zip
+      // commonly wraps the datapack in a single top-level folder).
+      const candidates = [tmpRoot, ...fs.readdirSync(tmpRoot, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path.join(tmpRoot, e.name))];
+      const root = candidates.find((c) => fs.existsSync(path.join(c, 'pack.mcmeta')));
+      if (!root) return { success: false, error: 'Could not find a real pack.mcmeta at the root of that archive — this doesn\'t look like a valid datapack.' };
+
+      const originalFileName = `${path.basename(zipPath, path.extname(zipPath)).replace(/[^a-z0-9-_ .]/gi, '_')}.zip`;
+      const relDir = path.join(this.getLevelName(id), 'datapacks');
+      let relPath = path.join(relDir, originalFileName);
+      let targetAbs = this.resolveWithinServer(id, relPath);
+      if (!targetAbs) return { success: false, error: 'Could not resolve a safe install location inside this server.' };
+      if (fs.existsSync(targetAbs)) {
+        const base = path.basename(originalFileName, '.zip');
+        let suffix = 2;
+        do { relPath = path.join(relDir, `${base} (${suffix}).zip`); targetAbs = this.resolveWithinServer(id, relPath)!; suffix++; } while (fs.existsSync(targetAbs));
+      }
+      fs.mkdirSync(path.dirname(targetAbs), { recursive: true });
+      const fileName = path.basename(relPath); // the REAL on-disk name, after any dedup suffix
+      // Re-zip the validated datapack root so it's installed exactly the
+      // way Minecraft itself expects a datapack .zip's own internal layout
+      // (pack.mcmeta at the zip root), regardless of how the ORIGINAL
+      // archive the user dropped happened to be structured.
+      await new Promise<void>((resolve, reject) => {
+        const output = fs.createWriteStream(targetAbs!);
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        output.on('close', resolve);
+        archive.on('error', reject);
+        archive.pipe(output);
+        archive.directory(root, false);
+        archive.finalize();
+      });
+
+      const record: InstalledContent = {
+        id: this.generateId(), kind: 'datapack', source: 'local',
+        projectId: '', projectName: path.basename(zipPath, path.extname(zipPath)), versionId: '', versionNumber: '',
+        fileName, relPath, sha1: '', size: fs.statSync(targetAbs).size,
+        enabled: true, installedAt: new Date().toISOString(), dependencies: [],
+      };
+      this.addInstalledContent(id, record);
+      return { success: true, content: record };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Datapack install failed.' };
+    } finally {
+      if (tmpRoot) { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {} }
+    }
+  }
+
+  /** Real, read-only content detection for the drag-and-drop import area
+   *  (Part 4) — sniffs a file's ACTUAL contents before anything is
+   *  installed, so the UI can show the user what Mercy found (Part 4's own
+   *  "show exactly what Mercy detected" requirement) before committing to
+   *  an install action. Never modifies anything; safe to call speculatively
+   *  on every file dropped. */
+  async detectMinecraftContent(id: string, filePath: string): Promise<{
+    kind: 'world' | 'resource_pack' | 'behavior_pack' | 'addon' | 'datapack' | 'structure' | 'schematic' | 'function' | 'unsupported';
+    label: string; compatible: boolean; reason?: string;
+  }> {
+    const server = this.getServer(id);
+    if (!server) return { kind: 'unsupported', label: 'Unknown', compatible: false, reason: 'Server not found.' };
+    if (!fs.existsSync(filePath)) return { kind: 'unsupported', label: 'Unknown', compatible: false, reason: 'File does not exist.' };
+    const ext = path.extname(filePath).toLowerCase();
+
+    if (ext === '.mcfunction') return { kind: 'function', label: 'Minecraft Function', compatible: true };
+    if (ext === '.mcstructure') return { kind: 'structure', label: 'Bedrock Structure', compatible: server.edition === 'bedrock', reason: server.edition !== 'bedrock' ? 'This server is Java Edition — .mcstructure is a Bedrock-only format.' : undefined };
+    if (ext === '.schem' || ext === '.schematic') return { kind: 'schematic', label: 'Java Schematic (WorldEdit)', compatible: server.edition === 'java', reason: server.edition !== 'java' ? 'Bedrock cannot read Java WorldEdit schematics at all.' : undefined };
+
+    if (ext !== '.zip' && ext !== '.mcpack' && ext !== '.mcaddon' && ext !== '.mcworld') {
+      return { kind: 'unsupported', label: 'Unrecognized file', compatible: false, reason: `Mercy doesn't recognize "${ext || 'this file type'}" as importable Minecraft content.` };
+    }
+
+    let tmpRoot = '';
+    try {
+      tmpRoot = path.join(this.userDataPath, 'tmp', `content-detect-${id}-${Date.now()}`);
+      fs.mkdirSync(tmpRoot, { recursive: true });
+      await extractZip(filePath, { dir: tmpRoot });
+
+      const world = this.findWorldRoot(tmpRoot);
+      if (world) return { kind: 'world', label: `Minecraft World (${world.edition === 'bedrock' ? 'Bedrock' : 'Java'})`, compatible: world.edition === server.edition, reason: world.edition !== server.edition ? `This is a ${world.edition} world, but this server is ${server.edition === 'bedrock' ? 'Bedrock' : 'Java'}.` : undefined };
+
+      if (server.edition === 'bedrock') {
+        const manifests = this.findAllManifestRoots(tmpRoot);
+        if (manifests.length > 1) return { kind: 'addon', label: 'Add-on (Resource + Behavior Pack)', compatible: true };
+        if (manifests.length === 1) {
+          const moduleTypes: string[] = Array.isArray(manifests[0].manifest?.modules) ? manifests[0].manifest.modules.map((m: any) => m?.type).filter((t: any) => typeof t === 'string') : [];
+          const isBehavior = moduleTypes.includes('data');
+          const isResource = moduleTypes.includes('resources') || moduleTypes.includes('client_data') || moduleTypes.includes('interface');
+          const name = this.resolveBedrockDisplayString(manifests[0].root, manifests[0].manifest?.header?.name, path.basename(filePath, ext));
+          if (isBehavior) return { kind: 'behavior_pack', label: `Behavior Pack — ${name}`, compatible: true };
+          if (isResource) return { kind: 'resource_pack', label: `Resource Pack — ${name}`, compatible: true };
+        }
+      } else {
+        const candidates = [tmpRoot, ...fs.readdirSync(tmpRoot, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path.join(tmpRoot, e.name))];
+        if (candidates.some((c) => fs.existsSync(path.join(c, 'pack.mcmeta')))) return { kind: 'datapack', label: 'Java Datapack', compatible: true };
+      }
+
+      return { kind: 'unsupported', label: 'Unrecognized archive', compatible: false, reason: `Mercy couldn't find a recognizable ${server.edition === 'bedrock' ? 'Bedrock pack/add-on' : 'datapack'} or world inside that archive.` };
+    } catch (e: any) {
+      return { kind: 'unsupported', label: 'Unrecognized archive', compatible: false, reason: e?.message || 'Could not read that archive.' };
     } finally {
       if (tmpRoot) { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {} }
     }

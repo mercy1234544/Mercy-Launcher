@@ -297,7 +297,8 @@ async function runLifecycleTests(mgr, serverId, serverPath, port) {
   const exeName = process.platform === 'win32' ? 'acServer.exe' : 'acServer';
 
   const noExe = await mgr.startServer(serverId);
-  ok('startServer refuses to start when the real executable is missing', noExe.success === false && /was not found/i.test(noExe.error));
+  ok('startServer refuses to start when the real executable is missing', noExe.success === false && /runtime has not been installed/i.test(noExe.error));
+  ok('a missing executable with no runtime configured is reported as runtimeRequired, not a generic error', noExe.runtimeRequired === true);
 
   // A real, genuinely-executable stand-in: the test runner's own Node
   // binary, copied to the exact path Mercy will spawn. It idles reading

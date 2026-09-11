@@ -107,11 +107,18 @@ const electronAPI = {
     worldInfo: (id: string) => ipcRenderer.invoke('minecraft:worldInfo', id),
     exportWorld: (id: string, destZipPath: string) => ipcRenderer.invoke('minecraft:exportWorld', id, destZipPath),
     importWorld: (id: string, sourceZipPath: string, confirmReplace?: boolean) => ipcRenderer.invoke('minecraft:importWorld', id, sourceZipPath, confirmReplace),
+    openWorldFolder: (id: string) => ipcRenderer.invoke('minecraft:openWorldFolder', id),
 
     listBedrockPacks: (id: string, kind: 'resource_packs' | 'behavior_packs') => ipcRenderer.invoke('minecraft:listBedrockPacks', id, kind),
     installBedrockPack: (id: string, kind: 'resource_packs' | 'behavior_packs', zipPath: string) => ipcRenderer.invoke('minecraft:installBedrockPack', id, kind, zipPath),
     setBedrockPackEnabled: (id: string, kind: 'resource_packs' | 'behavior_packs', uuid: string, version: number[], enabled: boolean) => ipcRenderer.invoke('minecraft:setBedrockPackEnabled', id, kind, uuid, version, enabled),
     removeBedrockPack: (id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string, uuid: string | null) => ipcRenderer.invoke('minecraft:removeBedrockPack', id, kind, folderName, uuid),
+    openPackFolder: (id: string, kind: 'resource_packs' | 'behavior_packs', folderName: string) => ipcRenderer.invoke('minecraft:openPackFolder', id, kind, folderName),
+    detectContent: (id: string, filePath: string) => ipcRenderer.invoke('minecraft:detectContent', id, filePath),
+    storeStructure: (id: string, filePath: string) => ipcRenderer.invoke('minecraft:storeStructure', id, filePath),
+    storeFunction: (id: string, filePath: string) => ipcRenderer.invoke('minecraft:storeFunction', id, filePath),
+    installLocalDatapack: (id: string, zipPath: string) => ipcRenderer.invoke('minecraft:installLocalDatapack', id, zipPath),
+    installBedrockAddon: (id: string, zipPath: string) => ipcRenderer.invoke('minecraft:installBedrockAddon', id, zipPath),
   },
 
   minecraftMarketplace: {
@@ -160,6 +167,11 @@ const electronAPI = {
     listBackups: (id: string) => ipcRenderer.invoke('assettocorsa:listBackups', id),
     restoreBackup: (backupId: string) => ipcRenderer.invoke('assettocorsa:restoreBackup', backupId),
     deleteBackup: (backupId: string) => ipcRenderer.invoke('assettocorsa:deleteBackup', backupId),
+    getRuntimePath: () => ipcRenderer.invoke('assettocorsa:getRuntimePath'),
+    validateRuntimeFolder: (dirPath: string) => ipcRenderer.invoke('assettocorsa:validateRuntimeFolder', dirPath),
+    setRuntimePath: (dirPath: string) => ipcRenderer.invoke('assettocorsa:setRuntimePath', dirPath),
+    getServerReadiness: (id: string) => ipcRenderer.invoke('assettocorsa:getServerReadiness', id),
+    ensureRuntimeFilesPresent: (id: string) => ipcRenderer.invoke('assettocorsa:ensureRuntimeFilesPresent', id),
   },
 
   games: {

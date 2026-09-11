@@ -335,6 +335,9 @@ export class MinecraftMarketplace {
   async setContentEnabled(mgr: MinecraftManager, serverId: string, contentId: string, enabled: boolean): Promise<{ success: boolean; error?: string }> {
     const item = mgr.getInstalledContent(serverId).find((c) => c.id === contentId);
     if (!item) return { success: false, error: 'Content not found.' };
+    if (item.kind !== 'plugin' && item.kind !== 'datapack') {
+      return { success: false, error: 'This content is stored, not a toggleable pack — there is nothing to enable/disable.' };
+    }
     if (item.enabled === enabled) return { success: true };
     const activeDir = this.activeRelDir(mgr, serverId, item.kind);
     const targetRelPath = enabled ? path.join(activeDir, item.fileName) : path.join(activeDir, 'mercy-disabled', item.fileName);

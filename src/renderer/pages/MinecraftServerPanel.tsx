@@ -850,7 +850,115 @@ function FilesTab({ server }: { server: MinecraftServer }) {
   );
 }
 
-// ── Content: Mods & Plugins (Paper) / Datapacks (both) ──────────────────────
+// ── Drag-and-drop Content import (Part 4) — real content-based detection
+// (see MinecraftManager.detectMinecraftContent) shown BEFORE anything is
+// installed, then dispatched to whichever real, existing/new install method
+// actually matches what was found. Never claims success for a format Mercy
+// only stores rather than truly installs (structures/schematics/functions).
+type DetectResult = Awaited<ReturnType<typeof window.electronAPI.minecraft.detectContent>>;
+
+function ContentDropZone({ server, onImported }: { server: MinecraftServer; onImported: () => void }) {
+  const [dragOver, setDragOver] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [detected, setDetected] = useState<{ filePath: string; result: DetectResult } | null>(null);
+
+  const handleFile = async (filePath: string) => {
+    setBusy(true);
+    setDetected(null);
+    try {
+      const result = await window.electronAPI.minecraft.detectContent(server.id, filePath);
+      setDetected({ filePath, result });
+    } finally { setBusy(false); }
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0] as (File & { path?: string }) | undefined;
+    if (file?.path) handleFile(file.path);
+  };
+
+  const pickFile = async () => {
+    const src = await window.electronAPI.openFile([
+      { name: 'Minecraft Content', extensions: ['zip', 'mcpack', 'mcaddon', 'mcworld', 'mcstructure', 'mcfunction', 'schem', 'schematic'] },
+    ]);
+    if (src) handleFile(src);
+  };
+
+  const doImport = async () => {
+    if (!detected) return;
+    const { filePath, result } = detected;
+    setBusy(true);
+    try {
+      let outcome: { success: boolean; error?: string } = { success: false, error: 'Not supported.' };
+      if (result.kind === 'resource_pack') outcome = await window.electronAPI.minecraft.installBedrockPack(server.id, 'resource_packs', filePath);
+      else if (result.kind === 'behavior_pack') outcome = await window.electronAPI.minecraft.installBedrockPack(server.id, 'behavior_packs', filePath);
+      else if (result.kind === 'addon') outcome = await window.electronAPI.minecraft.installBedrockAddon(server.id, filePath);
+      else if (result.kind === 'datapack') outcome = await window.electronAPI.minecraft.installLocalDatapack(server.id, filePath);
+      else if (result.kind === 'structure' || result.kind === 'schematic') outcome = await window.electronAPI.minecraft.storeStructure(server.id, filePath);
+      else if (result.kind === 'function') outcome = await window.electronAPI.minecraft.storeFunction(server.id, filePath);
+      else if (result.kind === 'world') return;
+
+      if (outcome.success) { toast.success(`${result.label} imported successfully`); setDetected(null); onImported(); }
+      else toast.error(outcome.error || 'Import failed');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        onClick={pickFile}
+        className={`rounded-xl border-2 border-dashed p-6 text-center cursor-pointer transition-colors ${dragOver ? 'border-primary-500 bg-primary-500/10' : 'border-overlay-10 hover:border-overlay-16 bg-overlay-2'}`}
+      >
+        <Upload size={20} className="mx-auto text-surface-500 mb-2" />
+        <p className="text-sm font-semibold text-surface-200">Drop Minecraft content here</p>
+        <p className="text-[11px] text-surface-500 mt-1">
+          {server.edition === 'bedrock'
+            ? '.mcpack, .mcaddon, .mcworld, .mcstructure, .mcfunction — or click to browse'
+            : 'Datapacks (.zip), .schem/.schematic, .mcfunction — or click to browse'}
+        </p>
+      </div>
+
+      {busy && !detected && <p className="text-xs text-surface-500 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Detecting…</p>}
+
+      {detected && (
+        <Panel className={detected.result.compatible ? 'border-primary-500/30' : 'border-error/30'}>
+          <div className="flex items-start gap-3">
+            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${detected.result.compatible ? 'bg-primary-500/15 text-primary-300' : 'bg-error-bg text-error'}`}>
+              {detected.result.compatible ? <PackageCheck size={16} /> : <PackageX size={16} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-surface-100">Mercy detected: {detected.result.label}</p>
+              {detected.result.reason && <p className="text-[11px] text-surface-500 mt-0.5">{detected.result.reason}</p>}
+              {detected.result.compatible && (detected.result.kind === 'structure' || detected.result.kind === 'schematic' || detected.result.kind === 'function') && (
+                <p className="text-[11px] text-amber-400/90 mt-0.5">
+                  {detected.result.kind === 'schematic' ? 'Stored for later use — applying it in-game requires the WorldEdit plugin\'s own /schematic load command.'
+                    : detected.result.kind === 'structure' ? 'Stored for later use — placing it in the world requires a structure block or a behavior pack that references it.'
+                    : 'Stored for later use — it only runs once placed inside a behavior/data pack\'s own functions folder and referenced from there.'}
+                </p>
+              )}
+            </div>
+            <button onClick={() => setDetected(null)} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><Trash size={13} /></button>
+          </div>
+          {detected.result.compatible && detected.result.kind !== 'world' && (
+            <button onClick={doImport} disabled={busy} className="btn-primary text-xs py-2 px-4 mt-3 flex items-center gap-1.5">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Import
+            </button>
+          )}
+          {detected.result.kind === 'world' && detected.result.compatible && (
+            <p className="text-[11px] text-surface-500 mt-3">Use the Worlds tab to import this — it needs to ask before replacing your current world.</p>
+          )}
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+// ── Content: Mods & Plugins (Paper) / Datapacks (both) / Bedrock Add-ons /
+// Structures, Schematics & Functions ─────────────────────────────────────
 function ContentTab({ server }: { server: MinecraftServer }) {
   const navigate = useNavigate();
   const [items, setItems] = useState<(InstalledContent & { missingOnDisk: boolean })[]>([]);
@@ -875,54 +983,53 @@ function ContentTab({ server }: { server: MinecraftServer }) {
 
   const plugins = items.filter((i) => i.kind === 'plugin');
   const datapacks = items.filter((i) => i.kind === 'datapack');
+  const structures = items.filter((i) => i.kind === 'structure' || i.kind === 'schematic');
+  const functions = items.filter((i) => i.kind === 'function');
 
-  if (server.edition === 'bedrock') {
-    return (
-      <Panel>
-        <EmptyState
-          icon={Puzzle}
-          title="Java Marketplace doesn't apply to Bedrock"
-          description="Bedrock uses a structurally different add-on system — resource packs and behavior packs, not Java plugins/mods/datapacks. There's no legitimate public download catalog Mercy can honestly plug in for Bedrock, so add-ons already on this server are managed directly from its own Packs tab instead."
-          action={
-            <button onClick={() => navigate(`/minecraft/server/${server.id}?tab=packs`)} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5">
-              <PackageCheck size={13} /> Open Packs
-            </button>
-          }
-        />
-      </Panel>
-    );
-  }
-
-  const Row = ({ item }: { item: InstalledContent & { missingOnDisk: boolean } }) => (
+  const Row = ({ item, toggleable = true }: { item: InstalledContent & { missingOnDisk: boolean }; toggleable?: boolean }) => (
     <Panel padding="sm" className="flex items-center gap-3">
       <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${item.enabled ? 'bg-primary-500/15 text-primary-300' : 'bg-overlay-6 text-surface-500'}`}><Puzzle size={14} /></div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-surface-100 truncate">{item.projectName} <span className="text-surface-500 font-normal">v{item.versionNumber}</span></p>
+        <p className="text-sm font-semibold text-surface-100 truncate">{item.projectName}{item.versionNumber && <span className="text-surface-500 font-normal"> v{item.versionNumber}</span>}</p>
         <p className="text-[11px] text-surface-500 truncate">
-          {item.fileName} · Modrinth · Installed {new Date(item.installedAt).toLocaleDateString()}
+          {item.fileName} · {item.source === 'modrinth' ? 'Modrinth' : 'Imported'} · Installed {new Date(item.installedAt).toLocaleDateString()}
           {item.missingOnDisk && <span className="text-error"> · file missing from disk</span>}
           {item.dependencies.length > 0 && <> · {item.dependencies.length} dependenc{item.dependencies.length === 1 ? 'y' : 'ies'}</>}
         </p>
       </div>
-      {!item.enabled && <span className="text-[10px] font-semibold text-surface-500 px-2 py-0.5 rounded-full bg-overlay-6 shrink-0">Disabled</span>}
-      <button onClick={() => window.electronAPI?.openExternal(`https://modrinth.com/project/${item.projectId}`)} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0" title="View on Modrinth"><ExternalLink size={13} /></button>
-      <button onClick={() => toggleEnabled(item.id, !item.enabled)} disabled={busyId === item.id || item.missingOnDisk} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0 disabled:opacity-40" title={item.enabled ? 'Disable' : 'Enable'}>
-        {busyId === item.id ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
-      </button>
+      {toggleable && !item.enabled && <span className="text-[10px] font-semibold text-surface-500 px-2 py-0.5 rounded-full bg-overlay-6 shrink-0">Disabled</span>}
+      {item.source === 'modrinth' && (
+        <button onClick={() => window.electronAPI?.openExternal(`https://modrinth.com/project/${item.projectId}`)} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0" title="View on Modrinth"><ExternalLink size={13} /></button>
+      )}
+      {toggleable && (
+        <button onClick={() => toggleEnabled(item.id, !item.enabled)} disabled={busyId === item.id || item.missingOnDisk} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0 disabled:opacity-40" title={item.enabled ? 'Disable' : 'Enable'}>
+          {busyId === item.id ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
+        </button>
+      )}
       <button onClick={() => remove(item.id)} disabled={busyId === item.id} className="p-1.5 rounded-lg text-surface-500 hover:text-error hover:bg-overlay-6 transition-colors shrink-0"><Trash2 size={13} /></button>
     </Panel>
   );
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <button onClick={() => navigate(`/minecraft/marketplace?server=${server.id}`)} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5"><Puzzle size={13} /> Browse Marketplace</button>
-      </div>
+      <ContentDropZone server={server} onImported={load} />
+
+      {server.edition === 'java' && (
+        <div className="flex justify-end">
+          <button onClick={() => navigate(`/minecraft/marketplace?server=${server.id}`)} className="btn-primary text-xs py-2 px-4 flex items-center gap-1.5"><Puzzle size={13} /> Browse Marketplace</button>
+        </div>
+      )}
+
       {loading ? (
         <Panel className="flex items-center justify-center py-10"><Loader2 size={18} className="animate-spin text-primary-400" /></Panel>
       ) : (
         <>
-          {server.serverType === 'paper' && (
+          {server.edition === 'bedrock' && (
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-overlay-4 border border-overlay-8 text-xs text-surface-400">
+              <Info size={14} className="shrink-0 mt-0.5" /> Resource/behavior packs and add-ons dropped above go straight to the <button onClick={() => navigate(`/minecraft/server/${server.id}?tab=packs`)} className="text-primary-400 hover:underline font-medium">Packs tab</button>. Structures and functions are stored here.
+            </div>
+          )}
+          {server.edition === 'java' && server.serverType === 'paper' && (
             <div>
               <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">Plugins</p>
               {plugins.length === 0 ? (
@@ -932,17 +1039,35 @@ function ContentTab({ server }: { server: MinecraftServer }) {
               )}
             </div>
           )}
-          {server.serverType === 'vanilla' && (
+          {server.edition === 'java' && server.serverType === 'vanilla' && (
             <div className="flex items-start gap-2 p-3 rounded-xl bg-overlay-4 border border-overlay-8 text-xs text-surface-400">
               <AlertTriangle size={14} className="shrink-0 mt-0.5" /> Vanilla servers can't run plugins or mods — only datapacks, shown below.
             </div>
           )}
+          {server.edition === 'java' && (
+            <div>
+              <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">Datapacks</p>
+              {datapacks.length === 0 ? (
+                <Panel><EmptyState icon={Puzzle} title="No datapacks installed" description="Datapacks work on both Vanilla and Paper — no mod loader needed." /></Panel>
+              ) : (
+                <div className="space-y-2">{datapacks.map((i) => <Row key={i.id} item={i} />)}</div>
+              )}
+            </div>
+          )}
           <div>
-            <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">Datapacks</p>
-            {datapacks.length === 0 ? (
-              <Panel><EmptyState icon={Puzzle} title="No datapacks installed" description="Datapacks work on both Vanilla and Paper — no mod loader needed." /></Panel>
+            <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">{server.edition === 'bedrock' ? 'Structures' : 'Structures & Schematics'}</p>
+            {structures.length === 0 ? (
+              <Panel><EmptyState icon={Puzzle} title="Nothing stored yet" description={server.edition === 'bedrock' ? 'Drop a .mcstructure file above to store it here.' : 'Drop a .schem/.schematic file above to store it here.'} /></Panel>
             ) : (
-              <div className="space-y-2">{datapacks.map((i) => <Row key={i.id} item={i} />)}</div>
+              <div className="space-y-2">{structures.map((i) => <Row key={i.id} item={i} toggleable={false} />)}</div>
+            )}
+          </div>
+          <div>
+            <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-2">Functions</p>
+            {functions.length === 0 ? (
+              <Panel><EmptyState icon={Puzzle} title="No functions stored" description="Drop a .mcfunction file above to store it here." /></Panel>
+            ) : (
+              <div className="space-y-2">{functions.map((i) => <Row key={i.id} item={i} toggleable={false} />)}</div>
             )}
           </div>
         </>
@@ -1000,6 +1125,11 @@ function WorldsTab({ server, isRunning }: { server: MinecraftServer; isRunning: 
     await runImport(src, false);
   };
 
+  const openFolder = async () => {
+    const result = await window.electronAPI.minecraft.openWorldFolder(server.id);
+    if (!result.success) toast.error(result.error || 'Could not open the world folder.');
+  };
+
   const disabledReason = isRunning ? 'Stop the server before exporting or importing its world.' : null;
 
   return (
@@ -1041,6 +1171,9 @@ function WorldsTab({ server, isRunning }: { server: MinecraftServer; isRunning: 
               {info?.exists ? `${fmtSize(info.sizeBytes)} · ${server.edition === 'bedrock' ? 'Bedrock' : 'Java'} world on disk` : 'No world found on disk yet'}
             </p>
           </div>
+          {info?.exists && (
+            <button onClick={openFolder} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0" title="Open World Folder"><FolderOpen size={14} /></button>
+          )}
         </Panel>
       )}
 
@@ -1068,7 +1201,7 @@ const PACK_KIND_META: Record<'resource_packs' | 'behavior_packs', { label: strin
 function PacksTab({ server }: { server: MinecraftServer }) {
   const navigate = useNavigate();
   const [kind, setKind] = useState<'resource_packs' | 'behavior_packs'>('resource_packs');
-  const [packs, setPacks] = useState<{ folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean }[]>([]);
+  const [packs, setPacks] = useState<{ folderName: string; uuid: string | null; name: string; version: string; description: string; valid: boolean; invalidReason?: string; enabled: boolean; installedViaMercy: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState(false);
   const [busyFolder, setBusyFolder] = useState<string | null>(null);
@@ -1102,6 +1235,11 @@ function PacksTab({ server }: { server: MinecraftServer }) {
       const result = await window.electronAPI.minecraft.removeBedrockPack(server.id, kind, pack.folderName, pack.uuid);
       if (result.success) { toast.success('Pack removed'); load(); } else toast.error(result.error || 'Failed to remove');
     } finally { setBusyFolder(null); }
+  };
+
+  const openPack = async (pack: typeof packs[number]) => {
+    const result = await window.electronAPI.minecraft.openPackFolder(server.id, kind, pack.folderName);
+    if (!result.success) { toast.error(result.error || 'Could not open that pack\'s folder.'); load(); }
   };
 
   return (
@@ -1143,6 +1281,7 @@ function PacksTab({ server }: { server: MinecraftServer }) {
                 <p className="text-sm font-semibold text-surface-100 truncate">{p.name} {p.valid && <span className="text-surface-500 font-normal">v{p.version}</span>}</p>
                 <p className="text-[11px] text-surface-500 truncate">
                   {p.valid ? (p.description || 'No description available') : (p.invalidReason || 'Invalid pack')}
+                  {!p.installedViaMercy && ' · Not installed via Mercy'}
                 </p>
               </div>
               {p.valid && (
@@ -1155,6 +1294,7 @@ function PacksTab({ server }: { server: MinecraftServer }) {
                   {busyFolder === p.folderName ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
                 </button>
               )}
+              <button onClick={() => openPack(p)} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0" title="Open Pack"><FolderOpen size={13} /></button>
               <button onClick={() => remove(p)} disabled={busyFolder === p.folderName} className="p-1.5 rounded-lg text-surface-500 hover:text-error hover:bg-overlay-6 transition-colors shrink-0"><Trash2 size={13} /></button>
             </Panel>
           ))}
