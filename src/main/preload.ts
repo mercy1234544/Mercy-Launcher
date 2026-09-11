@@ -162,6 +162,12 @@ const electronAPI = {
     deleteBackup: (backupId: string) => ipcRenderer.invoke('assettocorsa:deleteBackup', backupId),
   },
 
+  games: {
+    scan: () => ipcRenderer.invoke('games:scan'),
+    getCached: () => ipcRenderer.invoke('games:getCached'),
+    launch: (id: string) => ipcRenderer.invoke('games:launch', id),
+  },
+
   onAssettoCorsaConsole: (callback: (data: { serverId: string; line: string }) => void) => {
     const handler = (_: any, data: any) => callback(data);
     ipcRenderer.on('assettocorsa:console', handler);

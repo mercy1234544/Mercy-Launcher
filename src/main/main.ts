@@ -18,6 +18,7 @@ import { VehicleStudioAuth } from './services/VehicleStudioAuth';
 import { SettingsManager } from './services/SettingsManager';
 import { MinecraftManager } from './services/MinecraftManager';
 import { AssettoCorsaManager } from './services/AssettoCorsaManager';
+import { GameScanner } from './services/GameScanner';
 import { MinecraftMarketplace } from './services/MinecraftMarketplace';
 import { BedrockMarketplace } from './services/BedrockMarketplace';
 import { ThemeManager } from './services/ThemeManager';
@@ -69,6 +70,7 @@ let vehicleStudioAuth: VehicleStudioAuth;
 let settingsManager: SettingsManager;
 let minecraftManager: MinecraftManager;
 let assettoCorsaManager: AssettoCorsaManager;
+let gameScanner: GameScanner;
 let minecraftMarketplace: MinecraftMarketplace;
 let bedrockMarketplace: BedrockMarketplace;
 let themeManager: ThemeManager;
@@ -163,6 +165,7 @@ function initializeServices() {
   settingsManager = new SettingsManager();
   minecraftManager = new MinecraftManager(userDataPath);
   assettoCorsaManager = new AssettoCorsaManager(userDataPath);
+  gameScanner = new GameScanner(userDataPath);
   minecraftMarketplace = new MinecraftMarketplace();
   bedrockMarketplace = new BedrockMarketplace(userDataPath);
   themeManager = new ThemeManager(userDataPath);
@@ -403,6 +406,11 @@ function registerIpcHandlers() {
   ipcMain.handle('assettocorsa:listBackups', (_, id: string) => assettoCorsaManager.listBackups(id));
   ipcMain.handle('assettocorsa:restoreBackup', (_, backupId: string) => assettoCorsaManager.restoreBackup(backupId));
   ipcMain.handle('assettocorsa:deleteBackup', (_, backupId: string) => assettoCorsaManager.deleteBackup(backupId));
+
+  // Game Library — real, read-only game detection (see GameScanner.ts's own header comment).
+  ipcMain.handle('games:scan', () => gameScanner.scan());
+  ipcMain.handle('games:getCached', () => gameScanner.getCached());
+  ipcMain.handle('games:launch', (_, id: string) => gameScanner.launch(id));
 
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());

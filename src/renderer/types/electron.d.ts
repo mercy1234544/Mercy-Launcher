@@ -186,6 +186,12 @@ interface ElectronAPI {
     deleteBackup: (backupId: string) => Promise<boolean>;
   };
 
+  games: {
+    scan: () => Promise<DetectedGame[]>;
+    getCached: () => Promise<DetectedGame[]>;
+    launch: (id: string) => Promise<{ success: boolean; error?: string }>;
+  };
+
   onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
   onMinecraftStatusChange: (callback: (data: { serverId: string; status: string }) => void) => () => void;
   onMinecraftCreateProgress: (callback: (data: { pct: number; message: string }) => void) => () => void;
@@ -561,6 +567,12 @@ declare global {
   interface AcCarInfo { id: string; name: string; brand: string; tags: string[]; skins: string[]; valid: boolean; }
   interface AcTrackLayoutInfo { layout: string; name: string; }
   interface AcTrackInfo { id: string; name: string; tags: string[]; layouts: AcTrackLayoutInfo[]; valid: boolean; }
+
+  // ── Game Library types (mirror src/main/services/GameScanner.ts) ───────────
+  interface DetectedGame {
+    id: string; name: string; mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa' | null;
+    installPath: string; executablePath: string; source: 'steam' | 'direct'; detectedAt: string;
+  }
 
   // ── Vehicle Studio types (mirror src/main/services/VehicleStudio.ts) ────────
   interface VSVehicle {

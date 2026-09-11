@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Car, LayoutGrid, Package, ArrowRight } from 'lucide-react';
+import { Car, LayoutGrid, Package, ArrowRight, Gamepad2, Search, Loader2, Play, ExternalLink } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
-import { Panel, SectionHeading } from '../components/ui';
-import { GAMES } from '../config/games';
+import { Panel, SectionHeading, EmptyState } from '../components/ui';
+import { GAMES, getGame } from '../config/games';
+import toast from 'react-hot-toast';
 
 // Unified Library shell across every game hub. FiveM shows REAL numbers pulled
 // from the servers already loaded by ServerManager; the other games show an
@@ -45,6 +46,8 @@ export default function Library() {
         ))}
       </div>
 
+      <DetectedGamesSection />
+
       {showFivem && (
         <Panel>
           <div className="flex items-center gap-2 mb-3">
@@ -74,5 +77,89 @@ export default function Library() {
         </Panel>
       ))}
     </div>
+  );
+}
+
+// ── Game Library: real, read-only detection of games installed on this PC —
+// a DIFFERENT concept from Mercy server-management support (see
+// GameScanner.ts's own header comment). A detected game never implies
+// Mercy can manage a server for it; that's shown as its own honest badge. ──
+function DetectedGamesSection() {
+  const navigate = useNavigate();
+  const [games, setGames] = useState<DetectedGame[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!window.electronAPI?.games) return;
+    window.electronAPI.games.getCached().then((cached) => { setGames(cached); setHasScanned(cached.length > 0); }).catch(() => {});
+  }, []);
+
+  const scan = async () => {
+    setScanning(true);
+    try {
+      const found = await window.electronAPI.games.scan();
+      setGames(found);
+      setHasScanned(true);
+    } catch { toast.error('Scan failed'); } finally { setScanning(false); }
+  };
+
+  const launch = async (id: string, name: string) => {
+    setLaunchingId(id);
+    try {
+      const result = await window.electronAPI.games.launch(id);
+      if (!result.success) toast.error(result.error || `Could not launch ${name}`);
+    } finally { setLaunchingId(null); }
+  };
+
+  return (
+    <Panel>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Gamepad2 size={16} className="text-primary-300" />
+          <p className="text-sm font-bold text-surface-100">Game Library</p>
+          <span className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-overlay-6 text-surface-500 border border-overlay-10">Detected on this PC</span>
+        </div>
+        <button onClick={scan} disabled={scanning} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-60">
+          {scanning ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} {scanning ? 'Scanning…' : hasScanned ? 'Scan Again' : 'Scan for Games'}
+        </button>
+      </div>
+
+      {!hasScanned && !scanning ? (
+        <EmptyState icon={Gamepad2} title="No scan yet" description="Scan to detect games actually installed on this computer — this never assumes Mercy can manage a server for what it finds." />
+      ) : scanning ? (
+        <div className="flex items-center justify-center py-8"><Loader2 size={18} className="animate-spin text-primary-400" /></div>
+      ) : games.length === 0 ? (
+        <p className="text-xs text-surface-500 py-4">No known games were found on this computer.</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {games.map((g) => {
+            const mercyGame = g.mercyGameId ? getGame(g.mercyGameId) : undefined;
+            return (
+              <div key={g.id} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-3">
+                <div className="w-9 h-9 rounded-lg bg-overlay-6 flex items-center justify-center shrink-0">
+                  {mercyGame ? <mercyGame.icon size={16} className={mercyGame.tint} /> : <Gamepad2 size={16} className="text-surface-500" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-surface-100 truncate">{g.name}</p>
+                  <p className="text-[10px] mt-0.5">
+                    {mercyGame ? <span className="text-success">Mercy server tools available</span> : <span className="text-surface-500">Detected — no Mercy server tools yet</span>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {mercyGame && (
+                    <button onClick={() => navigate(mercyGame.path)} className="p-1.5 rounded-lg text-surface-500 hover:text-primary-300 hover:bg-overlay-6 transition-colors" title={`Manage in Mercy`}><ExternalLink size={13} /></button>
+                  )}
+                  <button onClick={() => launch(g.id, g.name)} disabled={launchingId === g.id} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5">
+                    {launchingId === g.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Launch
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Panel>
   );
 }
