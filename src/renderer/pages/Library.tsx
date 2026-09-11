@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Gamepad2, Search, Loader2, Play, ExternalLink, Users, Lock } from 'lucide-react';
+import { LayoutGrid, Gamepad2, Search, Loader2, Play, ExternalLink, Users, UserPlus, Check, X, WifiOff, RefreshCw } from 'lucide-react';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
 import { getGame } from '../config/games';
+import { useFriendsPresence } from '../stores/useFriendsPresence';
 import toast from 'react-hot-toast';
 
 // The Library is ONE unified list of games detected on this PC, plus a
@@ -136,34 +137,41 @@ function DetectedGamesSection() {
   );
 }
 
-const VISIBILITY_OPTIONS: { id: PresenceVisibility; label: string }[] = [
-  { id: 'private', label: 'Private' }, { id: 'friends-only', label: 'Friends Only' }, { id: 'everyone', label: 'Everyone' },
+const PRIVACY_TOGGLES: { key: 'appearOnline' | 'showCurrentGame' | 'showCurrentServer'; label: string }[] = [
+  { key: 'appearOnline', label: 'Appear Online' },
+  { key: 'showCurrentGame', label: 'Show Current Game' },
+  { key: 'showCurrentServer', label: 'Show Current Mercy Server' },
 ];
 
-// ── Friends & Presence — a REAL foundation, not a fake social feature.
-// Mercy has no deployed presence/signaling service today, so this is
-// deliberately a real, empty list (matching the existing MercyServers.tsx
-// precedent for "Mercy will eventually operate this, honestly nothing to
-// show yet") rather than any hardcoded/fabricated friends or sessions.
-// The privacy control and "what am I doing right now" ARE real and local. ─
+// ── Friends & Presence — a REAL system: real Supabase-backed accounts,
+// friend requests, and privacy-gated presence (see
+// src/renderer/lib/friendsPresence.ts and supabase/friends_presence_schema.sql
+// for the actual backend). This repo ships with NO Supabase project
+// configured (see lib/supabase.ts), so today this always renders the
+// honest "not deployed yet" state below — it is not hidden or faked once a
+// real project IS configured; the exact same code path handles both. ─────
 function FriendsPresenceSection() {
-  const [visibility, setVisibility] = useState<PresenceVisibility>('private');
-  const [localPresence, setLocalPresence] = useState<LocalPresence | null>(null);
-  const [friends, setFriends] = useState<FriendPresence[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { connection, friends, incoming, outgoing, settings, loading, addFriendError, init, teardown, addFriend, accept, decline, remove, updateSettings, join } = useFriendsPresence();
+  const [addUsername, setAddUsername] = useState('');
+  const [joiningId, setJoiningId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!window.electronAPI?.presence) { setLoading(false); return; }
-    Promise.all([
-      window.electronAPI.presence.getVisibility(),
-      window.electronAPI.presence.getLocal(),
-      window.electronAPI.presence.getFriends(),
-    ]).then(([v, local, f]) => { setVisibility(v); setLocalPresence(local); setFriends(f); }).finally(() => setLoading(false));
-  }, []);
+  useEffect(() => { init(); return () => teardown(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const changeVisibility = async (v: PresenceVisibility) => {
-    setVisibility(v);
-    await window.electronAPI.presence.setVisibility(v);
+  const submitAddFriend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addUsername.trim()) return;
+    await addFriend(addUsername.trim());
+    setAddUsername('');
+  };
+
+  const handleJoin = async (friend: typeof friends[number]) => {
+    if (!friend.serverId) return;
+    setJoiningId(friend.serverId);
+    try {
+      const result = await join(friend.serverId);
+      if (result.error) toast.error(result.error);
+      else toast('Join authorized — direct connection isn\'t implemented yet, so nothing will actually connect.', { icon: 'ℹ️' });
+    } finally { setJoiningId(null); }
   };
 
   return (
@@ -173,43 +181,65 @@ function FriendsPresenceSection() {
           <Users size={16} className="text-primary-300" />
           <p className="text-sm font-bold text-surface-100 uppercase tracking-wide">Friends & Presence</p>
         </div>
-        <div className="flex gap-1 p-1 rounded-xl bg-overlay-4 border border-overlay-8">
-          {VISIBILITY_OPTIONS.map((o) => (
-            <button key={o.id} onClick={() => changeVisibility(o.id)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${visibility === o.id ? 'bg-primary-600/20 text-primary-300' : 'text-surface-400 hover:text-surface-200'}`}>
-              {o.label}
-            </button>
-          ))}
-        </div>
+        {connection === 'connected' && (
+          <div className="flex gap-3">
+            {PRIVACY_TOGGLES.map((t) => (
+              <label key={t.key} className="flex items-center gap-1.5 text-[11px] text-surface-400 cursor-pointer select-none">
+                <input type="checkbox" checked={settings[t.key]} onChange={(e) => updateSettings({ [t.key]: e.target.checked })} className="accent-primary-500" />
+                {t.label}
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
-      {loading ? (
+      {connection === 'unconfigured' ? (
+        <EmptyState icon={Users} title="No friend presence yet" description="Friends & Presence requires a Mercy account presence service, which isn't deployed yet. When available, friends' real activity will appear here — never fabricated or hardcoded." />
+      ) : loading ? (
         <div className="flex items-center justify-center py-8"><Loader2 size={18} className="animate-spin text-primary-400" /></div>
+      ) : connection === 'unreachable' ? (
+        <EmptyState icon={WifiOff} title="Unable to connect to Mercy services." description="Your local games and servers are unaffected — only friends/presence needs the connection."
+          action={<button onClick={() => useFriendsPresence.getState().refresh()} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"><RefreshCw size={13} /> Retry</button>} />
       ) : (
         <>
-          <Panel padding="sm" className="mb-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-overlay-6 flex items-center justify-center shrink-0"><Lock size={15} className="text-surface-500" /></div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-surface-100">
-                {localPresence?.activity ? `Currently hosting: ${localPresence.activity.serverName}` : 'Not currently hosting anything'}
-              </p>
-              <p className="text-[11px] text-surface-500 mt-0.5">
-                Visibility: {VISIBILITY_OPTIONS.find((o) => o.id === visibility)?.label} — {visibility === 'private' ? 'your activity is not shared with anyone.' : 'shown to the audience you chose above, once a Mercy presence service is available.'}
-              </p>
+          <form onSubmit={submitAddFriend} className="flex items-center gap-2 mb-3">
+            <input value={addUsername} onChange={(e) => setAddUsername(e.target.value)} placeholder="Add a friend by username…" className="input-field text-xs py-2 flex-1" />
+            <button type="submit" className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"><UserPlus size={13} /> Add</button>
+          </form>
+          {addFriendError && <p className="text-[11px] text-danger mb-3">{addFriendError}</p>}
+
+          {incoming.length > 0 && (
+            <div className="space-y-2 mb-3">
+              {incoming.map((r) => (
+                <div key={r.id} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-2.5">
+                  <p className="flex-1 text-sm text-surface-100"><span className="font-semibold">{r.fromUsername}</span> wants to be friends</p>
+                  <button onClick={() => accept(r.id)} className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1"><Check size={12} /> Accept</button>
+                  <button onClick={() => decline(r.id)} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1"><X size={12} /> Decline</button>
+                </div>
+              ))}
             </div>
-          </Panel>
+          )}
+          {outgoing.length > 0 && (
+            <p className="text-[11px] text-surface-500 mb-3">Pending: {outgoing.map((r) => r.toUsername).join(', ')}</p>
+          )}
 
           {friends.length === 0 ? (
-            <EmptyState icon={Users} title="No friend presence yet" description="Friends & Presence requires a Mercy account presence service, which isn't deployed yet. When available, friends' real activity will appear here — never fabricated or hardcoded." />
+            <p className="text-xs text-surface-500 py-4">No friends yet — add one by username above.</p>
           ) : (
             <div className="space-y-2">
               {friends.map((f) => (
-                <div key={f.displayName} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-3">
+                <div key={f.friendId} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-3">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${f.status === 'online' ? 'bg-success' : 'bg-surface-600'}`} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-surface-100 truncate">{f.displayName}</p>
-                    <p className="text-[11px] text-surface-500">{f.activity ? `Playing ${f.activity.serverName}` : f.status}</p>
+                    <p className="text-sm font-semibold text-surface-100 truncate">{f.username}</p>
+                    <p className="text-[11px] text-surface-500">{f.activityLabel || (f.status === 'online' ? 'Online' : 'Offline')}{f.serverName ? ` — ${f.serverName}` : ''}</p>
                   </div>
-                  {f.joinable && <button className="btn-primary text-xs py-1.5 px-3">Join</button>}
+                  <button onClick={() => remove(f.friendId)} className="text-[11px] text-surface-500 hover:text-danger px-1">Remove</button>
+                  {f.serverId && (
+                    <button onClick={() => handleJoin(f)} disabled={joiningId === f.serverId} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+                      {joiningId === f.serverId ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Join
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

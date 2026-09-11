@@ -57,7 +57,11 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { exec } from 'child_process';
 import Store from 'electron-store';
+import {
+  PresenceSettings, DEFAULT_PRESENCE_SETTINGS, RealActivity, ActivityGameId,
+} from './FriendsPresenceLogic';
 
 export type PresenceVisibility = 'everyone' | 'friends-only' | 'private';
 export type PresenceStatus = 'online' | 'in-game' | 'offline';
@@ -69,6 +73,14 @@ export interface LocalActivity {
   serverName: string;
   /** Real, derived from the server's own real status field — never assumed. */
   joinable: boolean;
+  /** 'hosting' = a real Mercy-managed server of this game is running here;
+   *  'playing' = the game's own process is running, with no Mercy server —
+   *  both real, never invented. Defaults to 'hosting' for callers/tests
+   *  written before this field existed (every prior LocalActivity WAS a
+   *  hosting case — this file never detected "playing" before now). */
+  kind?: 'playing' | 'hosting';
+  /** Minecraft only — real, detected edition, never guessed. */
+  edition?: 'java' | 'bedrock';
 }
 
 export interface LocalPresence {
@@ -129,15 +141,45 @@ export function assessConnectivity(reachability: { hasLanAddress: boolean; realt
  *  small and structural (not importing the concrete classes) so this file
  *  has no dependency on Minecraft/AssettoCorsa/FiveM internals and stays
  *  trivially testable with disposable fixture objects. */
-export interface ManagerLike { getAllServers(): { id: string; name: string; status: string }[]; }
+export interface ManagerLike { getAllServers(): { id: string; name: string; status: string; edition?: string }[]; }
+
+/** Real process-presence check, real implementation using the OS's own
+ *  process list (tasklist on Windows) — injectable so tests never spawn a
+ *  real child process or depend on what's actually running on the test
+ *  runner's machine. Only ever asked about ONE exact image name at a time
+ *  (the real executable a real GameScanner scan already found), never a
+ *  broad process dump. */
+export interface ProcessChecker { isRunning(exeName: string): Promise<boolean>; }
+
+class TasklistProcessChecker implements ProcessChecker {
+  async isRunning(exeName: string): Promise<boolean> {
+    if (process.platform !== 'win32' || !exeName) return false;
+    const safe = exeName.replace(/[^A-Za-z0-9_.\-]/g, '');
+    if (!safe) return false;
+    return new Promise((resolve) => {
+      exec(`tasklist /FI "IMAGENAME eq ${safe}" /NH`, { windowsHide: true }, (err, stdout) => {
+        if (err) return resolve(false);
+        resolve(stdout.toLowerCase().includes(safe.toLowerCase()));
+      });
+    });
+  }
+}
+
+/** Minimal shape PresenceManager needs from GameScanner — just its own
+ *  already-real, already-cached detection results, never a fresh scan
+ *  triggered from here. Matches GameScanner.getCached()'s real (synchronous,
+ *  already-in-memory) signature. */
+export interface GameCacheLike { getCached(): { mercyGameId: string | null; executablePath: string }[]; }
 
 export interface PresenceManagerDeps {
   fivem?: ManagerLike;
   minecraft?: ManagerLike;
   assettoCorsa?: ManagerLike;
+  gameScanner?: GameCacheLike;
+  processChecker?: ProcessChecker;
 }
 
-interface PresenceSchema { visibility: PresenceVisibility; }
+interface PresenceSchema { visibility: PresenceVisibility; presenceSettings: PresenceSettings; }
 
 const RUNNING_STATUSES = new Set(['running']);
 const DEFAULT_JOIN_TOKEN_TTL_MS = 5 * 60 * 1000;
@@ -146,6 +188,14 @@ export class PresenceManager {
   private store: Store<PresenceSchema>;
   private secretFile: string;
   private secret: Buffer;
+  private processChecker: ProcessChecker;
+  /** Real single-use enforcement for join tokens (Phase 12/13's "token has
+   *  not already been used"): each real token's real nonce, seen exactly
+   *  once. In-memory and per-process is the honest scope here — a join
+   *  token is only ever meaningful while the HOST's own Mercy Launcher (the
+   *  process that minted it and actually owns the running game server) is
+   *  alive to begin with, so there is no real state to lose on restart. */
+  private consumedNonces = new Map<string, number>();
 
   constructor(userDataPath: string, private deps: PresenceManagerDeps = {}, private presenceServerUrl: string | null = null) {
     // Explicit cwd (unlike some other stores in this codebase that rely on
@@ -156,11 +206,15 @@ export class PresenceManager {
     // falling back to a shared default location when there's no real
     // Electron app object to detect (exactly what happens under a plain
     // node test process — the real bug this specific fix avoids).
-    this.store = new Store<PresenceSchema>({ name: 'mercy-presence', cwd: userDataPath, defaults: { visibility: 'private' } });
+    this.store = new Store<PresenceSchema>({
+      name: 'mercy-presence', cwd: userDataPath,
+      defaults: { visibility: 'private', presenceSettings: DEFAULT_PRESENCE_SETTINGS },
+    });
     const dataDir = path.join(userDataPath, 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     this.secretFile = path.join(dataDir, 'presence-secret.json');
     this.secret = this.loadOrCreateSecret();
+    this.processChecker = deps.processChecker || new TasklistProcessChecker();
   }
 
   private loadOrCreateSecret(): Buffer {
@@ -176,26 +230,53 @@ export class PresenceManager {
   }
 
   // ── Privacy (Part 9) — off by default; the user must opt in. ────────────
+  // `visibility` is the original 3-way placeholder from before a real
+  // friends system existed; kept (unchanged behavior, unchanged tests) for
+  // backward compatibility. `presenceSettings` is the REAL, explicit
+  // 3-toggle privacy model presence/friends actually uses now — presence is
+  // only ever shown to real friends (there is no "everyone" concept once
+  // friends are real), so this supersedes `visibility` going forward.
   getVisibility(): PresenceVisibility { return this.store.get('visibility'); }
   setVisibility(v: PresenceVisibility): void { this.store.set('visibility', v); }
 
-  /** Real local activity — the first real running server found across
-   *  FiveM/Minecraft/Assetto Corsa, in that order. Never fabricated: if
-   *  none of the injected managers report a running server, this is null. */
-  private detectLocalActivity(): LocalActivity | null {
-    const order: [PresenceGameId, ManagerLike | undefined][] = [
+  getPresenceSettings(): PresenceSettings { return this.store.get('presenceSettings') ?? DEFAULT_PRESENCE_SETTINGS; }
+  setPresenceSettings(settings: PresenceSettings): void { this.store.set('presenceSettings', settings); }
+
+  /** Real local activity: a real running Mercy-managed server takes
+   *  priority ('hosting'); otherwise, a real running game process with no
+   *  Mercy server ('playing'); otherwise null. Never fabricated — a game
+   *  that GameScanner hasn't actually found installed, or whose process
+   *  genuinely isn't running, never appears here. */
+  private async detectLocalActivity(): Promise<RealActivity | null> {
+    const managers: [ActivityGameId, ManagerLike | undefined][] = [
       ['fivem', this.deps.fivem], ['minecraft', this.deps.minecraft], ['assettocorsa', this.deps.assettoCorsa],
     ];
-    for (const [mercyGameId, mgr] of order) {
+    for (const [mercyGameId, mgr] of managers) {
       if (!mgr) continue;
       const running = mgr.getAllServers().find((s) => RUNNING_STATUSES.has(s.status));
-      if (running) return { mercyGameId, serverId: running.id, serverName: running.name, joinable: false };
+      if (running) {
+        const activity: RealActivity = { mercyGameId, kind: 'hosting', serverId: running.id, serverName: running.name };
+        if (mercyGameId === 'minecraft' && (running.edition === 'java' || running.edition === 'bedrock')) activity.edition = running.edition;
+        return activity;
+      }
+    }
+    if (this.deps.gameScanner) {
+      const cached = this.deps.gameScanner.getCached();
+      for (const mercyGameId of ['fivem', 'minecraft', 'assettocorsa'] as ActivityGameId[]) {
+        const game = cached.find((g) => g.mercyGameId === mercyGameId);
+        if (!game?.executablePath) continue;
+        const exeName = game.executablePath.split(/[\\/]/).pop() || '';
+        if (exeName && await this.processChecker.isRunning(exeName)) return { mercyGameId, kind: 'playing' };
+      }
     }
     return null;
   }
 
-  getLocalPresence(): LocalPresence {
-    const activity = this.detectLocalActivity();
+  async getLocalPresence(): Promise<LocalPresence> {
+    const real = await this.detectLocalActivity();
+    const activity: LocalActivity | null = real
+      ? { mercyGameId: real.mercyGameId, serverId: real.serverId || '', serverName: real.serverName || '', joinable: false, kind: real.kind, edition: real.edition }
+      : null;
     return { status: activity ? 'in-game' : 'online', visibility: this.getVisibility(), activity };
   }
 
@@ -224,6 +305,24 @@ export class PresenceManager {
     if (!payload.serverId || !payload.mercyGameId || typeof payload.expiresAt !== 'number') return { valid: false, reason: 'Malformed token.' };
     if (Date.now() > payload.expiresAt) return { valid: false, reason: 'Token expired.' };
     return { valid: true, payload };
+  }
+
+  /** The host's actual join-time check: valid signature AND not expired AND
+   *  never seen before. Use this (not the bare verifyJoinToken) at the
+   *  point a join is actually being honored — verifyJoinToken alone would
+   *  let the same short-lived token be replayed for a second join. */
+  verifyAndConsumeJoinToken(token: string): { valid: boolean; payload?: JoinTokenPayload; reason?: string } {
+    const result = this.verifyJoinToken(token);
+    if (!result.valid || !result.payload) return result;
+    this.pruneConsumedNonces();
+    if (this.consumedNonces.has(result.payload.nonce)) return { valid: false, reason: 'Token has already been used.' };
+    this.consumedNonces.set(result.payload.nonce, result.payload.expiresAt);
+    return result;
+  }
+
+  private pruneConsumedNonces(): void {
+    const now = Date.now();
+    for (const [nonce, expiresAt] of this.consumedNonces) if (expiresAt < now) this.consumedNonces.delete(nonce);
   }
 
   // ── Friends/presence broadcast — real client, honestly unconfigured. ────

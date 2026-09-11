@@ -168,7 +168,7 @@ function initializeServices() {
   minecraftManager = new MinecraftManager(userDataPath);
   assettoCorsaManager = new AssettoCorsaManager(userDataPath);
   gameScanner = new GameScanner(userDataPath);
-  presenceManager = new PresenceManager(userDataPath, { fivem: serverManager, minecraft: minecraftManager, assettoCorsa: assettoCorsaManager });
+  presenceManager = new PresenceManager(userDataPath, { fivem: serverManager, minecraft: minecraftManager, assettoCorsa: assettoCorsaManager, gameScanner });
   minecraftMarketplace = new MinecraftMarketplace();
   bedrockMarketplace = new BedrockMarketplace(userDataPath);
   themeManager = new ThemeManager(userDataPath);
@@ -422,6 +422,8 @@ function registerIpcHandlers() {
   ipcMain.handle('presence:getVisibility', () => presenceManager.getVisibility());
   ipcMain.handle('presence:setVisibility', (_, v: 'everyone' | 'friends-only' | 'private') => presenceManager.setVisibility(v));
   ipcMain.handle('presence:getFriends', () => presenceManager.getFriends());
+  ipcMain.handle('presence:getSettings', () => presenceManager.getPresenceSettings());
+  ipcMain.handle('presence:setSettings', (_, s: { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean }) => presenceManager.setPresenceSettings(s));
 
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());

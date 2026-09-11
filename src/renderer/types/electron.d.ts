@@ -199,6 +199,8 @@ interface ElectronAPI {
     getVisibility: () => Promise<PresenceVisibility>;
     setVisibility: (v: PresenceVisibility) => Promise<void>;
     getFriends: () => Promise<FriendPresence[]>;
+    getSettings: () => Promise<PresenceSettings>;
+    setSettings: (s: PresenceSettings) => Promise<void>;
   };
 
   onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
@@ -586,14 +588,17 @@ declare global {
     platformLabel: string; detectedAt: string;
   }
 
-  // ── Presence/Friends types (mirror src/main/services/PresenceManager.ts) ──
+  // ── Presence/Friends types (mirror src/main/services/PresenceManager.ts
+  // and src/main/services/FriendsPresenceLogic.ts) ──────────────────────────
   type PresenceVisibility = 'everyone' | 'friends-only' | 'private';
   type PresenceStatus = 'online' | 'in-game' | 'offline';
   interface LocalActivity {
     mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa'; serverId: string; serverName: string; joinable: boolean;
+    kind?: 'playing' | 'hosting'; edition?: 'java' | 'bedrock';
   }
   interface LocalPresence { status: PresenceStatus; visibility: PresenceVisibility; activity: LocalActivity | null; }
   interface FriendPresence { displayName: string; status: PresenceStatus; activity: LocalActivity | null; joinable: boolean; }
+  interface PresenceSettings { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean; }
 
   // ── Vehicle Studio types (mirror src/main/services/VehicleStudio.ts) ────────
   interface VSVehicle {

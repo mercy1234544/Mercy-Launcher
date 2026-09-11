@@ -175,6 +175,8 @@ const electronAPI = {
     getVisibility: () => ipcRenderer.invoke('presence:getVisibility'),
     setVisibility: (v: 'everyone' | 'friends-only' | 'private') => ipcRenderer.invoke('presence:setVisibility', v),
     getFriends: () => ipcRenderer.invoke('presence:getFriends'),
+    getSettings: () => ipcRenderer.invoke('presence:getSettings'),
+    setSettings: (s: { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean }) => ipcRenderer.invoke('presence:setSettings', s),
   },
 
   onAssettoCorsaConsole: (callback: (data: { serverId: string; line: string }) => void) => {

@@ -22,22 +22,51 @@ function fixtureManager(servers) { return { getAllServers: () => servers }; }
     // ── Local presence: online / in-game, derived from REAL fixture manager state ─
     const idleManagers = { fivem: fixtureManager([]), minecraft: fixtureManager([]), assettoCorsa: fixtureManager([]) };
     const idlePresence = new PresenceManager(userDataRoot, idleManagers);
-    const idleLocal = idlePresence.getLocalPresence();
+    const idleLocal = await idlePresence.getLocalPresence();
     ok('with no real running servers anywhere, local status is "online" (not fabricated as in-game)', idleLocal.status === 'online');
     ok('with no real running servers, activity is null — never invented', idleLocal.activity === null);
 
     const runningMcRoot = mkTempRoot();
     const runningManagers = {
       fivem: fixtureManager([{ id: 'fivem-1', name: 'My FiveM Server', status: 'stopped' }]),
-      minecraft: fixtureManager([{ id: 'mc-1', name: 'My Minecraft Server', status: 'running' }]),
+      minecraft: fixtureManager([{ id: 'mc-1', name: 'My Minecraft Server', status: 'running', edition: 'java' }]),
       assettoCorsa: fixtureManager([{ id: 'ac-1', name: 'My AC Server', status: 'running' }]),
     };
     const runningPresence = new PresenceManager(runningMcRoot, runningManagers);
-    const runningLocal = runningPresence.getLocalPresence();
+    const runningLocal = await runningPresence.getLocalPresence();
     ok('a real running server makes local status "in-game"', runningLocal.status === 'in-game');
     ok('activity reports the REAL server name, not a placeholder', runningLocal.activity?.serverName === 'My Minecraft Server');
     ok('activity reports the correct real mercyGameId', runningLocal.activity?.mercyGameId === 'minecraft');
+    ok('activity kind is "hosting" for a real running Mercy-managed server', runningLocal.activity?.kind === 'hosting');
+    ok('Minecraft activity carries the real detected edition', runningLocal.activity?.edition === 'java');
     ok('when multiple games have running servers, a stable priority order picks one real activity (never both/ambiguous)', runningLocal.activity?.mercyGameId !== 'assettocorsa' || true); // documents that fivem > minecraft > assettocorsa priority is deterministic; minecraft won here per that order since fivem's own server was stopped
+
+    // ── "Playing" activity: a real game process running with NO Mercy
+    // server — never invented, only reported when BOTH a real GameScanner
+    // cache entry AND a real (fixture) running process are present. ───────
+    const noProcess = { isRunning: async () => false };
+    const fivemProcessRunning = { isRunning: async (exe) => exe.toLowerCase() === 'fivem.exe' };
+    const fixtureCache = { getCached: () => [{ mercyGameId: 'fivem', executablePath: 'C:\\Users\\test\\AppData\\Local\\FiveM\\FiveM.exe' }] };
+
+    const playingPresence = new PresenceManager(mkTempRoot(), { ...idleManagers, gameScanner: fixtureCache, processChecker: fivemProcessRunning });
+    const playingLocal = await playingPresence.getLocalPresence();
+    ok('a real running game process with no Mercy server is reported as "playing"', playingLocal.activity?.kind === 'playing' && playingLocal.activity?.mercyGameId === 'fivem');
+    ok('"playing" activity carries no serverId/serverName — there is no real server to report', !playingLocal.activity?.serverId);
+
+    const nothingRunningPresence = new PresenceManager(mkTempRoot(), { ...idleManagers, gameScanner: fixtureCache, processChecker: noProcess });
+    const nothingRunningLocal = await nothingRunningPresence.getLocalPresence();
+    ok('a detected-but-not-running game process never fabricates "playing" activity', nothingRunningLocal.activity === null);
+
+    const hostingBeatsPlayingPresence = new PresenceManager(mkTempRoot(), { ...runningManagers, gameScanner: fixtureCache, processChecker: fivemProcessRunning });
+    const hostingBeatsPlayingLocal = await hostingBeatsPlayingPresence.getLocalPresence();
+    ok('a real running Mercy-managed server takes priority over a merely-playing process', hostingBeatsPlayingLocal.activity?.kind === 'hosting');
+
+    // ── Explicit 3-toggle presence settings (Phase 4): private by default ──
+    const settingsPresence = new PresenceManager(mkTempRoot(), idleManagers);
+    const defaultSettings = settingsPresence.getPresenceSettings();
+    ok('presence settings default to fully private (appearOnline/showCurrentGame/showCurrentServer all false)', defaultSettings.appearOnline === false && defaultSettings.showCurrentGame === false && defaultSettings.showCurrentServer === false);
+    settingsPresence.setPresenceSettings({ appearOnline: true, showCurrentGame: true, showCurrentServer: false });
+    ok('setPresenceSettings() takes effect immediately', settingsPresence.getPresenceSettings().showCurrentServer === false && settingsPresence.getPresenceSettings().appearOnline === true);
 
     // ── Privacy (Part 9): private by default, real persistence ───────────
     ok('visibility defaults to "private" (opt-in, not opt-out)', idlePresence.getVisibility() === 'private');
@@ -74,6 +103,14 @@ function fixtureManager(servers) { return { getAllServers: () => servers }; }
     const otherToken = otherPresence.createJoinToken('server-abc', 'minecraft', 5000);
     ok('a token signed by a DIFFERENT install\'s secret is rejected here', idlePresence.verifyJoinToken(otherToken).valid === false);
     fs.rmSync(otherRoot, { recursive: true, force: true });
+
+    // ── Single-use join tokens (Phase 12/13: "token has not already been used") ─
+    const reuseToken = idlePresence.createJoinToken('server-xyz', 'fivem', 5000);
+    const firstUse = idlePresence.verifyAndConsumeJoinToken(reuseToken);
+    ok('a fresh token is accepted the first time it is actually used', firstUse.valid === true);
+    const secondUse = idlePresence.verifyAndConsumeJoinToken(reuseToken);
+    ok('the SAME token is rejected the second time — real single-use enforcement, not just signature/expiry checks', secondUse.valid === false && /already been used/i.test(secondUse.reason));
+    ok('plain verifyJoinToken (no consumption) still reports a used token as cryptographically valid — consumption is a separate, deliberate step', idlePresence.verifyJoinToken(reuseToken).valid === true);
 
     // ── Connectivity assessment (Parts 10-13, 20): real, honest, per-case ─
     const lan = assessConnectivity({ hasLanAddress: true, realtimeReachable: true });
