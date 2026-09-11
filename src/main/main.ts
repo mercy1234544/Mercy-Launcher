@@ -19,6 +19,7 @@ import { SettingsManager } from './services/SettingsManager';
 import { MinecraftManager } from './services/MinecraftManager';
 import { AssettoCorsaManager } from './services/AssettoCorsaManager';
 import { GameScanner } from './services/GameScanner';
+import { PresenceManager } from './services/PresenceManager';
 import { MinecraftMarketplace } from './services/MinecraftMarketplace';
 import { BedrockMarketplace } from './services/BedrockMarketplace';
 import { ThemeManager } from './services/ThemeManager';
@@ -71,6 +72,7 @@ let settingsManager: SettingsManager;
 let minecraftManager: MinecraftManager;
 let assettoCorsaManager: AssettoCorsaManager;
 let gameScanner: GameScanner;
+let presenceManager: PresenceManager;
 let minecraftMarketplace: MinecraftMarketplace;
 let bedrockMarketplace: BedrockMarketplace;
 let themeManager: ThemeManager;
@@ -166,6 +168,7 @@ function initializeServices() {
   minecraftManager = new MinecraftManager(userDataPath);
   assettoCorsaManager = new AssettoCorsaManager(userDataPath);
   gameScanner = new GameScanner(userDataPath);
+  presenceManager = new PresenceManager(userDataPath, { fivem: serverManager, minecraft: minecraftManager, assettoCorsa: assettoCorsaManager });
   minecraftMarketplace = new MinecraftMarketplace();
   bedrockMarketplace = new BedrockMarketplace(userDataPath);
   themeManager = new ThemeManager(userDataPath);
@@ -411,6 +414,14 @@ function registerIpcHandlers() {
   ipcMain.handle('games:scan', () => gameScanner.scan());
   ipcMain.handle('games:getCached', () => gameScanner.getCached());
   ipcMain.handle('games:launch', (_, id: string) => gameScanner.launch(id));
+  ipcMain.handle('games:getLastScanAt', () => gameScanner.getLastScanAt());
+  ipcMain.handle('games:isStale', () => gameScanner.isStale());
+
+  // Presence / Friends foundation (see PresenceManager.ts's own header comment).
+  ipcMain.handle('presence:getLocal', () => presenceManager.getLocalPresence());
+  ipcMain.handle('presence:getVisibility', () => presenceManager.getVisibility());
+  ipcMain.handle('presence:setVisibility', (_, v: 'everyone' | 'friends-only' | 'private') => presenceManager.setVisibility(v));
+  ipcMain.handle('presence:getFriends', () => presenceManager.getFriends());
 
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());

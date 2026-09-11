@@ -189,7 +189,16 @@ interface ElectronAPI {
   games: {
     scan: () => Promise<DetectedGame[]>;
     getCached: () => Promise<DetectedGame[]>;
-    launch: (id: string) => Promise<{ success: boolean; error?: string }>;
+    launch: (id: string) => Promise<{ success: boolean; error?: string; note?: string }>;
+    getLastScanAt: () => Promise<string | null>;
+    isStale: () => Promise<boolean>;
+  };
+
+  presence: {
+    getLocal: () => Promise<LocalPresence>;
+    getVisibility: () => Promise<PresenceVisibility>;
+    setVisibility: (v: PresenceVisibility) => Promise<void>;
+    getFriends: () => Promise<FriendPresence[]>;
   };
 
   onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
@@ -571,8 +580,20 @@ declare global {
   // ── Game Library types (mirror src/main/services/GameScanner.ts) ───────────
   interface DetectedGame {
     id: string; name: string; mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa' | null;
-    installPath: string; executablePath: string; source: 'steam' | 'direct'; detectedAt: string;
+    mercyStatus: 'supported' | 'planned' | 'unsupported';
+    installPath: string; executablePath: string;
+    platform: 'steam' | 'epic' | 'gog' | 'ubisoft' | 'rockstar' | 'ea' | 'microsoft' | 'direct';
+    platformLabel: string; detectedAt: string;
   }
+
+  // ── Presence/Friends types (mirror src/main/services/PresenceManager.ts) ──
+  type PresenceVisibility = 'everyone' | 'friends-only' | 'private';
+  type PresenceStatus = 'online' | 'in-game' | 'offline';
+  interface LocalActivity {
+    mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa'; serverId: string; serverName: string; joinable: boolean;
+  }
+  interface LocalPresence { status: PresenceStatus; visibility: PresenceVisibility; activity: LocalActivity | null; }
+  interface FriendPresence { displayName: string; status: PresenceStatus; activity: LocalActivity | null; joinable: boolean; }
 
   // ── Vehicle Studio types (mirror src/main/services/VehicleStudio.ts) ────────
   interface VSVehicle {

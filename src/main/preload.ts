@@ -166,6 +166,15 @@ const electronAPI = {
     scan: () => ipcRenderer.invoke('games:scan'),
     getCached: () => ipcRenderer.invoke('games:getCached'),
     launch: (id: string) => ipcRenderer.invoke('games:launch', id),
+    getLastScanAt: () => ipcRenderer.invoke('games:getLastScanAt'),
+    isStale: () => ipcRenderer.invoke('games:isStale'),
+  },
+
+  presence: {
+    getLocal: () => ipcRenderer.invoke('presence:getLocal'),
+    getVisibility: () => ipcRenderer.invoke('presence:getVisibility'),
+    setVisibility: (v: 'everyone' | 'friends-only' | 'private') => ipcRenderer.invoke('presence:setVisibility', v),
+    getFriends: () => ipcRenderer.invoke('presence:getFriends'),
   },
 
   onAssettoCorsaConsole: (callback: (data: { serverId: string; line: string }) => void) => {

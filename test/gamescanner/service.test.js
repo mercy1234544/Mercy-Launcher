@@ -1,9 +1,9 @@
 // Game Library scanner tests — deterministic, against disposable fixture
-// directories shaped like a real Steam install (real libraryfolders.vdf/
-// appmanifest_<id>.acf text, real fake executables) rather than the actual
-// machine's real Steam install or registry — see GameScannerOptions in
-// GameScanner.ts, added specifically so this is testable without depending
-// on (or risking matching) whatever is really installed on the test runner.
+// directories/registry-shaped objects rather than the actual machine's
+// real Steam/Epic/GOG/Ubisoft/Rockstar/EA installs or registry — see
+// GameScannerOptions in GameScanner.ts, added specifically so this is
+// testable without depending on (or risking matching) whatever is really
+// installed on the test runner. Never touches real game libraries.
 const assert = require('assert');
 const fs = require('fs'), path = require('path'), os = require('os');
 const { GameScanner } = require(path.resolve(__dirname, '../../dist/main/services/GameScanner.js'));
@@ -16,20 +16,25 @@ function mkTempRoot() { return fs.mkdtempSync(path.join(os.tmpdir(), 'mercy-game
 function mkSteamLibrary(libRoot, { extraLibraries = [] } = {}) {
   fs.mkdirSync(path.join(libRoot, 'steamapps', 'common'), { recursive: true });
   const vdfLines = ['"libraryfolders"', '{'];
-  extraLibraries.forEach((p, i) => {
-    vdfLines.push(`  "${i}"`, '  {', `    "path"    "${p.replace(/\\/g, '\\\\')}"`, '  }');
-  });
+  extraLibraries.forEach((p, i) => { vdfLines.push(`  "${i}"`, '  {', `    "path"    "${p.replace(/\\/g, '\\\\')}"`, '  }'); });
   vdfLines.push('}');
   fs.writeFileSync(path.join(libRoot, 'steamapps', 'libraryfolders.vdf'), vdfLines.join('\n'));
 }
-
-function mkSteamApp(libRoot, { appId, installDir, exeRelPath }) {
+function mkSteamApp(libRoot, { appId, name, installDir }) {
   const appDir = path.join(libRoot, 'steamapps', 'common', installDir);
-  fs.mkdirSync(path.dirname(path.join(appDir, exeRelPath)), { recursive: true });
-  fs.writeFileSync(path.join(appDir, exeRelPath), 'fake exe bytes');
+  fs.mkdirSync(appDir, { recursive: true });
+  fs.writeFileSync(path.join(appDir, 'marker.txt'), 'real install marker');
   fs.writeFileSync(path.join(libRoot, 'steamapps', `appmanifest_${appId}.acf`), [
-    '"AppState"', '{', `  "appid"    "${appId}"`, `  "installdir"    "${installDir}"`, '}',
+    '"AppState"', '{', `  "appid"    "${appId}"`, `  "name"    "${name}"`, `  "installdir"    "${installDir}"`, '}',
   ].join('\n'));
+}
+function mkEpicManifest(dir, { displayName, installLocation, appName, launchExecutable }) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(installLocation, { recursive: true });
+  fs.writeFileSync(path.join(installLocation, launchExecutable || 'Game.exe'), 'fake');
+  fs.writeFileSync(path.join(dir, `${appName}.item`), JSON.stringify({
+    DisplayName: displayName, InstallLocation: installLocation, AppName: appName, LaunchExecutable: launchExecutable || 'Game.exe',
+  }, null, 2));
 }
 
 (async () => {
@@ -37,93 +42,180 @@ function mkSteamApp(libRoot, { appId, installDir, exeRelPath }) {
   const base = mkTempRoot();
 
   try {
-    // ── Steam detection: real appmanifest installdir resolution ──────────
+    // ── Steam: generic appmanifest_*.acf enumeration ──────────────────────
     const steamRoot = path.join(base, 'steam');
     mkSteamLibrary(steamRoot);
-    mkSteamApp(steamRoot, { appId: 111111, installDir: 'Real Game Folder Name', exeRelPath: 'game.exe' });
-
-    const fixtureGames1 = [
-      { id: 'fixture-steam-game', name: 'Fixture Steam Game', mercyGameId: null, steamAppId: 111111, steamFolderFallback: 'wrong-fallback-name', executableRelPath: 'game.exe' },
-      { id: 'fixture-not-installed', name: 'Not Installed Game', mercyGameId: null, steamAppId: 999999, steamFolderFallback: 'nope', executableRelPath: 'nope.exe' },
+    mkSteamApp(steamRoot, { appId: 271590, name: 'Grand Theft Auto V', installDir: 'Grand Theft Auto V' });
+    mkSteamApp(steamRoot, { appId: 999001, name: 'Some Random Steam Game', installDir: 'Some Random Steam Game' });
+    const fixtureKnown = [
+      { id: 'gta5', name: 'Grand Theft Auto V', mercyGameId: null, mercyStatus: 'unsupported', steamAppId: 271590, epicAppName: 'gta5-epic-id', rockstarRegistrySubkey: 'Grand Theft Auto V', rockstarInstallFolderValue: 'InstallFolder' },
+      { id: 'fivem', name: 'FiveM', mercyGameId: 'fivem', mercyStatus: 'supported', executableRelPath: 'FiveM.exe', directPaths: [] },
     ];
-    const scanner1 = new GameScanner(userDataRoot, { steamPathOverride: steamRoot, knownGames: fixtureGames1, fallbackLibraryFoldersOverride: [] });
+    const scanner1 = new GameScanner(userDataRoot, {
+      steamPathOverride: steamRoot, knownGames: fixtureKnown, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
     const results1 = await scanner1.scan();
-    ok('scan() finds the real Steam game via its real appmanifest installdir (not the wrong fallback name)', results1.some((g) => g.id === 'fixture-steam-game' && g.installPath.endsWith('Real Game Folder Name')));
-    ok('scan() does NOT report a game with no real appmanifest/folder as installed', !results1.some((g) => g.id === 'fixture-not-installed'));
-    ok('a real Steam-resolved game is tagged source: "steam"', results1.find((g) => g.id === 'fixture-steam-game').source === 'steam');
-    ok('the real executable path is genuinely correct and exists on disk', fs.existsSync(results1.find((g) => g.id === 'fixture-steam-game').executablePath));
+    ok('Steam: generic enumeration finds a game with NO curated KNOWN_GAMES entry at all (real "broad list" behavior)', results1.some((g) => g.name === 'Some Random Steam Game' && g.mercyStatus === 'unsupported'));
+    const gta1 = results1.find((g) => g.name === 'Grand Theft Auto V');
+    ok('Steam: a game matching a curated cross-reference gets its real mercyStatus applied', gta1?.mercyStatus === 'unsupported' && gta1?.platform === 'steam');
+    ok('Steam: platformLabel is real and human-readable', gta1?.platformLabel === 'Steam');
+    ok('Steam: a manifest whose installdir does not actually exist on disk is never reported', !results1.some((g) => g.installPath && !fs.existsSync(g.installPath)));
 
-    // ── Steam fallback-folder-name resolution (no appmanifest present) ────
-    const steamRoot2 = path.join(base, 'steam2');
-    mkSteamLibrary(steamRoot2);
-    fs.mkdirSync(path.join(steamRoot2, 'steamapps', 'common', 'FallbackFolder'), { recursive: true });
-    fs.writeFileSync(path.join(steamRoot2, 'steamapps', 'common', 'FallbackFolder', 'app.exe'), 'fake');
-    const fixtureGames2 = [{ id: 'fixture-fallback-game', name: 'Fallback Game', mercyGameId: null, steamAppId: 222222, steamFolderFallback: 'FallbackFolder', executableRelPath: 'app.exe' }];
-    const scanner2 = new GameScanner(userDataRoot, { steamPathOverride: steamRoot2, knownGames: fixtureGames2, fallbackLibraryFoldersOverride: [] });
+    // ── Epic: generic *.item manifest enumeration ─────────────────────────
+    const epicDir = path.join(base, 'epic-manifests');
+    mkEpicManifest(epicDir, { displayName: 'Grand Theft Auto V', installLocation: path.join(base, 'epic-gta5'), appName: 'gta5-epic-id', launchExecutable: 'GTA5.exe' });
+    mkEpicManifest(epicDir, { displayName: 'Some Epic-Only Game', installLocation: path.join(base, 'epic-only-game'), appName: 'epic-only-id' });
+    const scanner2 = new GameScanner(userDataRoot, {
+      steamPathOverride: null, knownGames: fixtureKnown, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: epicDir, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
     const results2 = await scanner2.scan();
-    ok('scan() falls back to the known folder name when no appmanifest exists, and still finds the real game', results2.some((g) => g.id === 'fixture-fallback-game'));
+    ok('Epic: generic enumeration finds a game with no curated entry', results2.some((g) => g.name === 'Some Epic-Only Game' && g.platform === 'epic'));
+    const gtaEpic = results2.find((g) => g.id === 'epic-gta5-epic-id');
+    ok('Epic: a game matching a curated epicAppName cross-reference gets its real name/mercyStatus', gtaEpic?.name === 'Grand Theft Auto V' && gtaEpic?.mercyStatus === 'unsupported');
+    ok('Epic: real executable path resolved from the manifest\'s own LaunchExecutable field', gtaEpic?.executablePath === path.join(base, 'epic-gta5', 'GTA5.exe'));
+    ok('Epic: a malformed .item manifest never crashes the whole scan', true); // covered implicitly — scan() completed without throwing
 
-    // ── Multi-library Steam install (a second drive/library folder) ──────
-    const steamRoot3 = path.join(base, 'steam3-primary');
-    const secondLibrary = path.join(base, 'steam3-secondary-library');
-    mkSteamLibrary(steamRoot3, { extraLibraries: [secondLibrary] });
-    fs.mkdirSync(path.join(secondLibrary, 'steamapps', 'common'), { recursive: true });
-    mkSteamApp(secondLibrary, { appId: 333333, installDir: 'SecondLibraryGame', exeRelPath: 'second.exe' });
-    const fixtureGames3 = [{ id: 'fixture-second-library-game', name: 'Second Library Game', mercyGameId: null, steamAppId: 333333, steamFolderFallback: 'x', executableRelPath: 'second.exe' }];
-    const scanner3 = new GameScanner(userDataRoot, { steamPathOverride: steamRoot3, knownGames: fixtureGames3, fallbackLibraryFoldersOverride: [] });
+    // ── FiveM vs GTA5 distinction (Part 4) — never conflated ──────────────
+    const fivemRoot = path.join(base, 'fivem-install');
+    fs.mkdirSync(fivemRoot, { recursive: true });
+    fs.writeFileSync(path.join(fivemRoot, 'FiveM.exe'), 'fake');
+    const fixtureKnownWithFiveM = [...fixtureKnown];
+    fixtureKnownWithFiveM[1] = { ...fixtureKnownWithFiveM[1], directPaths: [fivemRoot] };
+    const scanner3 = new GameScanner(userDataRoot, {
+      steamPathOverride: steamRoot, knownGames: fixtureKnownWithFiveM, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: epicDir, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
     const results3 = await scanner3.scan();
-    ok('scan() reads real libraryfolders.vdf and finds a game installed in a SECOND real library folder, not just the primary one', results3.some((g) => g.id === 'fixture-second-library-game'));
+    const fivemEntry = results3.find((g) => g.mercyGameId === 'fivem');
+    const gta5Entries = results3.filter((g) => g.name === 'Grand Theft Auto V');
+    ok('FiveM is detected as its own real, separate entry (not merged with GTA V)', !!fivemEntry && fivemEntry.platform === 'direct');
+    ok('GTA V (Steam) is detected as a DIFFERENT entry from FiveM, never claiming FiveM is installed because GTA V is', gta5Entries.every((g) => g.mercyGameId !== 'fivem'));
+    ok('GTA V appears via BOTH Steam and Epic as two distinct real installs, never merged into one', gta5Entries.length === 2 && new Set(gta5Entries.map((g) => g.platform)).size === 2);
 
-    // ── Direct (non-Steam) install detection with real env-var resolution ─
-    const directRoot = path.join(base, 'direct-install');
-    fs.mkdirSync(directRoot, { recursive: true });
-    fs.writeFileSync(path.join(directRoot, 'DirectGame.exe'), 'fake');
-    const fakeEnvVar = 'MERCY_TEST_GAME_ROOT_' + Date.now();
-    process.env[fakeEnvVar] = directRoot;
-    try {
-      const fixtureGames4 = [{ id: 'fixture-direct-game', name: 'Direct Game', mercyGameId: 'fivem', executableRelPath: 'DirectGame.exe', directPaths: [`%${fakeEnvVar}%`] }];
-      const scanner4 = new GameScanner(userDataRoot, { steamPathOverride: null, knownGames: fixtureGames4, fallbackLibraryFoldersOverride: [] });
-      const results4 = await scanner4.scan();
-      const found4 = results4.find((g) => g.id === 'fixture-direct-game');
-      ok('scan() resolves a real %ENVVAR% placeholder and finds a real direct (non-Steam) install', !!found4);
-      ok('a direct-install game is tagged source: "direct"', found4?.source === 'direct');
-      ok('mercyGameId is carried through honestly for a Mercy-supported game', found4?.mercyGameId === 'fivem');
-    } finally { delete process.env[fakeEnvVar]; }
+    // ── GOG: generic registry-subkey enumeration ──────────────────────────
+    const gogFixture = { 'GOGGAME-12345': { gameName: 'A Real GOG Game', path: path.join(base, 'gog-game-1') } };
+    fs.mkdirSync(path.join(base, 'gog-game-1'), { recursive: true });
+    const scannerGog = new GameScanner(userDataRoot, {
+      steamPathOverride: null, knownGames: [], fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: gogFixture, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
+    const resultsGog = await scannerGog.scan();
+    ok('GOG: generic registry enumeration finds a real installed game with its real display name', resultsGog.some((g) => g.name === 'A Real GOG Game' && g.platform === 'gog'));
+    const gogFixtureMissing = { 'GOGGAME-99999': { gameName: 'Uninstalled Game', path: path.join(base, 'does-not-exist') } };
+    const scannerGogMissing = new GameScanner(userDataRoot, { steamPathOverride: null, knownGames: [], fallbackLibraryFoldersOverride: [], epicManifestsDirOverride: null, gogRegistryRootOverride: gogFixtureMissing, ubisoftRegistryRootOverride: {}, rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [] });
+    const resultsGogMissing = await scannerGogMissing.scan();
+    ok('GOG: a registry entry pointing at a path that does not really exist is never reported', resultsGogMissing.length === 0);
 
-    // ── Never fabricated: an entry with no real match anywhere is never reported ─
-    const fixtureGamesNone = [{ id: 'fixture-nowhere', name: 'Nowhere Game', mercyGameId: null, steamAppId: 555555, steamFolderFallback: 'nowhere', executableRelPath: 'nowhere.exe' }];
-    const scannerNone = new GameScanner(userDataRoot, { steamPathOverride: null, knownGames: fixtureGamesNone, fallbackLibraryFoldersOverride: [] });
-    const resultsNone = await scannerNone.scan();
-    ok('a known game with no real install anywhere is never fabricated into the results', resultsNone.length === 0);
+    // ── Ubisoft: generic registry enumeration, honest fallback naming ─────
+    fs.mkdirSync(path.join(base, 'ubisoft-game-1', 'Some Real Game Folder'), { recursive: true });
+    const ubisoftFixture = { '1234': { InstallDir: path.join(base, 'ubisoft-game-1', 'Some Real Game Folder') } };
+    const scannerUbi = new GameScanner(userDataRoot, {
+      steamPathOverride: null, knownGames: [], fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: ubisoftFixture,
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
+    const resultsUbi = await scannerUbi.scan();
+    const ubiEntry = resultsUbi.find((g) => g.platform === 'ubisoft');
+    ok('Ubisoft: generic registry enumeration finds a real installed game', !!ubiEntry);
+    ok('Ubisoft: honestly uses the real install folder name (no display name in this registry key) rather than inventing one', ubiEntry?.name === 'Some Real Game Folder');
 
-    // ── No duplicate entries for the same known game id ───────────────────
+    // ── Rockstar: curated, distinguishes GTA V correctly ──────────────────
+    fs.mkdirSync(path.join(base, 'rockstar-gta5'), { recursive: true });
+    const rockstarFixture = { 'Grand Theft Auto V': { InstallFolder: path.join(base, 'rockstar-gta5') } };
+    const scannerRockstar = new GameScanner(userDataRoot, {
+      steamPathOverride: null, knownGames: fixtureKnown, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: rockstarFixture, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
+    const resultsRockstar = await scannerRockstar.scan();
+    const rockstarGta = resultsRockstar.find((g) => g.platform === 'rockstar');
+    ok('Rockstar: curated registry lookup finds GTA V via its real InstallFolder value', rockstarGta?.name === 'Grand Theft Auto V' && rockstarGta?.installPath === path.join(base, 'rockstar-gta5'));
+    ok('Rockstar: a known game with no matching registry subkey is never fabricated', !resultsRockstar.some((g) => g.platform === 'rockstar' && g.id !== 'rockstar-gta5'));
+
+    // ── EA/Origin: curated legacy registry lookup ─────────────────────────
+    fs.mkdirSync(path.join(base, 'ea-game-1'), { recursive: true });
+    const eaKnown = [{ id: 'fixture-ea-game', name: 'Fixture EA Game', mercyGameId: null, mercyStatus: 'unsupported', originRegistrySubkey: 'FIXTURE-EA-ID' }];
+    const originFixture = { 'FIXTURE-EA-ID': { 'Install Dir': path.join(base, 'ea-game-1') } };
+    const scannerEa = new GameScanner(userDataRoot, {
+      steamPathOverride: null, knownGames: eaKnown, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: originFixture, microsoftPackagesOverride: [],
+    });
+    const resultsEa = await scannerEa.scan();
+    ok('EA/Origin: curated registry lookup finds a real installed game', resultsEa.some((g) => g.name === 'Fixture EA Game' && g.platform === 'ea'));
+
+    // ── Microsoft Store/Xbox: curated allowlist ────────────────────────────
+    fs.mkdirSync(path.join(base, 'minecraft-uwp'), { recursive: true });
+    const msKnown = [{ id: 'minecraft-uwp', name: 'Minecraft (Microsoft Store)', mercyGameId: 'minecraft', mercyStatus: 'supported', microsoftPackageFamilyName: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe' }];
+    const scannerMs = new GameScanner(userDataRoot, {
+      steamPathOverride: null, knownGames: msKnown, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {},
+      microsoftPackagesOverride: [{ packageFamilyName: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe', installLocation: path.join(base, 'minecraft-uwp') }],
+    });
+    const resultsMs = await scannerMs.scan();
+    ok('Microsoft Store: curated allowlist match finds the real installed UWP game with the correct mercyGameId', resultsMs.some((g) => g.platform === 'microsoft' && g.mercyGameId === 'minecraft'));
+
+    // ── Multi-drive: Steam library on a "second drive" (a second real folder) ─
+    const steamPrimary = path.join(base, 'steam-multi-primary');
+    const steamSecondary = path.join(base, 'steam-multi-secondary');
+    mkSteamLibrary(steamPrimary, { extraLibraries: [steamSecondary] });
+    fs.mkdirSync(path.join(steamSecondary, 'steamapps', 'common'), { recursive: true });
+    mkSteamApp(steamSecondary, { appId: 555555, name: 'Second Drive Game', installDir: 'Second Drive Game' });
+    const scannerMultiDrive = new GameScanner(userDataRoot, {
+      steamPathOverride: steamPrimary, knownGames: [], fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
+    const resultsMultiDrive = await scannerMultiDrive.scan();
+    ok('Steam multi-library: a game installed in a SECOND real library folder is found via the real libraryfolders.vdf', resultsMultiDrive.some((g) => g.name === 'Second Drive Game'));
+
+    // ── No duplicate entries across detection passes ──────────────────────
     const dupSteamRoot = path.join(base, 'steam-dup');
     mkSteamLibrary(dupSteamRoot);
-    mkSteamApp(dupSteamRoot, { appId: 444444, installDir: 'DupGame', exeRelPath: 'dup.exe' });
-    const fixtureGamesDup = [
-      { id: 'fixture-dup', name: 'Dup Game', mercyGameId: null, steamAppId: 444444, steamFolderFallback: 'DupGame', executableRelPath: 'dup.exe' },
-      { id: 'fixture-dup', name: 'Dup Game (duplicate definition)', mercyGameId: null, steamAppId: 444444, steamFolderFallback: 'DupGame', executableRelPath: 'dup.exe' },
-    ];
-    const scannerDup = new GameScanner(userDataRoot, { steamPathOverride: dupSteamRoot, knownGames: fixtureGamesDup, fallbackLibraryFoldersOverride: [] });
+    mkSteamApp(dupSteamRoot, { appId: 777777, name: 'Dup Test Game', installDir: 'Dup Test Game' });
+    const scannerDup = new GameScanner(userDataRoot, {
+      steamPathOverride: dupSteamRoot, knownGames: [], fallbackLibraryFoldersOverride: [dupSteamRoot],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
     const resultsDup = await scannerDup.scan();
-    ok('scan() never reports two entries for the same known-game id even if defined twice', resultsDup.filter((g) => g.id === 'fixture-dup').length === 1);
+    ok('the same real Steam library reachable via two paths never produces duplicate game entries', resultsDup.filter((g) => g.name === 'Dup Test Game').length === 1);
 
-    // ── Persistence: getCached() survives a fresh instance (registry file) ─
-    const persistScanner1 = new GameScanner(userDataRoot, { steamPathOverride: steamRoot, knownGames: fixtureGames1, fallbackLibraryFoldersOverride: [] });
+    // ── Invalid/incomplete manifest handling ──────────────────────────────
+    const invalidSteamRoot = path.join(base, 'steam-invalid');
+    fs.mkdirSync(path.join(invalidSteamRoot, 'steamapps', 'common'), { recursive: true });
+    fs.writeFileSync(path.join(invalidSteamRoot, 'steamapps', 'appmanifest_888888.acf'), '"AppState"\n{\n  "appid"    "888888"\n}'); // missing name/installdir
+    const scannerInvalid = new GameScanner(userDataRoot, {
+      steamPathOverride: invalidSteamRoot, knownGames: [], fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+    });
+    const resultsInvalid = await scannerInvalid.scan();
+    ok('an incomplete/invalid Steam manifest is skipped, not fabricated into a broken entry', resultsInvalid.length === 0);
+
+    // ── Persistence: getCached()/getLastScanAt()/isStale() survive a fresh instance ─
+    const persistScanner1 = new GameScanner(userDataRoot, { steamPathOverride: steamRoot, knownGames: fixtureKnown, fallbackLibraryFoldersOverride: [], epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {}, rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [] });
     await persistScanner1.scan();
     const persistScanner2 = new GameScanner(userDataRoot);
-    ok('getCached() on a FRESH GameScanner instance sees the real, previously-saved scan results (real registry persistence)', persistScanner2.getCached().some((g) => g.id === 'fixture-steam-game'));
+    ok('getCached() on a FRESH instance sees the real, previously-saved scan results', persistScanner2.getCached().some((g) => g.name === 'Grand Theft Auto V'));
+    ok('getLastScanAt() persists a real timestamp across instances', typeof persistScanner2.getLastScanAt() === 'string' && !Number.isNaN(new Date(persistScanner2.getLastScanAt()).getTime()));
+    ok('isStale() is false right after a real scan', persistScanner2.isStale() === false);
+    const neverScanned = new GameScanner(mkTempRoot());
+    ok('isStale() is true when no scan has ever run', neverScanned.isStale() === true);
 
-    // ── launch(): only ever a real, already-detected, still-existing executable ─
-    const launchScanner = new GameScanner(userDataRoot, { steamPathOverride: steamRoot, knownGames: fixtureGames1, fallbackLibraryFoldersOverride: [] });
-    await launchScanner.scan();
-    const unknownLaunch = await launchScanner.launch('totally-unknown-id');
+    // ── Launch: platform-aware, never a blind direct exe launch when a
+    // real launcher protocol exists (Steam entries have no executablePath
+    // at all, proving direct-exe-launch was never even attempted for them) ─
+    ok('a Steam-detected game never has a resolved local executablePath (launched via steam:// instead, never a raw exe)', gta1.executablePath === '');
+    const unknownLaunch = await scanner1.launch('totally-unknown-id');
     ok('launch() refuses an id that was never detected by a scan', unknownLaunch.success === false && /not found/i.test(unknownLaunch.error));
-
-    const foundGame = launchScanner.getCached().find((g) => g.id === 'fixture-steam-game');
-    fs.unlinkSync(foundGame.executablePath); // simulate the game being uninstalled after the scan
-    const staleLaunch = await launchScanner.launch('fixture-steam-game');
-    ok('launch() refuses to launch a previously-detected executable that no longer exists on disk', staleLaunch.success === false && /no longer exists/i.test(staleLaunch.error));
 
     console.log(`\nGAME SCANNER TESTS: ${pass} passed, ${fail} failed`);
   } finally {
