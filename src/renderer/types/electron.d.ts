@@ -201,11 +201,13 @@ interface ElectronAPI {
     getFriends: () => Promise<FriendPresence[]>;
     getSettings: () => Promise<PresenceSettings>;
     setSettings: (s: PresenceSettings) => Promise<void>;
-    createJoinToken: (serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string } | null) => Promise<string>;
+    createJoinToken: (serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string; relayId?: string } | null) => Promise<string>;
   };
 
   connection: {
     negotiateMinecraftEndpoint: (serverId: string) => Promise<EndpointPlan | null>;
+    connectViaRelay: (args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) => Promise<RelayConnectResult>;
+    teardownRelayHost: (serverId: string) => Promise<void>;
   };
 
   onMinecraftConsole: (callback: (data: { serverId: string; line: string }) => void) => () => void;
@@ -608,8 +610,9 @@ declare global {
   // ── Connection negotiation types (mirror
   // src/main/services/connection/ConnectionNegotiator.ts) ────────────────────
   type EndpointStrategy = 'lan-direct' | 'upnp-direct' | 'relay';
-  interface EndpointCandidate { strategy: EndpointStrategy; address: string; note: string; }
+  interface EndpointCandidate { strategy: EndpointStrategy; address: string; relayId?: string; note: string; }
   interface EndpointPlan { candidates: EndpointCandidate[]; relayAvailable: boolean; unavailableExplanation: string | null; }
+  interface RelayConnectResult { success: boolean; localAddress?: string; reason?: string; }
 
   // ── Vehicle Studio types (mirror src/main/services/VehicleStudio.ts) ────────
   interface VSVehicle {

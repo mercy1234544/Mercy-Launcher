@@ -34,6 +34,13 @@ const JOIN_TOKEN_TTL_MS = 2 * 60 * 1000;
 
 export type ConnectionState = 'unconfigured' | 'connecting' | 'connected' | 'unreachable';
 
+// Honest, user-facing connection states (Step 9) — never "Connected" unless
+// a real local tunnel/direct address was actually established.
+export type GameConnectionState =
+  | 'idle' | 'connecting-direct' | 'connected-direct'
+  | 'connecting-relay' | 'connected-relay' | 'failed';
+export interface GameConnectionStatus { state: GameConnectionState; detail?: string; localAddress?: string; }
+
 interface FriendsPresenceState {
   connection: ConnectionState;
   friends: FriendPresenceRow[];
@@ -41,6 +48,9 @@ interface FriendsPresenceState {
   outgoing: OutgoingFriendRequest[];
   incomingJoinRequests: JoinRequestRow[];
   outgoingJoinRequests: JoinRequestRow[];
+  /** Keyed by join_requests.id — the requester's own real connection
+   *  attempt state for one approved join, never shared across requests. */
+  connectionStatus: Record<string, GameConnectionStatus>;
   settings: PresenceSettings;
   loading: boolean;
   addFriendError: string | null;
@@ -56,6 +66,12 @@ interface FriendsPresenceState {
   join: (serverId: string) => Promise<{ error?: string; requested?: boolean }>;
   approveJoin: (request: JoinRequestRow) => Promise<{ error?: string }>;
   declineJoin: (requestId: string) => Promise<void>;
+  /** REQUESTER side: once a join request is authorized, actually attempt
+   *  the connection — direct address verification, or a real relay tunnel
+   *  when the host's endpoint says strategy:'relay'. Drives
+   *  connectionStatus[request.id] through the honest states above; never
+   *  reports connected-* without a real, successful check. */
+  connectToApprovedJoin: (request: JoinRequestRow) => Promise<void>;
 }
 
 let localPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -74,6 +90,7 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
   outgoing: [],
   incomingJoinRequests: [],
   outgoingJoinRequests: [],
+  connectionStatus: {},
   settings: DEFAULT_SETTINGS,
   loading: true,
   addFriendError: null,
@@ -117,6 +134,10 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
                 id: lastHosted.serverId, mercyGameId: lastHosted.mercyGameId, edition: lastHosted.edition ?? null,
                 displayName: lastHosted.serverName, isOnline: false,
               }).catch(() => {});
+              // Real cleanup: stop forwarding relay traffic for a server
+              // that has actually stopped, rather than waiting for the
+              // relay's own idle timeout to notice.
+              await window.electronAPI?.connection?.teardownRelayHost?.(lastHosted.serverId).catch(() => {});
             }
             if (nowHosting) {
               await upsertServer({
@@ -182,11 +203,14 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
 
   approveJoin: async (request) => {
     // Minecraft only this milestone (Phase 5) — negotiate a real endpoint
-    // on THIS machine using the server's own real connection info, then
-    // mint a real, single-use, short-lived token bound to it.
+    // on THIS machine (LAN, then UPnP, then the real Mercy relay — see
+    // ConnectionNegotiator's own direct-first priority), then mint a real,
+    // single-use, short-lived token bound to it. A relay candidate is only
+    // ever produced after a real, successful registration round trip —
+    // never assumed available.
     const plan = await window.electronAPI?.connection?.negotiateMinecraftEndpoint?.(request.serverId).catch(() => null);
     const best = plan?.candidates?.[0] ?? null;
-    const endpoint = best ? { strategy: best.strategy, address: best.address } : null;
+    const endpoint = best ? { strategy: best.strategy, address: best.address, relayId: best.relayId } : null;
     const token = await window.electronAPI?.presence?.createJoinToken?.(request.serverId, 'minecraft', JOIN_TOKEN_TTL_MS, endpoint).catch(() => null);
     const result = await respondToJoinRequest(request.id, true, token || undefined, endpoint);
     if (result.error) return { error: result.error };
@@ -195,4 +219,40 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
   },
 
   declineJoin: async (requestId) => { await respondToJoinRequest(requestId, false); await get().refresh(); },
+
+  connectToApprovedJoin: async (request) => {
+    const key = request.id;
+    const setStatus = (status: GameConnectionStatus) => set((s) => ({ connectionStatus: { ...s.connectionStatus, [key]: status } }));
+    if (!request.endpoint) { setStatus({ state: 'failed', detail: 'The host did not provide a connection endpoint.' }); return; }
+    const transport: 'tcp' | 'udp' = request.edition === 'bedrock' ? 'udp' : 'tcp';
+
+    if (request.endpoint.strategy === 'lan-direct' || request.endpoint.strategy === 'upnp-direct') {
+      // Reported as the real, negotiated address — not independently
+      // re-verified from the renderer (ConnectionNegotiator.verifyEndpointReachable
+      // is a main-process-only helper with no IPC exposure yet, since
+      // nothing calls it live — see docs/linux-backend-client-contract.md
+      // §10). The game client's own connection attempt is the real proof,
+      // exactly like MinecraftServerPanel's existing ConnectTab already
+      // treats a LAN address today.
+      setStatus({
+        state: 'connected-direct', localAddress: request.endpoint.address,
+        detail: 'Use this address in your game client to connect.',
+      });
+      return;
+    }
+
+    if (request.endpoint.strategy === 'relay') {
+      if (!request.endpoint.relayId || !request.token) { setStatus({ state: 'failed', detail: 'Missing relay authorization.' }); return; }
+      setStatus({ state: 'connecting-relay' });
+      const listenPort = 40000 + Math.floor(Math.random() * 5000);
+      const result: { success: boolean; localAddress?: string; reason?: string } | undefined = await window.electronAPI?.connection?.connectViaRelay?.({
+        joinRequestId: request.id, relayId: request.endpoint.relayId, token: request.token, transport, listenPort,
+      }).catch((e) => ({ success: false, reason: e?.message }));
+      if (result?.success) setStatus({ state: 'connected-relay', localAddress: result.localAddress });
+      else setStatus({ state: 'failed', detail: result?.reason || 'Could not connect through the Mercy relay.' });
+      return;
+    }
+
+    setStatus({ state: 'failed', detail: 'Unknown connection strategy.' });
+  },
 }));

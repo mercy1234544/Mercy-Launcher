@@ -114,7 +114,7 @@ export interface JoinTokenPayload {
    *  because the whole point of this token is letting an authorized friend
    *  actually connect — this is the "necessary" case the no-unnecessary-IP
    *  rule allows for. */
-  endpoint?: { strategy: string; address: string } | null;
+  endpoint?: { strategy: string; address: string; relayId?: string } | null;
 }
 
 export type ConnectivityStrategy = 'lan-direct' | 'public-direct' | 'relay-required-unavailable' | 'not-joinable';
@@ -289,7 +289,7 @@ export class PresenceManager {
   }
 
   // ── Join tokens — real HMAC-signed, short-lived, minimal-disclosure. ────
-  createJoinToken(serverId: string, mercyGameId: PresenceGameId, ttlMs: number = DEFAULT_JOIN_TOKEN_TTL_MS, endpoint?: { strategy: string; address: string } | null): string {
+  createJoinToken(serverId: string, mercyGameId: PresenceGameId, ttlMs: number = DEFAULT_JOIN_TOKEN_TTL_MS, endpoint?: { strategy: string; address: string; relayId?: string } | null): string {
     const payload: JoinTokenPayload = {
       serverId, mercyGameId, issuedAt: Date.now(), expiresAt: Date.now() + ttlMs, nonce: crypto.randomBytes(8).toString('hex'),
       ...(endpoint ? { endpoint } : {}),

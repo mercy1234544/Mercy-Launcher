@@ -152,14 +152,24 @@ const PRIVACY_TOGGLES: { key: 'appearOnline' | 'showCurrentGame' | 'showCurrentS
 // real project IS configured; the exact same code path handles both. ─────
 function FriendsPresenceSection() {
   const {
-    connection, friends, incoming, outgoing, incomingJoinRequests, outgoingJoinRequests, settings, loading, addFriendError,
-    init, teardown, addFriend, accept, decline, remove, updateSettings, join, approveJoin, declineJoin,
+    connection, friends, incoming, outgoing, incomingJoinRequests, outgoingJoinRequests, connectionStatus, settings, loading, addFriendError,
+    init, teardown, addFriend, accept, decline, remove, updateSettings, join, approveJoin, declineJoin, connectToApprovedJoin,
   } = useFriendsPresence();
   const [addUsername, setAddUsername] = useState('');
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
 
   useEffect(() => { init(); return () => teardown(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The moment a friend's join request is authorized, actually attempt the
+  // connection (direct address, or a real relay tunnel) — never left as a
+  // raw address for the user to interpret themselves (Step 9: no NAT/UPnP/
+  // relay/WebSocket jargon in the normal UI).
+  useEffect(() => {
+    for (const r of outgoingJoinRequests) {
+      if (r.status === 'authorized' && !connectionStatus[r.id]) connectToApprovedJoin(r);
+    }
+  }, [outgoingJoinRequests]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submitAddFriend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -249,22 +259,36 @@ function FriendsPresenceSection() {
               ))}
             </div>
           )}
-          {outgoingJoinRequests.filter((r) => r.status !== 'denied' && r.status !== 'expired').map((r) => (
-            <div key={r.id} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-2.5 mb-3">
-              {r.status === 'pending' ? (
-                <p className="flex-1 text-xs text-surface-400"><Loader2 size={12} className="inline animate-spin mr-1.5" /> Waiting for the host to approve your join request for {r.serverId}…</p>
-              ) : (
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-surface-100">Approved — try connecting to:</p>
-                  {r.endpoint ? (
-                    <p className="text-xs font-mono text-primary-300 mt-0.5">{r.endpoint.address} <span className="text-surface-500">({r.endpoint.strategy})</span></p>
-                  ) : (
-                    <p className="text-[11px] text-warning mt-0.5">No connection endpoint could be negotiated — the host may need a Mercy relay, which isn't deployed yet.</p>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
+          {outgoingJoinRequests.filter((r) => r.status !== 'denied' && r.status !== 'expired').map((r) => {
+            const status = connectionStatus[r.id];
+            return (
+              <div key={r.id} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-2.5 mb-3">
+                {r.status === 'pending' ? (
+                  <p className="flex-1 text-xs text-surface-400"><Loader2 size={12} className="inline animate-spin mr-1.5" /> Waiting for the host to approve your join request for {r.serverId}…</p>
+                ) : !status || status.state === 'connecting-direct' ? (
+                  <p className="flex-1 text-xs text-surface-400"><Loader2 size={12} className="inline animate-spin mr-1.5" /> Connecting directly…</p>
+                ) : status.state === 'connecting-relay' ? (
+                  <p className="flex-1 text-xs text-surface-400"><Loader2 size={12} className="inline animate-spin mr-1.5" /> Direct connection unavailable — connecting through Mercy Relay…</p>
+                ) : status.state === 'connected-direct' ? (
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-success font-semibold">Connected directly</p>
+                    <p className="text-xs font-mono text-primary-300 mt-0.5">{status.localAddress}</p>
+                    {status.detail && <p className="text-[11px] text-surface-500 mt-0.5">{status.detail}</p>}
+                  </div>
+                ) : status.state === 'connected-relay' ? (
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-success font-semibold">Connected through Mercy Relay</p>
+                    <p className="text-xs font-mono text-primary-300 mt-0.5">{status.localAddress}</p>
+                  </div>
+                ) : (
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-danger font-semibold">Unable to establish connection</p>
+                    {status.detail && <p className="text-[11px] text-surface-500 mt-0.5">{status.detail}</p>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           {friends.length === 0 ? (
             <p className="text-xs text-surface-500 py-4">No friends yet — add one by username above.</p>

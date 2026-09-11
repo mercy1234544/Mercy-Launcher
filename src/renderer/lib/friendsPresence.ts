@@ -160,7 +160,17 @@ export async function respondToJoinRequest(
 export interface JoinRequestRow {
   id: string; requesterId: string; requesterUsername: string; hostId: string; serverId: string;
   status: 'pending' | 'authorized' | 'denied' | 'expired';
-  endpoint: { strategy: string; address: string } | null;
+  endpoint: { strategy: string; address: string; relayId?: string } | null;
+  /** Only meaningful to the REQUESTER (RLS scopes the row to the two real
+   *  parties either way) — the opaque HMAC credential the host minted,
+   *  needed to authenticate to the relay when endpoint.strategy is
+   *  'relay'. Never decoded/inspected client-side (see PresenceManager.ts). */
+  token: string | null;
+  /** The real server's own registered game/edition (joined from `servers`)
+   *  — needed so the requester knows whether a relay connection must use
+   *  TCP or UDP (Bedrock) transport, without guessing. */
+  mercyGameId: string | null;
+  edition: 'java' | 'bedrock' | null;
   createdAt: string;
 }
 
@@ -174,12 +184,13 @@ export async function listJoinRequests(): Promise<ServiceResult<{ incoming: Join
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { data: { incoming: [], outgoing: [] } };
     const { data, error } = await supabase.from('join_requests')
-      .select('id, status, endpoint, created_at, requester_id, host_id, server_id, profiles!join_requests_requester_id_fkey(username)')
+      .select('id, status, endpoint, token, created_at, requester_id, host_id, server_id, profiles!join_requests_requester_id_fkey(username), servers(mercy_game_id, edition)')
       .order('created_at', { ascending: false }).limit(20);
     if (error) return { data: { incoming: [], outgoing: [] }, error: friendlyError(error) };
     const rows: JoinRequestRow[] = (data || []).map((r: any) => ({
       id: r.id, requesterId: r.requester_id, requesterUsername: r.profiles?.username || 'Unknown', hostId: r.host_id,
-      serverId: r.server_id, status: r.status, endpoint: r.endpoint, createdAt: r.created_at,
+      serverId: r.server_id, status: r.status, endpoint: r.endpoint, token: r.token,
+      mercyGameId: r.servers?.mercy_game_id ?? null, edition: r.servers?.edition ?? null, createdAt: r.created_at,
     }));
     return {
       data: {

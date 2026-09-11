@@ -177,12 +177,15 @@ const electronAPI = {
     getFriends: () => ipcRenderer.invoke('presence:getFriends'),
     getSettings: () => ipcRenderer.invoke('presence:getSettings'),
     setSettings: (s: { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean }) => ipcRenderer.invoke('presence:setSettings', s),
-    createJoinToken: (serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string } | null) =>
+    createJoinToken: (serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string; relayId?: string } | null) =>
       ipcRenderer.invoke('presence:createJoinToken', serverId, mercyGameId, ttlMs, endpoint),
   },
 
   connection: {
     negotiateMinecraftEndpoint: (serverId: string) => ipcRenderer.invoke('connection:negotiateMinecraftEndpoint', serverId),
+    connectViaRelay: (args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) =>
+      ipcRenderer.invoke('connection:connectViaRelay', args),
+    teardownRelayHost: (serverId: string) => ipcRenderer.invoke('connection:teardownRelayHost', serverId),
   },
 
   onAssettoCorsaConsole: (callback: (data: { serverId: string; line: string }) => void) => {

@@ -21,6 +21,8 @@ import { AssettoCorsaManager } from './services/AssettoCorsaManager';
 import { GameScanner } from './services/GameScanner';
 import { PresenceManager } from './services/PresenceManager';
 import { ConnectionNegotiator } from './services/connection/ConnectionNegotiator';
+import { RelayConnectionManager } from './services/connection/RelayConnectionManager';
+import { loadMainProcessEnv } from './services/envConfig';
 import { MinecraftMarketplace } from './services/MinecraftMarketplace';
 import { BedrockMarketplace } from './services/BedrockMarketplace';
 import { ThemeManager } from './services/ThemeManager';
@@ -35,6 +37,11 @@ import { autoUpdater } from 'electron-updater';
 // ready. Disabling the shader disk cache only costs a slightly slower shader
 // (re)compile per launch, never visual correctness.
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
+// Real main-process .env support (see envConfig.ts's own header for why this
+// is needed at all — Vite's VITE_-prefixed injection never reaches main).
+// Must run before anything reads process.env.MERCY_RELAY_WS_URL below.
+loadMainProcessEnv(app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd());
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -427,21 +434,39 @@ function registerIpcHandlers() {
   ipcMain.handle('presence:setSettings', (_, s: { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean }) => presenceManager.setPresenceSettings(s));
 
   // Real cross-computer join infrastructure — Minecraft first (see
-  // ConnectionNegotiator.ts). Reuses MinecraftManager's own real
-  // lanAddress/portListening/raknet detection; never re-derives it.
-  // relayConfigured reflects whether a real Mercy relay/signaling URL has
-  // actually been supplied — there is none by default, so this is honest
-  // about relay unavailability rather than assuming one exists.
+  // ConnectionNegotiator.ts / RelayConnectionManager.ts). Reuses
+  // MinecraftManager's own real lanAddress/portListening/raknet detection;
+  // never re-derives it. MERCY_RELAY_WS_URL is read by the main process
+  // only (see envConfig.ts's header for why) — there is none by default, so
+  // this is honest about relay unavailability rather than assuming one
+  // exists, and a relay is only ever reported available after a real,
+  // successful registration (see ConnectionNegotiator.planHostEndpoint).
   const connectionNegotiator = new ConnectionNegotiator();
-  ipcMain.handle('presence:createJoinToken', (_, serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string } | null) =>
+  const relayConnectionManager = new RelayConnectionManager(process.env.MERCY_RELAY_WS_URL || null);
+  ipcMain.handle('presence:createJoinToken', (_, serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string; relayId?: string } | null) =>
     presenceManager.createJoinToken(serverId, mercyGameId, ttlMs, endpoint));
   ipcMain.handle('connection:negotiateMinecraftEndpoint', async (_, serverId: string) => {
     const info = await minecraftManager.getConnectionInfo(serverId);
     if (!info) return null;
     const lanAddress = info.lanAddress ? info.lanAddress.split(':').slice(0, -1).join(':') : null;
+    const transport = info.edition === 'bedrock' ? 'udp' as const : 'tcp' as const;
     const portListening = info.edition === 'bedrock' ? (info.raknet?.reachable ?? null) : info.portListening;
-    return connectionNegotiator.planHostEndpoint({ lanAddress, port: info.port, portListening }, !!process.env.MERCY_RELAY_WS_URL);
+    const relay = relayConnectionManager.isConfigured()
+      ? { manager: relayConnectionManager, serverId, game: 'minecraft' as const, sessionToken: presenceManager.createJoinToken(serverId, 'minecraft', 60 * 60 * 1000) }
+      : null;
+    return connectionNegotiator.planHostEndpoint({ lanAddress, port: info.port, portListening, transport }, relay);
   });
+  // CLIENT side: once a friend's join request comes back authorized with a
+  // strategy:'relay' endpoint, this actually connects to the relay and
+  // starts the local tunnel the real game client uses. Never reports
+  // success without a real relay-granted response (see
+  // RelayConnectionManager.connectViaRelay's own header).
+  ipcMain.handle('connection:connectViaRelay', async (_, args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) =>
+    relayConnectionManager.connectViaRelay(args.joinRequestId, args.relayId, args.token, args.transport, args.listenPort));
+  // Real cleanup — called once the renderer's own real-activity tracking
+  // (useFriendsPresence.ts, already the authoritative "did hosting stop"
+  // signal) detects a Mercy-managed server actually stopped hosting.
+  ipcMain.handle('connection:teardownRelayHost', (_, serverId: string) => relayConnectionManager.teardownHost(serverId));
 
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());
