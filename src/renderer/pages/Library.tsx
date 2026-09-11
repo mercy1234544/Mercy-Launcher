@@ -106,20 +106,20 @@ function DetectedGamesSection() {
       ) : visibleGames.length === 0 ? (
         <p className="text-xs text-surface-500 py-4">No games match "{query}".</p>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {visibleGames.map((g) => {
             const mercyGame = g.mercyGameId ? getGame(g.mercyGameId) : undefined;
             const statusMeta = MERCY_STATUS_META[g.mercyStatus];
             return (
-              <div key={g.id} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-3">
-                <div className="w-9 h-9 rounded-lg bg-overlay-6 flex items-center justify-center shrink-0">
-                  {mercyGame ? <mercyGame.icon size={16} className={mercyGame.tint} /> : <Gamepad2 size={16} className="text-surface-500" />}
+              <div key={g.id} className="flex items-center gap-2.5 rounded-lg border border-overlay-4 bg-overlay-2 px-3 py-2">
+                <div className="w-8 h-8 rounded-lg bg-overlay-6 flex items-center justify-center shrink-0">
+                  {mercyGame ? <mercyGame.icon size={14} className={mercyGame.tint} /> : <Gamepad2 size={14} className="text-surface-500" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-surface-100 truncate">{g.name}</p>
-                  <p className="text-[11px] text-surface-500 truncate">{g.platformLabel} · {g.installPath}</p>
-                  <p className={`text-[10px] mt-0.5 font-semibold ${statusMeta.className}`}>Mercy Server Tools — {statusMeta.label}</p>
+                  <p className="text-[10.5px] text-surface-500 truncate">{g.platformLabel}</p>
                 </div>
+                <span className={`text-[10px] font-semibold shrink-0 whitespace-nowrap ${statusMeta.className}`}>{statusMeta.label}</span>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {mercyGame && (
                     <button onClick={() => navigate(mercyGame.path)} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Open Mercy Server Tools"><ExternalLink size={12} /> Server Tools</button>

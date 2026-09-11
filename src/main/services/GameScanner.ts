@@ -143,6 +143,20 @@ export const KNOWN_GAMES: KnownGameDef[] = [
     microsoftPackageFamilyName: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe',
   },
   { id: 'assetto-corsa', name: 'Assetto Corsa', mercyGameId: 'assettocorsa', mercyStatus: 'supported', steamAppId: 244210 },
+  {
+    // Content Manager (AcTools) is a real, legitimate third-party
+    // launcher players use to launch/manage Assetto Corsa — not a
+    // plugin, SDK, or dev tool, so it's a curated KNOWN_GAMES entry like
+    // FiveM/Minecraft Launcher rather than something the non-game
+    // classifier would ever need to touch. Its most common real default
+    // install location (AcTools' own installer); a user who chose a
+    // custom folder won't be found by this specific path, matching this
+    // scanner's existing "real, bounded, never a full-drive search"
+    // limitation for every other direct install.
+    id: 'content-manager', name: 'Content Manager', mercyGameId: null, mercyStatus: 'unsupported',
+    executableRelPath: 'Content Manager.exe',
+    directPaths: ['%LOCALAPPDATA%\\AcTools Content Manager'],
+  },
   { id: 'beamng-drive', name: 'BeamNG.drive', mercyGameId: null, mercyStatus: 'planned', steamAppId: 284160 },
   { id: 'gta5', name: 'Grand Theft Auto V', mercyGameId: null, mercyStatus: 'unsupported', steamAppId: 271590, epicAppName: '9d2d0eb64d5c44529cece33fe2a46482', rockstarRegistrySubkey: 'Grand Theft Auto V', rockstarInstallFolderValue: 'InstallFolder' },
   { id: 'rdr2', name: 'Red Dead Redemption 2', mercyGameId: null, mercyStatus: 'unsupported', steamAppId: 1174180, rockstarRegistrySubkey: 'Red Dead Redemption 2', rockstarInstallFolderValue: 'InstallFolder' },
@@ -157,6 +171,39 @@ function matchKnownBySteamAppId(appId: number): KnownGameDef | null {
 }
 function matchKnownByEpicAppName(appName: string): KnownGameDef | null {
   return KNOWN_GAMES.find((g) => g.epicAppName === appName) || null;
+}
+
+// ── Non-game classification ─────────────────────────────────────────────
+// A generic Steam/Epic/GOG/Ubisoft scan reports EVERY real manifest it
+// finds — and Steam in particular treats SDKs, redistributables, and
+// workshop/dev tools as ordinary "apps" with their own appmanifest_*.acf,
+// exactly like a real game. This is a real, metadata-based filter applied
+// ONLY to entries with no curated KNOWN_GAMES match (a curated match is a
+// specific, human-verified real game and always wins outright) — never a
+// giant classifier, never a network call, never a full-catalog allowlist:
+// a short, well-known appid blocklist for the handful of extremely common
+// non-game Steam apps that would otherwise show up on nearly every
+// Steam user's machine, plus conservative name-pattern matching for the
+// general case (SDKs, redistributables, dedicated-server tools, workshop/
+// content tools, engine/dev tooling).
+const KNOWN_NON_GAME_STEAM_APP_IDS = new Set([
+  250820,  // SteamVR
+  228980,  // Steamworks Common Redistributables
+  431960,  // Wallpaper Engine
+  365670,  // Steam Audio (dev tool)
+  1007353, // Steam Linux Runtime
+  1391110, // Steam Linux Runtime - Soldier
+]);
+
+const NON_GAME_NAME_PATTERN = /\b(SDK|redistributable|dedicated server tool|benchmark|workshop tool|content tool|runtime(s)?|editor tools?|modding tool|dev(eloper)? tool|plugin|devkit|engine tools?|unreal engine|\bFAB\b)\b/i;
+
+/** Real, honest classification — never guesses on network/live data that
+ *  isn't available offline; a name/appid this doesn't recognize as
+ *  non-game is treated as a real game, matching "show me the games I
+ *  actually have installed" rather than risk hiding something real. */
+function isLikelyNonGame(appId: number | null, name: string): boolean {
+  if (appId !== null && KNOWN_NON_GAME_STEAM_APP_IDS.has(appId)) return true;
+  return NON_GAME_NAME_PATTERN.test(name);
 }
 
 function resolveEnvPlaceholders(p: string): string {
@@ -298,6 +345,7 @@ export class GameScanner {
           const installPath = path.join(steamappsDir, 'common', installDir);
           if (!fs.existsSync(installPath)) continue; // manifest exists but files were removed/incomplete
           const known = matchKnownBySteamAppId(appId);
+          if (!known && isLikelyNonGame(appId, name)) continue; // real tool/SDK/redistributable, not a game
           results.push({
             id: `steam-${appId}`, name: known?.name || name,
             mercyGameId: known?.mercyGameId ?? null, mercyStatus: known?.mercyStatus ?? 'unsupported',
@@ -332,6 +380,7 @@ export class GameScanner {
         const appName = manifest.AppName;
         if (!installLocation || !displayName || !fs.existsSync(installLocation)) continue;
         const known = appName ? matchKnownByEpicAppName(appName) : null;
+        if (!known && isLikelyNonGame(null, displayName)) continue; // real tool/engine/dev content, not a game
         results.push({
           id: `epic-${appName || displayName}`, name: known?.name || displayName,
           mercyGameId: known?.mercyGameId ?? null, mercyStatus: known?.mercyStatus ?? 'unsupported',
@@ -374,6 +423,7 @@ if (Test-Path '${rootPath}') {
       const installPath = values[opts.pathKey];
       if (!installPath || !fs.existsSync(installPath)) continue;
       const name = (opts.nameKey && values[opts.nameKey]) || path.basename(installPath) || key;
+      if (isLikelyNonGame(null, name)) continue; // real tool/SDK/redistributable, not a game
       results.push({
         id: `${opts.idPrefix}-${key}`, name, mercyGameId: null, mercyStatus: 'unsupported',
         installPath, executablePath: '', platform, platformLabel: PLATFORM_LABELS[platform], detectedAt: now,
