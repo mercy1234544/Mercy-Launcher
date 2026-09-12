@@ -200,7 +200,8 @@ interface ElectronAPI {
     setRuntimePath: (dirPath: string) => Promise<{ success: boolean; error?: string }>;
     getServerReadiness: (id: string) => Promise<{
       ready: boolean; runtimeConfigured: boolean; executablePresent: boolean; configPresent: boolean;
-      contentValid: boolean; contentError?: string; portAvailable: boolean; portError?: string;
+      contentValid: boolean; contentError?: string; contentLinked: boolean; contentLinkError?: string;
+      portAvailable: boolean; portError?: string;
     } | null>;
     ensureRuntimeFilesPresent: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
@@ -593,6 +594,7 @@ declare global {
     legalTyres: string; sunAngle: number; weatherGraphics: string; ambientTemp: number; roadTemp: number;
     status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
     pid: number | null; startedAt: string | null; createdAt: string; updatedAt: string; lastError: string | null;
+    lobbyStatus: 'unknown' | 'unreachable';
   }
   interface AcCreateConfig {
     name: string; installPath: string; contentRoot: string; track: string; trackLayout?: string; cars: AcCarEntry[];

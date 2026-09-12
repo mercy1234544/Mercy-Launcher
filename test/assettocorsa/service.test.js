@@ -301,10 +301,23 @@ async function runLifecycleTests(mgr, serverId, serverPath, port) {
   ok('a missing executable with no runtime configured is reported as runtimeRequired, not a generic error', noExe.runtimeRequired === true);
 
   // A real, genuinely-executable stand-in: the test runner's own Node
-  // binary, copied to the exact path Mercy will spawn. It idles reading
-  // stdin (never given any), so it stays alive like a real server process
-  // would, without needing the actual Assetto Corsa binary.
+  // binary, copied to the exact path Mercy will spawn. NODE_OPTIONS makes
+  // this real spawned process genuinely bind the server's own configured
+  // UDP port itself (via --require, no CLI args needed — startServer()
+  // spawns with no arguments, exactly like the real acServer.exe) rather
+  // than an unrelated socket in the test process standing in for it — this
+  // is what makes the readiness check's real, PID-scoped OS query (see
+  // isProcessListeningOnUdpPort()) actually exercise the real fix: the
+  // genuinely-spawned child process is the one genuinely holding the port.
   fs.copyFileSync(process.execPath, path.join(serverPath, exeName));
+  const bindScript = path.join(serverPath, '..', 'fake-udp-bind.js');
+  // Also prints the real, known AC central-lobby rejection line once bound
+  // — proving lobbyStatus is tracked separately from the local server's own
+  // (genuinely running) status (Part 5/8's own separation requirement).
+  fs.writeFileSync(bindScript, "const dgram=require('dgram');const s=dgram.createSocket('udp4');s.on('error',()=>{});s.bind(Number(process.env.MERCY_TEST_UDP_PORT),()=>{console.log('ERROR,INVALID SERVER,CHECK YOUR PORT FORWARDING SETTINGS');});");
+  const prevNodeOptions = process.env.NODE_OPTIONS;
+  process.env.NODE_OPTIONS = `--require ${JSON.stringify(bindScript)}`;
+  process.env.MERCY_TEST_UDP_PORT = String(port);
 
   const startResult = await mgr.startServer(serverId);
   ok('startServer succeeds against the real stand-in executable', startResult.success === true);
@@ -312,14 +325,19 @@ async function runLifecycleTests(mgr, serverId, serverPath, port) {
   const afterStart = mgr.getServer(serverId);
   ok('status is starting (or already running) right after spawn, with a real PID', (afterStart.status === 'starting' || afterStart.status === 'running') && typeof afterStart.pid === 'number');
 
-  // Simulate the real acServer binding its configured UDP port — a genuine
-  // local socket bind, exercised through the manager's own real
-  // waitForUdpPortBound() polling, not mocked.
-  const boundSocket = dgram.createSocket('udp4');
-  await new Promise((resolve) => boundSocket.bind(port, resolve));
+  // The real spawned process genuinely bound the configured UDP port itself
+  // — verified through the manager's own real, PID-scoped readiness poll
+  // (isProcessListeningOnUdpPort / waitForServerReady), not a bind-race
+  // against an unrelated socket.
   await new Promise((resolve) => { const check = () => (mgr.getServer(serverId).status === 'running' ? resolve() : setTimeout(check, 200)); check(); });
-  ok('status genuinely transitions to running once the real UDP port is detected as bound', mgr.getServer(serverId).status === 'running');
-  boundSocket.close();
+  ok('status genuinely transitions to running once the REAL spawned process is detected (by its own PID) as holding the UDP port', mgr.getServer(serverId).status === 'running');
+
+  // Part 5/8: the real AC central-lobby rejection is tracked as its own,
+  // separate field — never conflated with, and never flipping, the local
+  // server's own genuinely-running status.
+  await new Promise((resolve) => { const check = () => (mgr.getServer(serverId).lobbyStatus === 'unreachable' ? resolve() : setTimeout(check, 100)); check(); });
+  ok('the real, known AC public-lobby rejection text is detected and recorded as lobbyStatus', mgr.getServer(serverId).lobbyStatus === 'unreachable');
+  ok('a lobby rejection never changes the local server\'s own genuinely-running status', mgr.getServer(serverId).status === 'running');
 
   const stats = await mgr.getProcessStats(serverId);
   ok('getProcessStats returns a real PID while running', stats.pid === afterStart.pid);
@@ -354,4 +372,7 @@ async function runLifecycleTests(mgr, serverId, serverPath, port) {
   const del = await mgr.deleteServer(serverId, true);
   ok('deleteServer succeeds and removes the real server directory', del.success === true && !fs.existsSync(serverPath));
   ok('deleteServer removes the server from the registry', mgr.getServer(serverId) === undefined);
+
+  if (prevNodeOptions === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = prevNodeOptions;
+  delete process.env.MERCY_TEST_UDP_PORT;
 }

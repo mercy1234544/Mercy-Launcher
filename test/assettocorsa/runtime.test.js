@@ -98,7 +98,14 @@ const EXE_NAME = process.platform === 'win32' ? 'acServer.exe' : 'acServer';
     ok('ensureRuntimeFilesPresent succeeds once a real runtime is configured', copyResult.success === true);
     ok('the real executable now genuinely exists in the server\'s own folder', fs.existsSync(path.join(serverPath1, EXE_NAME)));
     ok('the real companion file (steam_appid.txt) was copied too — not just the executable', fs.existsSync(path.join(serverPath1, 'steam_appid.txt')));
-    ok('the runtime\'s own "content" folder is NEVER copied into a server — that would duplicate large, already-shared data', !fs.existsSync(path.join(serverPath1, 'content')));
+    // The server's own content/ is a real LINK to contentRoot (see
+    // linkServerContent(), created automatically by createServer() above)
+    // — never a copy of the RUNTIME's own separate content folder. Proven
+    // by the runtime's stub file genuinely being absent even though
+    // content/ itself now (correctly) exists.
+    ok('the server\'s content/ is linked to contentRoot, not copied from the runtime\'s own separate content folder', !fs.existsSync(path.join(serverPath1, 'content', 'cars', 'should-never-be-copied.txt')));
+    ok('content/ is a real symlink/junction, never a real duplicated directory', fs.lstatSync(path.join(serverPath1, 'content')).isSymbolicLink());
+    ok('the real linked content/cars/test_gt3 (from contentRoot) is genuinely visible at the server\'s own path — this is the actual Part 7 fix', fs.existsSync(path.join(serverPath1, 'content', 'cars', 'test_gt3', 'ui', 'ui_car.json')));
 
     const readiness2 = await mgr.getServerReadiness(created1.server.id);
     ok('after copying the runtime, getServerReadiness now reports a real, ready server', readiness2.runtimeConfigured === true && readiness2.executablePresent === true && readiness2.ready === true);
@@ -148,6 +155,63 @@ const EXE_NAME = process.platform === 'win32' ? 'acServer.exe' : 'acServer';
     ok('getServerReadiness detects genuinely missing configuration files as its own real check', readinessNoConfig.configPresent === false);
     const startNoConfig = await mgr.startServer(created1.server.id);
     ok('startServer refuses to start with real configuration files missing, with a real, specific reason', startNoConfig.success === false && /configuration files/i.test(startNoConfig.error));
+
+    // ── linkServerContent(): a stale link (pointing at an old/removed
+    //    contentRoot) is replaced, never left dangling ───────────────────
+    const staleTargetDir = path.join(base, 'old-content-root-no-longer-used');
+    fs.mkdirSync(staleTargetDir, { recursive: true });
+    const contentLinkPath = path.join(serverPath1, 'content');
+    fs.rmSync(contentLinkPath, { recursive: true, force: true });
+    fs.symlinkSync(staleTargetDir, contentLinkPath, 'junction');
+    const relinked = mgr.linkServerContent(created1.server.id);
+    ok('linkServerContent replaces a stale link pointing at the wrong target', relinked.success === true);
+    ok('the link now genuinely resolves to the server\'s real, current contentRoot', path.resolve(fs.realpathSync(contentLinkPath)) === path.resolve(contentRoot));
+
+    // ── linkServerContent(): a REAL directory at content/ (e.g. an older
+    //    full-copy install) is never touched or deleted ──────────────────
+    const serverPath4 = path.join(base, 'server-4-real-content-dir');
+    const port4 = await findFreeUdpPort(port3 + 20);
+    const created4 = await mgr.createServer({
+      name: 'Server Four', installPath: serverPath4, contentRoot, track: 'test_circuit',
+      cars: [{ model: 'test_gt3', skin: '', ballastKg: 0, restrictor: 0, spectatorMode: false }],
+      udpPort: port4, httpPort: port4 + 500,
+    });
+    ok('creating a server (into an empty folder) succeeds', created4.success === true);
+    // Replace the real link createServer() just made with a REAL directory,
+    // simulating an older full-copy install / manually-placed content —
+    // linkServerContent() must never delete real content sitting there.
+    fs.rmSync(path.join(serverPath4, 'content'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(serverPath4, 'content'), { recursive: true });
+    fs.writeFileSync(path.join(serverPath4, 'content', 'real-file-must-survive.txt'), 'genuine pre-existing content');
+    const relink4 = mgr.linkServerContent(created4.server.id);
+    ok('linkServerContent succeeds (as a no-op) when a real content/ directory already exists', relink4.success === true);
+    ok('a real, pre-existing content/ directory is left completely untouched, never replaced with a link', fs.existsSync(path.join(serverPath4, 'content', 'real-file-must-survive.txt')) && !fs.lstatSync(path.join(serverPath4, 'content')).isSymbolicLink());
+
+    // ── The real, PID-scoped UDP readiness check (the actual root-cause
+    //    fix): a genuine child process that really binds a UDP socket is
+    //    correctly detected by PID — never by racing to bind the port
+    //    ourselves, which is what silently misreported the real bug. ─────
+    const udpServerScript = path.join(base, 'fake-udp-server.js');
+    const readyPort = await findFreeUdpPort(port4 + 20);
+    fs.writeFileSync(udpServerScript, `
+      const dgram = require('dgram');
+      const s = dgram.createSocket('udp4');
+      s.bind(${readyPort}, () => { process.stdout.write('bound\\n'); });
+      setInterval(() => {}, 60000); // stay alive
+    `);
+    const udpProc = require('child_process').spawn(process.execPath, [udpServerScript]);
+    try {
+      await new Promise((resolve) => udpProc.stdout.once('data', resolve));
+      const detected = await mgr.isProcessListeningOnUdpPort(udpProc.pid, readyPort);
+      ok('a real process that genuinely bound a UDP port is correctly detected as listening, by its real PID', detected === true);
+      const wrongPid = await mgr.isProcessListeningOnUdpPort(udpProc.pid, readyPort + 1);
+      ok('the same real process is correctly reported as NOT listening on a DIFFERENT port it never bound', wrongPid === false);
+      const randomPort = await findFreeUdpPort(readyPort + 50);
+      const nobodyListening = await mgr.isProcessListeningOnUdpPort(udpProc.pid, randomPort);
+      ok('a genuinely free port with no real listener at all is correctly reported as not bound', nobodyListening === false);
+    } finally {
+      udpProc.kill('SIGKILL');
+    }
 
     console.log(`\nASSETTO CORSA RUNTIME TESTS: ${pass} passed, ${fail} failed`);
   } finally {

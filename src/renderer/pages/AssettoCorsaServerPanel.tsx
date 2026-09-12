@@ -197,7 +197,7 @@ function OverviewTab({ server }: { server: AssettoCorsaServer }) {
   }, [server.id, isRunning]);
 
   const cards = [
-    { label: 'Status', value: server.status === 'running' ? 'Running' : server.status === 'starting' ? 'Starting' : server.status === 'stopping' ? 'Stopping' : server.status === 'error' ? 'Error' : 'Stopped', icon: FlagTriangleRight },
+    { label: 'Mercy Server', value: server.status === 'running' ? 'Running' : server.status === 'starting' ? 'Starting' : server.status === 'stopping' ? 'Stopping' : server.status === 'error' ? 'Error' : 'Stopped', icon: FlagTriangleRight },
     { label: 'Track', value: server.track ? `${server.track}${server.trackLayout ? ` (${server.trackLayout})` : ''}` : 'Not set', icon: Hash },
     { label: 'Cars', value: `${server.cars.length} / ${server.maxClients} slots`, icon: Users },
     { label: 'Port', value: `${server.udpPort} (UDP/TCP)`, icon: Hash },
@@ -216,6 +216,24 @@ function OverviewTab({ server }: { server: AssettoCorsaServer }) {
           </Panel>
         ))}
       </div>
+      {/* Deliberately separate from "Mercy Server" above (Part 5/8): the
+          official AC public lobby rejecting a server as unreachable (no
+          port forwarding) does not mean the local/LAN/Mercy-relay server is
+          broken — those are two different, independently-tracked states. */}
+      {server.registerToLobby && (
+        <Panel padding="sm" className={server.lobbyStatus === 'unreachable' ? 'border-amber-500/30' : ''}>
+          <div className="flex items-center gap-2">
+            {server.lobbyStatus === 'unreachable' ? <XCircle size={13} className="text-amber-400 shrink-0" /> : <Info size={13} className="text-surface-500 shrink-0" />}
+            <p className="text-xs text-surface-300">
+              <span className="font-semibold">AC Public Lobby:</span>{' '}
+              {server.lobbyStatus === 'unreachable' ? 'Unavailable (rejected as unreachable — likely no port forwarding)' : 'Unknown — the base server has no confirmed "registered" signal'}
+            </p>
+          </div>
+          {server.lobbyStatus === 'unreachable' && (
+            <p className="text-[11px] text-surface-500 mt-1">This only affects public matchmaking visibility. Friends can still connect directly, over LAN, or through the Mercy relay.</p>
+          )}
+        </Panel>
+      )}
       {server.pid && isRunning && (
         <Panel padding="sm" className="text-xs text-surface-500">Process ID: <span className="font-mono text-surface-300">{server.pid}</span></Panel>
       )}

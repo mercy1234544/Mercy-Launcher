@@ -130,6 +130,17 @@ export interface AssettoCorsaServer {
   createdAt: string;
   updatedAt: string;
   lastError: string | null;
+  /** The REAL Assetto Corsa central lobby's own registration outcome for
+   *  the CURRENT run — deliberately separate from `status` (Part 5/8): a
+   *  server the AC public lobby rejects as unreachable (typically no port
+   *  forwarding) is still a genuinely running local/LAN/Mercy-relay server.
+   *  'unknown' is the honest default — the base dedicated server has no
+   *  documented "lobby registration succeeded" line to confirm success by
+   *  (see this file's header), so this only ever flips to 'unreachable'
+   *  upon actually observing the real, stable AC central-server rejection
+   *  text in this run's own console output. Reset to 'unknown' on every
+   *  fresh start. */
+  lobbyStatus: 'unknown' | 'unreachable';
 }
 
 export interface AcCreateConfig {
@@ -341,6 +352,8 @@ export class AssettoCorsaManager {
     configPresent: boolean;
     contentValid: boolean;
     contentError?: string;
+    contentLinked: boolean;
+    contentLinkError?: string;
     portAvailable: boolean;
     portError?: string;
   } | null> {
@@ -360,15 +373,62 @@ export class AssettoCorsaManager {
         if (!carCheck.valid) { contentValid = false; contentError = carCheck.error; }
       }
     }
+    // Real check that the server's OWN folder can actually see its content
+    // (Part 7) — distinct from contentValid above, which only confirms the
+    // content exists in contentRoot. A real acServer.exe process resolves
+    // content/... relative to ITS OWN working directory, so this is the
+    // check that actually predicts the "file not found" runtime errors.
+    const linkResult = this.linkServerContent(id);
+    const contentLinked = linkResult.success;
+    const contentLinkError = linkResult.error;
 
     const portFree = this.processes.has(id) ? true : await this.isUdpPortFree(server.udpPort);
     const portAvailable = portFree;
     const portError = portFree ? undefined : `UDP port ${server.udpPort} is already in use by another program on this computer.`;
 
     return {
-      ready: executablePresent && configPresent && contentValid && portAvailable,
-      runtimeConfigured, executablePresent, configPresent, contentValid, contentError, portAvailable, portError,
+      ready: executablePresent && configPresent && contentValid && contentLinked && portAvailable,
+      runtimeConfigured, executablePresent, configPresent, contentValid, contentError, contentLinked, contentLinkError, portAvailable, portError,
     };
+  }
+
+  /** Real per-server content staging — the root-cause fix for "file not
+   *  found" errors under content/... for cars/tracks that genuinely DO
+   *  exist in contentRoot. The real acServer.exe process resolves
+   *  `content/cars/<model>`, `content/tracks/<track>`, `content/weather/
+   *  <preset>`, etc. RELATIVE TO ITS OWN WORKING DIRECTORY (this server's
+   *  installPath) — never relative to the separately-configured
+   *  contentRoot Mercy itself uses for browsing/selection/validation.
+   *  ensureRuntimeFilesPresent() above deliberately never COPIES content/
+   *  (to avoid GB-scale duplication per server) but never provided any
+   *  alternative for the real process to actually see it either — this is
+   *  that alternative: a single directory junction (Windows) / symlink
+   *  (elsewhere), not a copy, so this costs no meaningful disk space
+   *  regardless of the shared library's real size, and NTFS junctions
+   *  don't require administrator privileges the way symbolic links do.
+   *  Never touches a real, already-existing `content/` directory (e.g. an
+   *  older full-copy install, or content the user placed there manually)
+   *  — only ever creates or replaces a STALE link. */
+  linkServerContent(id: string): { success: boolean; error?: string } {
+    const server = this.getServer(id);
+    if (!server) return { success: false, error: 'Server not found.' };
+    if (!server.contentRoot) return { success: true }; // nothing to link — content-dependent checks already degrade honestly elsewhere
+    const contentLink = path.join(server.installPath, 'content');
+    try {
+      if (fs.existsSync(contentLink)) {
+        const st = fs.lstatSync(contentLink);
+        if (!st.isSymbolicLink()) return { success: true }; // a real directory already sits here — never touch/delete real content
+        let real: string | null = null;
+        try { real = fs.realpathSync(contentLink); } catch { /* target no longer exists — definitely stale */ }
+        if (real && path.resolve(real) === path.resolve(server.contentRoot)) return { success: true }; // already correct
+        fs.unlinkSync(contentLink); // stale link only — never a real directory
+      }
+      fs.mkdirSync(path.dirname(contentLink), { recursive: true });
+      fs.symlinkSync(server.contentRoot, contentLink, process.platform === 'win32' ? 'junction' : 'dir');
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e?.message || `Could not link this server's content folder to ${server.contentRoot}.` };
+    }
   }
 
   /** Real, best-effort population of a server's own folder from the
@@ -377,7 +437,8 @@ export class AssettoCorsaManager {
    *  installPath, never the runtime's own `content/` folder (that's the
    *  large, already-shared car/track data referenced separately via
    *  contentRoot — copying it here would be exactly the unnecessary GB-scale
-   *  duplication Part 10 warns against). Never overwrites a file that's
+   *  duplication Part 10 warns against; see linkServerContent() above for
+   *  how the real process still sees it). Never overwrites a file that's
    *  already really there (e.g. this server's own cfg/ is left alone). */
   ensureRuntimeFilesPresent(id: string): { success: boolean; error?: string } {
     const server = this.getServer(id);
@@ -722,6 +783,7 @@ export class AssettoCorsaManager {
       sunAngle: cfg.sunAngle ?? 48, weatherGraphics: cfg.weatherGraphics || DEFAULT_WEATHER,
       ambientTemp: cfg.ambientTemp ?? 18, roadTemp: cfg.roadTemp ?? 24,
       status: 'stopped', pid: null, startedAt: null, createdAt: now, updatedAt: now, lastError: null,
+      lobbyStatus: 'unknown',
     };
 
     try {
@@ -732,6 +794,14 @@ export class AssettoCorsaManager {
     }
 
     this.servers.push(server);
+    const linkResult = this.linkServerContent(server.id);
+    if (!linkResult.success) {
+      // Real content problem detected BEFORE the server is ever started
+      // (Part 7) — never leave a server registered whose real content the
+      // dedicated server process would fail to find at runtime.
+      this.servers = this.servers.filter((s) => s.id !== server.id);
+      return { success: false, error: linkResult.error };
+    }
     this.save();
     return { success: true, server };
   }
@@ -814,10 +884,12 @@ export class AssettoCorsaManager {
       sunAngle: iniNum(cfg, 'SERVER', 'SUN_ANGLE', 48), weatherGraphics: iniStr(cfg, 'WEATHER_0', 'GRAPHICS', DEFAULT_WEATHER),
       ambientTemp: iniNum(cfg, 'WEATHER_0', 'BASE_TEMPERATURE_AMBIENT', 18), roadTemp: iniNum(cfg, 'WEATHER_0', 'BASE_TEMPERATURE_ROAD', 24),
       status: 'stopped', pid: null, startedAt: null, createdAt: now, updatedAt: now, lastError: null,
+      lobbyStatus: 'unknown',
     };
 
     this.servers.push(server);
     this.save();
+    if (contentRoot) this.linkServerContent(server.id); // best-effort on import — the existing folder already has its own real content today
     return { success: true, server };
   }
 
@@ -845,6 +917,8 @@ export class AssettoCorsaManager {
 
     Object.assign(server, merged, { updatedAt: new Date().toISOString() });
     try { this.writeConfigFiles(server); } catch (e: any) { return { success: false, error: e?.message || 'Failed to write configuration.' }; }
+    const linkResult = this.linkServerContent(server.id);
+    if (!linkResult.success) return { success: false, error: linkResult.error };
     this.save();
     return { success: true };
   }
@@ -890,29 +964,69 @@ export class AssettoCorsaManager {
   }
 
   // ── Process lifecycle ──────────────────────────────────────────────────
-  /** Real readiness check — see this file's header note on why AC has no
-   *  reliable "ready" log line to grep for. Polls whether something is
-   *  genuinely bound to the server's own configured UDP port by trying (and
-   *  expecting to fail) to bind that same port ourselves — EADDRINUSE means
-   *  a real listener (presumably the process we just spawned) already
-   *  claimed it. */
-  private waitForUdpPortBound(port: number, timeoutMs: number): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs;
-    const tryOnce = (): Promise<boolean> => new Promise((resolve) => {
-      const probe = dgram.createSocket('udp4');
-      probe.once('error', (err: any) => { probe.close(); resolve(err?.code === 'EADDRINUSE'); });
-      probe.once('listening', () => { probe.close(); resolve(false); });
-      try { probe.bind(port); } catch { resolve(false); }
+  /** Real, PID-scoped readiness check — see this file's own header note on
+   *  why AC has no reliable "ready" log line to grep for.
+   *
+   *  This is DELIBERATELY NOT a "try to bind the port myself" probe (that
+   *  was the actual bug: on Windows, a UDP socket that itself sets
+   *  SO_REUSEADDR — a common, legitimate technique real game servers use so
+   *  they can rebind quickly after a crash/restart without waiting for the
+   *  OS to release the old socket — allows a COMPLETELY UNRELATED process
+   *  to also successfully bind the SAME port. When acServer.exe's own UDP
+   *  socket has that flag set, Mercy's own probe bind would SUCCEED
+   *  alongside it rather than fail with EADDRINUSE, so the old check
+   *  concluded "nothing is listening" even while the real server was
+   *  genuinely running and reachable — exactly the reported "Server
+   *  started" / "[Mercy] UDP port never came up" contradiction). Querying
+   *  the OS's own real socket table for the EXACT pid we spawned has none
+   *  of that ambiguity: it can never be confused by an unrelated process on
+   *  the same port, and it can never falsely say "not bound" just because
+   *  our own probe was allowed to coexist. */
+  async isProcessListeningOnUdpPort(pid: number, port: number): Promise<boolean> {
+    if (process.platform === 'win32') {
+      return new Promise((resolve) => {
+        execFile('powershell', [
+          '-NoProfile', '-NonInteractive', '-Command',
+          `if (Get-NetUDPEndpoint -OwningProcess ${pid} -LocalPort ${port} -ErrorAction SilentlyContinue) { 'yes' } else { 'no' }`,
+        ], { timeout: 5000, windowsHide: true }, (err, stdout) => {
+          if (err) return resolve(false);
+          resolve(stdout.trim().toLowerCase() === 'yes');
+        });
+      });
+    }
+    // Future Linux host (see this file's own header on spawn portability):
+    // `ss` reports the owning pid directly with -p, avoiding the same
+    // ambiguity as the Windows path above.
+    return new Promise((resolve) => {
+      execFile('ss', ['-lunp'], { timeout: 5000 }, (err, stdout) => {
+        if (err || !stdout) return resolve(false);
+        const found = stdout.split('\n').some((line) => line.includes(`:${port} `) && line.includes(`pid=${pid},`));
+        resolve(found);
+      });
     });
+  }
+
+  private waitForServerReady(pid: number, port: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
     return new Promise((resolve) => {
       const poll = async () => {
-        if (await tryOnce()) return resolve(true);
+        if (await this.isProcessListeningOnUdpPort(pid, port)) return resolve(true);
         if (Date.now() >= deadline) return resolve(false);
         setTimeout(poll, 500);
       };
       poll();
     });
   }
+
+  /** The one, real, stable text the official Assetto Corsa central lobby
+   *  emits when it rejects a server as unreachable (no port forwarding) —
+   *  see this file's header + Part 5/8's own architecture note: this is
+   *  deliberately tracked SEPARATELY from `status`, since a server the
+   *  public AC lobby can't reach is still a genuinely running local/LAN/
+   *  Mercy-relay server. Matched loosely (case-insensitive substring, not
+   *  the full exact punctuation) so minor formatting differences across
+   *  acServer builds don't silently stop this from being detected. */
+  private static readonly LOBBY_REJECTION_PATTERN = /invalid\s*server.*port\s*forwarding/i;
 
   async startServer(id: string): Promise<{ success: boolean; error?: string; runtimeRequired?: boolean }> {
     const server = this.getServer(id);
@@ -943,6 +1057,11 @@ export class AssettoCorsaManager {
         if (!carCheck.valid) return { success: false, error: carCheck.error };
       }
     }
+    // Real content-visibility check (Part 7) — refreshed on every start so a
+    // stale/removed link, or a contentRoot that moved, is caught here rather
+    // than surfacing as a runtime "file not found" from acServer.exe itself.
+    const linkResult = this.linkServerContent(id);
+    if (!linkResult.success) return { success: false, error: linkResult.error };
     if (!(await this.isUdpPortFree(server.udpPort))) {
       return { success: false, error: `UDP port ${server.udpPort} is already in use by another program on this computer. Stop that program or change this server's port.` };
     }
@@ -950,6 +1069,7 @@ export class AssettoCorsaManager {
     this.intentionalStop.delete(id);
     server.status = 'starting';
     server.lastError = null;
+    server.lobbyStatus = 'unknown'; // this run's own outcome — never carried over from a previous run
     server.updatedAt = new Date().toISOString();
     this.save();
     this.broadcast('assettocorsa:statusChange', { serverId: id, status: 'starting' });
@@ -960,11 +1080,22 @@ export class AssettoCorsaManager {
     server.startedAt = new Date().toISOString();
     this.save();
 
+    const scanForLobbyRejection = (line: string) => {
+      if (server.lobbyStatus === 'unreachable') return; // already recorded for this run
+      if (!AssettoCorsaManager.LOBBY_REJECTION_PATTERN.test(line)) return;
+      server.lobbyStatus = 'unreachable';
+      this.save();
+      // Reuses the existing statusChange channel (never `status` itself,
+      // which stays about the LOCAL process) — the renderer's existing
+      // listener already re-fetches the full server record on this event,
+      // so this needs no new IPC channel to reach the UI.
+      this.broadcast('assettocorsa:statusChange', { serverId: id, status: server.status });
+    };
     proc.stdout?.on('data', (chunk: Buffer) => {
-      for (const line of chunk.toString().split(/\r?\n/)) { if (line) this.appendConsole(id, line); }
+      for (const line of chunk.toString().split(/\r?\n/)) { if (line) { this.appendConsole(id, line); scanForLobbyRejection(line); } }
     });
     proc.stderr?.on('data', (chunk: Buffer) => {
-      for (const line of chunk.toString().split(/\r?\n/)) { if (line) this.appendConsole(id, `[ERROR] ${line}`); }
+      for (const line of chunk.toString().split(/\r?\n/)) { if (line) { this.appendConsole(id, `[ERROR] ${line}`); scanForLobbyRejection(line); } }
     });
     proc.on('exit', (code, signal) => {
       this.processes.delete(id);
@@ -977,7 +1108,10 @@ export class AssettoCorsaManager {
       current.startedAt = null;
       current.updatedAt = new Date().toISOString();
       current.status = wasIntentional ? 'stopped' : 'error';
-      if (!wasIntentional) this.appendConsole(id, `[Mercy] Server process exited unexpectedly (code ${code}, signal ${signal}).`);
+      if (!wasIntentional) {
+        const lobbyNote = current.lobbyStatus === 'unreachable' ? ' Note: the AC public lobby had rejected this server as unreachable — that is a separate, non-fatal state and is not the reason recorded for this exit.' : '';
+        this.appendConsole(id, `[Mercy] Server process exited unexpectedly (code ${code}, signal ${signal}).${lobbyNote}`);
+      }
       this.save();
       this.broadcast('assettocorsa:statusChange', { serverId: id, status: current.status });
     });
@@ -990,8 +1124,12 @@ export class AssettoCorsaManager {
 
     // Verify real readiness in the background — never blocks the caller,
     // matching Minecraft's own "starting" -> "running" async transition.
+    // Local server health only: the official AC public lobby's own
+    // accept/reject decision (tracked separately as lobbyStatus above) is
+    // never part of this check — see this file's header + Part 5/8.
     (async () => {
-      const bound = await this.waitForUdpPortBound(server.udpPort, 20000);
+      const pid = proc.pid;
+      const bound = pid ? await this.waitForServerReady(pid, server.udpPort, 20000) : false;
       const stillTracked = this.processes.get(id) === proc;
       if (!stillTracked) return; // exited or was replaced before we finished checking
       if (bound) {
@@ -1159,7 +1297,20 @@ export class AssettoCorsaManager {
         output.on('close', resolve);
         archive.on('error', reject);
         archive.pipe(output);
-        archive.directory(server.installPath, false);
+        // Walk only the server's OWN top-level entries rather than
+        // archive.directory(server.installPath, false) — that would follow
+        // the real `content` junction/symlink (see linkServerContent()) and
+        // back up the entire shared, potentially huge content library into
+        // every single per-server backup, which is both slow and pointless
+        // (that data isn't per-server). Never following a symlink here also
+        // means restoreBackup() can never overwrite the shared content
+        // location the link actually points to.
+        for (const entry of fs.readdirSync(server.installPath, { withFileTypes: true })) {
+          if (entry.name === 'content' || entry.isSymbolicLink()) continue;
+          const full = path.join(server.installPath, entry.name);
+          if (entry.isDirectory()) archive.directory(full, entry.name);
+          else archive.file(full, { name: entry.name });
+        }
         archive.finalize();
       });
       const stats = fs.statSync(backupPath);
