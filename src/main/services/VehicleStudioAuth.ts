@@ -21,11 +21,11 @@ const OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 // avoid a network round-trip on every protected IPC call.
 const GUARD_CACHE_MS = 60 * 1000;
 // Real inactivity policy: a session last confirmed less than this long ago
-// is restored automatically; one idle 5+ hours requires signing in again.
+// is restored automatically; one idle 6+ hours requires signing in again.
 // This is a LOCAL, additional rule — it never overrides or weakens a real
 // server-side revocation/expiry, which still applies regardless (see
 // status()'s own 401 handling below).
-export const SESSION_INACTIVITY_LIMIT_MS = 5 * 60 * 60 * 1000;
+export const SESSION_INACTIVITY_LIMIT_MS = 6 * 60 * 60 * 1000;
 
 interface Saved { token?: string; refreshToken?: string; username?: string; lastAuthorizedAt?: number; }
 export interface VSAuthStatus { enabled: boolean; authorized: boolean; username?: string; reason?: string; stale?: boolean; expiresAt?: number; entitlements?: string[]; }
@@ -113,9 +113,9 @@ export class VehicleStudioAuth {
   }
 
   /** The check the gate depends on — always confirmed against the backend,
-   *  subject to the real 5-hour inactivity policy checked first (Part 7):
-   *  a session confirmed less than 5 hours ago is restored automatically;
-   *  one genuinely idle 5+ hours requires signing in again, checked before
+   *  subject to the real 6-hour inactivity policy checked first:
+   *  a session confirmed less than 6 hours ago is restored automatically;
+   *  one genuinely idle 6+ hours requires signing in again, checked before
    *  any network call so a clearly-idle session never even gets the chance
    *  to succeed a stale refresh. A real server-side revocation/expiry (the
    *  refresh call itself failing) still requires re-auth regardless of the
@@ -129,7 +129,7 @@ export class VehicleStudioAuth {
     if (s.lastAuthorizedAt && Date.now() - s.lastAuthorizedAt >= SESSION_INACTIVITY_LIMIT_MS) {
       this.clear();
       this.setGuard(false);
-      return { enabled: true, authorized: false, reason: 'inactive_5h' };
+      return { enabled: true, authorized: false, reason: 'inactive_6h' };
     }
 
     return this.checkSession(s);

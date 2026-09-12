@@ -126,15 +126,16 @@ function startFakeAuthBackend() {
     ok('three concurrent status() calls racing the same expired token ALL succeed — no lost race wipes the session', r1.authorized === true && r2.authorized === true && r3.authorized === true);
     ok('a valid session genuinely remains on disk after the concurrent race', fs.existsSync(authFilePath(userDataRoot)));
 
-    // ── 5-hour inactivity policy ─────────────────────────────────────────
+    // ── 6-hour inactivity policy ─────────────────────────────────────────
     seedAuth(userDataRoot, { token: 'session-token-1', refreshToken: 'refresh-token-1', username: 'FakeDiscordUser', lastAuthorizedAt: Date.now() - 10 * 60 * 1000 });
-    const underFiveHours = await auth.status();
-    ok('a session confirmed less than 5 hours ago is restored automatically', underFiveHours.authorized === true || underFiveHours.reason !== 'inactive_5h');
+    const underSixHours = await auth.status();
+    ok('a session confirmed less than 6 hours ago is restored automatically', underSixHours.authorized === true || underSixHours.reason !== 'inactive_6h');
 
     seedAuth(userDataRoot, { token: 'session-token-1', refreshToken: 'refresh-token-1', username: 'FakeDiscordUser', lastAuthorizedAt: Date.now() - (SESSION_INACTIVITY_LIMIT_MS + 60_000) });
-    const overFiveHours = await auth.status();
-    ok('a session inactive for 5+ hours requires authenticating again, without even attempting a network refresh', overFiveHours.authorized === false && overFiveHours.reason === 'inactive_5h');
+    const overSixHours = await auth.status();
+    ok('a session inactive for 6+ hours requires authenticating again, without even attempting a network refresh', overSixHours.authorized === false && overSixHours.reason === 'inactive_6h');
     ok('the inactivity-expired session is actually cleared from storage', !fs.existsSync(authFilePath(userDataRoot)));
+    ok('SESSION_INACTIVITY_LIMIT_MS is genuinely 6 hours, not left over at 5', SESSION_INACTIVITY_LIMIT_MS === 6 * 60 * 60 * 1000);
 
     // ── No password is ever stored ───────────────────────────────────────
     seedAuth(userDataRoot, { token: 'session-token-1', refreshToken: 'refresh-token-1', username: 'FakeDiscordUser', lastAuthorizedAt: Date.now() });
@@ -155,6 +156,13 @@ function startFakeAuthBackend() {
 
     // ── Storage lives outside any install directory ──────────────────────
     ok('VehicleStudioAuth persists to <userDataPath>/data/vst-auth.json — a real per-user path, never inside the app\'s own install directory', authFilePath(userDataRoot).includes(userDataRoot));
+
+    // ── The login gate must actually explain an inactivity sign-out ──────
+    // (previously fell through to no banner at all — the user just saw the
+    // generic "Welcome to Mercy Launcher" screen with no idea why they'd
+    // been signed out).
+    const gateSrc = fs.readFileSync(path.resolve(__dirname, '../../src/renderer/components/AppAccessGate.tsx'), 'utf8');
+    ok('AppAccessGate shows a real explanation for an inactivity sign-out, not a silent generic login screen', /inactive_6h/.test(gateSrc));
 
     await new Promise((resolve) => server.close(resolve));
     console.log(`\nVEHICLE STUDIO AUTH TESTS: ${pass} passed, ${fail} failed`);

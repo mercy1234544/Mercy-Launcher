@@ -83,6 +83,7 @@ export default function AppAccessGate({ children }: { children: React.ReactNode 
     : status.reason === 'offline' ? "Couldn't reach the verification server — check your connection and try again."
     : (status.reason === 'expired' || status.reason === 'expired_session') ? 'Your session has expired — sign in with Discord again.'
     : (status.reason === 'invalid' || status.reason === 'invalid_session') ? 'Your session is no longer valid — sign in with Discord again.'
+    : status.reason === 'inactive_6h' ? "You've been signed out after 6 hours away — sign in again to continue."
     : null;
 
   return (
