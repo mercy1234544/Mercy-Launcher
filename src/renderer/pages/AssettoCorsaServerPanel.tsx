@@ -47,6 +47,14 @@ export default function AssettoCorsaServerPanel() {
   const [tab, setTab] = useState('overview');
   const [runtimeRequired, setRuntimeRequired] = useState(false);
   const [settingUpRuntime, setSettingUpRuntime] = useState(false);
+  // Must be declared before the `if (!server) return` below — same bug class
+  // proven and fixed in MinecraftServerPanel.tsx: every hook must run on
+  // every render regardless of whether server has loaded yet. This one used
+  // to be declared after that early return, which meant the first render
+  // (server===null, before load() resolves) called one fewer hook than every
+  // render after it — a guaranteed "Rendered more hooks than during the
+  // previous render" crash on every successful load, not a hypothetical.
+  const [launchingGame, setLaunchingGame] = useState(false);
 
   // Real failure isolation (Part 2): an honest, recoverable error state
   // instead of a spinner that never resolves if the load genuinely fails.
@@ -124,7 +132,6 @@ export default function AssettoCorsaServerPanel() {
   const handleStop = async () => { setBusy(true); await window.electronAPI.assettoCorsa.stop(server.id, false); setBusy(false); load(); };
   const handleForceStop = async () => { setBusy(true); await window.electronAPI.assettoCorsa.stop(server.id, true); setBusy(false); load(); };
   const handleRestart = async () => { setBusy(true); await window.electronAPI.assettoCorsa.restart(server.id); setBusy(false); load(); };
-  const [launchingGame, setLaunchingGame] = useState(false);
   const handleLaunchGame = async () => {
     setLaunchingGame(true);
     try {

@@ -58,6 +58,14 @@ export default function MinecraftServerPanel() {
   const validTabs = ['overview', 'connect', 'console', 'properties', 'players', 'backups', 'files', 'content', 'worlds', 'packs', 'danger'];
   const requestedTab = searchParams.get('tab');
   const [tab, setTab] = useState(requestedTab && validTabs.includes(requestedTab) ? requestedTab : 'overview');
+  // Must be declared before the `if (!server) return` below — every hook in
+  // this component has to run on every render regardless of whether server
+  // is loaded yet. This one used to be declared after that early return,
+  // which meant the very first render (server===null, before load()
+  // resolves) called one fewer hook than every render after it — a real
+  // "Rendered more hooks than during the previous render" crash, guaranteed
+  // on every successful load, not a hypothetical.
+  const [launchingGame, setLaunchingGame] = useState(false);
 
   // Real failure isolation (Part 2): a failed load must produce an honest,
   // recoverable error state — never leave the page stuck on a spinner
@@ -110,7 +118,6 @@ export default function MinecraftServerPanel() {
   const handleStop = async () => { setBusy(true); await window.electronAPI.minecraft.stop(server.id, false); setBusy(false); load(); };
   const handleForceStop = async () => { setBusy(true); await window.electronAPI.minecraft.stop(server.id, true); setBusy(false); load(); };
   const handleRestart = async () => { setBusy(true); await window.electronAPI.minecraft.restart(server.id); setBusy(false); load(); };
-  const [launchingGame, setLaunchingGame] = useState(false);
   const handleLaunchGame = async () => {
     setLaunchingGame(true);
     try {
