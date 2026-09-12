@@ -170,6 +170,7 @@ interface ElectronAPI {
     getAll: () => Promise<AssettoCorsaServer[]>;
     get: (id: string) => Promise<AssettoCorsaServer | undefined>;
     consoleBuffer: (id: string) => Promise<string[]>;
+    startupDiagnostics: (id: string) => Promise<AcStartupDiagnostics | null>;
     delete: (id: string, deleteFiles: boolean) => Promise<{ success: boolean; error?: string }>;
     create: (config: AcCreateConfig) => Promise<{ success: boolean; server?: AssettoCorsaServer; error?: string }>;
     update: (id: string, patch: Partial<AcCreateConfig>) => Promise<{ success: boolean; error?: string }>;
@@ -598,6 +599,13 @@ declare global {
     status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
     pid: number | null; startedAt: string | null; createdAt: string; updatedAt: string; lastError: string | null;
     lobbyStatus: 'unknown' | 'unreachable';
+  }
+  interface AcStartupDiagnostics {
+    serverId: string; executablePath: string; workingDirectory: string;
+    configPath: string; entryListPath: string; track: string; trackLayout: string; cars: string[];
+    tcpPort: number; udpPort: number; httpPort: number;
+    pid: number | null; startedAt: string;
+    exitedAt: string | null; exitCode: number | null; exitSignal: string | null; lastConsoleLines: string[];
   }
   interface AcCreateConfig {
     name: string; installPath: string; contentRoot: string; track: string; trackLayout?: string; cars: AcCarEntry[];

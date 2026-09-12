@@ -417,6 +417,7 @@ function registerIpcHandlers() {
   ipcMain.handle('assettocorsa:getAll', () => assettoCorsaManager.getAllServers());
   ipcMain.handle('assettocorsa:get', (_, id: string) => assettoCorsaManager.getServer(id));
   ipcMain.handle('assettocorsa:consoleBuffer', (_, id: string) => assettoCorsaManager.getConsoleBuffer(id));
+  ipcMain.handle('assettocorsa:startupDiagnostics', (_, id: string) => assettoCorsaManager.getStartupDiagnostics(id));
   ipcMain.handle('assettocorsa:delete', (_, id: string, deleteFiles: boolean) => assettoCorsaManager.deleteServer(id, deleteFiles));
   ipcMain.handle('assettocorsa:create', (_, config) => assettoCorsaManager.createServer(config));
   ipcMain.handle('assettocorsa:update', (_, id: string, patch) => assettoCorsaManager.updateServer(id, patch));

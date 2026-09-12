@@ -374,8 +374,29 @@ async function runLifecycleTests(mgr, serverId, serverPath, port) {
   const crashPid = mgr.getServer(serverId).pid;
   await new Promise((resolve, reject) => execFile('taskkill', ['/F', '/PID', String(crashPid)], (err) => (err ? reject(err) : resolve())));
   await new Promise((resolve) => { const check = () => (!mgr.isRunning(serverId) ? resolve() : setTimeout(check, 200)); check(); });
-  ok('an unintentional termination is reported as a real error, not a silent stop', mgr.getServer(serverId).status === 'error');
-  ok('the console buffer records the real unexpected-exit message', mgr.getConsoleBuffer(serverId).some((l) => /exited unexpectedly/i.test(l)));
+  ok('an unintentional, abnormal termination is reported as a real error, not a silent stop', mgr.getServer(serverId).status === 'error');
+  ok('the console buffer records the real, honest "stopped unexpectedly" message for a genuinely abnormal exit', mgr.getConsoleBuffer(serverId).some((l) => /stopped unexpectedly/i.test(l)));
+  const crashDiag = mgr.getStartupDiagnostics(serverId);
+  ok('startup diagnostics record the real exit code/signal for the abnormal exit', crashDiag && crashDiag.exitedAt !== null && crashDiag.exitCode !== 0);
+  ok('startup diagnostics never include a password field', !JSON.stringify(crashDiag).toLowerCase().includes('password'));
+
+  // ── The real, root-cause fix: exit code 0 with no signal is a CLEAN exit
+  // — never, by itself, evidence of a crash. Mercy still notes it wasn't
+  // the one who requested the stop (LOOP_MODE=1 means a real acServer.exe
+  // isn't expected to exit on its own), but reports it as "stopped", never
+  // "crashed"/"exited unexpectedly". ──────────────────────────────────────
+  const cleanExitScript = path.join(serverPath, '..', 'fake-clean-exit.js');
+  fs.writeFileSync(cleanExitScript, "const dgram=require('dgram');const s=dgram.createSocket('udp4');s.on('error',()=>{});s.bind(Number(process.env.MERCY_TEST_UDP_PORT),()=>{setTimeout(()=>process.exit(0),300);});");
+  process.env.NODE_OPTIONS = `--require ${JSON.stringify(cleanExitScript)}`;
+  await mgr.startServer(serverId);
+  await new Promise((resolve) => { const check = () => (!mgr.isRunning(serverId) ? resolve() : setTimeout(check, 150)); check(); });
+  const cleanExitServer = mgr.getServer(serverId);
+  ok('a real exit with code 0 and no signal is reported as stopped, NEVER as an error/crash', cleanExitServer.status === 'stopped');
+  ok('the console buffer honestly notes Mercy did not request this stop, without calling it a crash', mgr.getConsoleBuffer(serverId).some((l) => /stopped \(exit code 0\)/i.test(l)));
+  ok('the console buffer for a clean exit never uses crash/unexpected language', !mgr.getConsoleBuffer(serverId).some((l) => /crashed|exited unexpectedly/i.test(l)));
+  const cleanExitDiag = mgr.getStartupDiagnostics(serverId);
+  ok('startup diagnostics record the real exit code 0 and no signal for the clean exit', cleanExitDiag && cleanExitDiag.exitCode === 0 && cleanExitDiag.exitSignal === null);
+  ok('startup diagnostics capture real final console output, not a generic placeholder', cleanExitDiag.lastConsoleLines.length > 0);
 
   ok('updateServer refuses to change config while the process record still shows non-stopped and would-be-running state is re-checked', true); // covered by stopped-state test above; running-state is inherently transient here
 

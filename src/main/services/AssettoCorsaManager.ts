@@ -143,6 +143,31 @@ export interface AssettoCorsaServer {
   lobbyStatus: 'unknown' | 'unreachable';
 }
 
+/** Real, per-start-attempt diagnostics (Part 4) — every field reflects what
+ *  was actually spawned/observed, never a guess. Deliberately excludes
+ *  password/adminPassword; everything else here is safe to show a user
+ *  troubleshooting a startup problem. `exitedAt`/`exitCode`/`exitSignal`/
+ *  `lastConsoleLines` stay null/empty while the process is still running. */
+export interface AcStartupDiagnostics {
+  serverId: string;
+  executablePath: string;
+  workingDirectory: string;
+  configPath: string;
+  entryListPath: string;
+  track: string;
+  trackLayout: string;
+  cars: string[];
+  tcpPort: number;
+  udpPort: number;
+  httpPort: number;
+  pid: number | null;
+  startedAt: string;
+  exitedAt: string | null;
+  exitCode: number | null;
+  exitSignal: string | null;
+  lastConsoleLines: string[];
+}
+
 export interface AcCreateConfig {
   name: string;
   installPath: string;
@@ -278,6 +303,10 @@ export class AssettoCorsaManager {
   private consoleBuffers: Map<string, string[]> = new Map();
   private intentionalStop: Set<string> = new Set();
   private resourceSamples: Map<string, { cpuMs: number; sampledAt: number }> = new Map();
+  /** Real startup diagnostics (Part 4) — one entry per server, replaced on
+   *  every real start attempt. Never secrets (password/adminPassword are
+   *  deliberately excluded from this shape). */
+  private startupDiagnostics: Map<string, AcStartupDiagnostics> = new Map();
 
   constructor(private userDataPath: string) {
     const dataDir = path.join(userDataPath, 'data');
@@ -535,6 +564,11 @@ export class AssettoCorsaManager {
   }
 
   getConsoleBuffer(id: string): string[] { return this.consoleBuffers.get(id) || []; }
+  /** Real diagnostics for this server's last real start attempt (Part 4) —
+   *  null if it has never been started this session (diagnostics are kept
+   *  in memory only, matching the process map itself; a real restart of
+   *  Mercy Launcher has no real process left to report on anyway). */
+  getStartupDiagnostics(id: string): AcStartupDiagnostics | null { return this.startupDiagnostics.get(id) ?? null; }
   getAllServers(): AssettoCorsaServer[] { return this.servers; }
   getServer(id: string): AssettoCorsaServer | undefined { return this.servers.find((s) => s.id === id); }
   isRunning(id: string): boolean { return this.processes.has(id); }
@@ -1116,6 +1150,19 @@ export class AssettoCorsaManager {
     server.startedAt = new Date().toISOString();
     this.save();
 
+    // Real startup diagnostics (Part 4) — never secrets (password/
+    // adminPassword deliberately excluded). Populated here so it reflects
+    // exactly what was actually spawned, not re-derived/guessed later.
+    this.startupDiagnostics.set(id, {
+      serverId: id, executablePath: exePath, workingDirectory: server.installPath,
+      configPath: path.join(server.installPath, 'cfg', 'server_cfg.ini'),
+      entryListPath: path.join(server.installPath, 'cfg', 'entry_list.ini'),
+      track: server.track, trackLayout: server.trackLayout, cars: server.cars.map((c) => c.model),
+      tcpPort: server.tcpPort, udpPort: server.udpPort, httpPort: server.httpPort,
+      pid: proc.pid ?? null, startedAt: server.startedAt,
+      exitedAt: null, exitCode: null, exitSignal: null, lastConsoleLines: [],
+    });
+
     const scanForLobbyRejection = (line: string) => {
       if (server.lobbyStatus === 'unreachable') return; // already recorded for this run
       if (!AssettoCorsaManager.LOBBY_REJECTION_PATTERN.test(line)) return;
@@ -1139,14 +1186,39 @@ export class AssettoCorsaManager {
       const wasIntentional = this.intentionalStop.has(id);
       this.intentionalStop.delete(id);
       const current = this.getServer(id);
+
+      const diag = this.startupDiagnostics.get(id);
+      if (diag) {
+        diag.exitedAt = new Date().toISOString();
+        diag.exitCode = code;
+        diag.exitSignal = signal;
+        diag.lastConsoleLines = this.getConsoleBuffer(id).slice(-15);
+      }
+
       if (!current) return;
       current.pid = null;
       current.startedAt = null;
       current.updatedAt = new Date().toISOString();
-      current.status = wasIntentional ? 'stopped' : 'error';
-      if (!wasIntentional) {
-        const lobbyNote = current.lobbyStatus === 'unreachable' ? ' Note: the AC public lobby had rejected this server as unreachable — that is a separate, non-fatal state and is not the reason recorded for this exit.' : '';
-        this.appendConsole(id, `[Mercy] Server process exited unexpectedly (code ${code}, signal ${signal}).${lobbyNote}`);
+
+      // Real state machine (Part 3): exit code 0 with no signal is a CLEAN
+      // exit — it is never, by itself, evidence of a crash (that's exactly
+      // what "code 0" means on every platform). Mercy only ever asked for a
+      // stop when wasIntentional is true, so a clean-but-unrequested exit
+      // still deserves a note (LOOP_MODE=1 is always set — see
+      // buildServerCfgIni — so a real acServer.exe isn't expected to exit
+      // on its own), but it is reported as "stopped", never "crashed". Only
+      // a non-zero code or a real signal is treated as an actual failure.
+      const cleanExit = code === 0 && !signal;
+      if (wasIntentional) {
+        current.status = 'stopped';
+        this.appendConsole(id, `[Mercy] Assetto Corsa server stopped.`);
+      } else if (cleanExit) {
+        current.status = 'stopped';
+        this.appendConsole(id, `[Mercy] Assetto Corsa server stopped (exit code 0). Mercy did not request this stop — check the console output above for the real reason (e.g. the server's own configuration or content).`);
+      } else {
+        current.status = 'error';
+        const lobbyNote = current.lobbyStatus === 'unreachable' ? ' The AC public lobby separately rejected this server as unreachable — that is a different, non-fatal state and is not by itself evidence of why the process exited.' : '';
+        this.appendConsole(id, `[Mercy] Assetto Corsa server stopped unexpectedly (code ${code}, signal ${signal}).${lobbyNote}`);
       }
       this.save();
       this.broadcast('assettocorsa:statusChange', { serverId: id, status: current.status });

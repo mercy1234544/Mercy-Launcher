@@ -13,9 +13,10 @@ import {
   Package, Archive, Loader2, Search, Save, Upload, RefreshCw, ArrowDown, ArrowLeft,
   ToggleLeft, ToggleRight, AlertTriangle, Globe, X, Download, HardDrive,
   Wrench, HeartPulse, FileCode, Import as ImportIcon, Car, Palette, FolderTree, ListOrdered,
-  CornerDownLeft, Lightbulb,
+  CornerDownLeft, Lightbulb, Gamepad2,
 } from 'lucide-react';
 import { useAppStore, Server as ServerType } from '../stores/useAppStore';
+import { launchGameFor } from '../lib/launchGame';
 
 // ── Console line colouring (compact version of ServerConsole's parser) ───────
 function lineClass(l: string): string {
@@ -235,6 +236,15 @@ export default function ServerPanel() {
 
   // 'starting' counts as up for button purposes (you can Stop a starting server).
   const isUp = server.status === 'running' || server.status === 'starting';
+  const [launchingGame, setLaunchingGame] = useState(false);
+  const handleLaunchGame = async () => {
+    setLaunchingGame(true);
+    try {
+      const result = await launchGameFor('fivem');
+      if (result.success && result.note) toast(result.note, { icon: 'ℹ️' });
+      else if (!result.success) toast.error(result.error || 'Could not launch FiveM');
+    } finally { setLaunchingGame(false); }
+  };
 
   return (
     <div className="h-full flex overflow-hidden">
@@ -288,6 +298,13 @@ export default function ServerPanel() {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              {server.status === 'running' && (
+                <button onClick={handleLaunchGame} disabled={launchingGame}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/25 transition-all disabled:opacity-50"
+                  title="Launch the FiveM application (never the server files)">
+                  {launchingGame ? <Loader2 size={13} className="animate-spin" /> : <Gamepad2 size={13} />} Launch Game
+                </button>
+              )}
               {isUp ? (
                 <button onClick={doStop} disabled={!!busy}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-overlay-6 text-surface-200 hover:bg-overlay-10 border border-overlay-8 transition-all disabled:opacity-50">

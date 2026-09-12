@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Panel, SectionHeading, Toggle, EmptyState } from '../components/ui';
 import { useMinecraftStore } from '../stores/useMinecraftStore';
+import { launchGameFor } from '../lib/launchGame';
 import toast from 'react-hot-toast';
 
 const STATUS_META: Record<string, { label: string; dot: string; text: string }> = {
@@ -88,6 +89,15 @@ export default function MinecraftServerPanel() {
   const handleStop = async () => { setBusy(true); await window.electronAPI.minecraft.stop(server.id, false); setBusy(false); load(); };
   const handleForceStop = async () => { setBusy(true); await window.electronAPI.minecraft.stop(server.id, true); setBusy(false); load(); };
   const handleRestart = async () => { setBusy(true); await window.electronAPI.minecraft.restart(server.id); setBusy(false); load(); };
+  const [launchingGame, setLaunchingGame] = useState(false);
+  const handleLaunchGame = async () => {
+    setLaunchingGame(true);
+    try {
+      const result = await launchGameFor('minecraft', server.edition);
+      if (result.success && result.note) toast(result.note, { icon: 'ℹ️' });
+      else if (!result.success) toast.error(result.error || 'Could not launch Minecraft');
+    } finally { setLaunchingGame(false); }
+  };
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-5 max-w-5xl mx-auto pb-16">
@@ -104,6 +114,11 @@ export default function MinecraftServerPanel() {
                 <button onClick={handleStart} disabled={busy} className="btn-primary text-xs py-2 px-3 flex items-center gap-1.5">{busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Start</button>
               ) : (
                 <>
+                  {server.status === 'running' && (
+                    <button onClick={handleLaunchGame} disabled={launchingGame} className="btn-primary text-xs py-2 px-3 flex items-center gap-1.5" title="Launch Minecraft (never opens Explorer/Documents)">
+                      {launchingGame ? <Loader2 size={13} className="animate-spin" /> : <Gamepad2 size={13} />} Launch Game
+                    </button>
+                  )}
                   <button onClick={handleRestart} disabled={busy} className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"><RotateCcw size={13} /> Restart</button>
                   <button onClick={handleStop} disabled={busy} className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"><Square size={13} /> Stop</button>
                   <button onClick={handleForceStop} disabled={busy} className="p-2 rounded-lg text-surface-500 hover:text-error hover:bg-overlay-6 transition-colors" title="Force stop"><AlertTriangle size={14} /></button>
@@ -323,6 +338,25 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
   const [info, setInfo] = useState<MinecraftConnectionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [showDetails, setShowDetails] = useState(false);
+  const [showMercyAdvanced, setShowMercyAdvanced] = useState(false);
+  const [connPlan, setConnPlan] = useState<EndpointPlan | null | undefined>(undefined);
+  const [launchingGame, setLaunchingGame] = useState(false);
+
+  useEffect(() => {
+    if (server.status !== 'running') { setConnPlan(undefined); return; }
+    let cancelled = false;
+    window.electronAPI.connection?.negotiateMinecraftEndpoint?.(server.id).then((plan) => { if (!cancelled) setConnPlan(plan); }).catch(() => { if (!cancelled) setConnPlan(null); });
+    return () => { cancelled = true; };
+  }, [server.id, server.status]);
+
+  const handleLaunchGame = async () => {
+    setLaunchingGame(true);
+    try {
+      const result = await launchGameFor('minecraft', server.edition);
+      if (result.success && result.note) toast(result.note, { icon: 'ℹ️' });
+      else if (!result.success) toast.error(result.error || 'Could not launch Minecraft');
+    } finally { setLaunchingGame(false); }
+  };
 
   const load = () => window.electronAPI.minecraft.connectionInfo(server.id).then((i) => { setInfo(i); setLoading(false); }).catch(() => setLoading(false));
   // Recomputed live on every poll and whenever the server's own record
@@ -370,8 +404,49 @@ function ConnectTab({ server }: { server: MinecraftServer }) {
               : `Port ${info.port} is NOT accepting connections — the process is running but something is wrong.`)
       : null;
 
+  const mercyConnectionState: { label: string; tone: 'ok' | 'warn' | 'idle' } =
+    server.status !== 'running' ? { label: 'Start the server to enable joining through Mercy', tone: 'idle' }
+    : connPlan === undefined ? { label: 'Checking Mercy connection…', tone: 'idle' }
+    : connPlan && (connPlan.candidates.length > 0 || connPlan.relayAvailable) ? { label: 'Ready to connect — friends can join now', tone: 'ok' }
+    : { label: connPlan?.unavailableExplanation ? `Mercy connection unavailable: ${connPlan.unavailableExplanation}` : 'Mercy connection unavailable', tone: 'warn' };
+
   return (
     <div className="space-y-3">
+      {/* Mercy-relay-based join — the recommended path for friends over the
+          internet: no port forwarding, no manual IP sharing. Real, truthful
+          connection state, never claiming relay availability that wasn't
+          actually confirmed by the same negotiation Join approval uses. */}
+      <Panel padding="sm" className={mercyConnectionState.tone === 'ok' ? 'border-emerald-500/30' : mercyConnectionState.tone === 'warn' ? 'border-amber-500/30' : ''}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            {mercyConnectionState.tone === 'ok' ? <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
+              : mercyConnectionState.tone === 'warn' ? <XCircle size={14} className="text-amber-400 shrink-0" />
+              : <Info size={14} className="text-surface-500 shrink-0" />}
+            <p className="text-sm text-surface-200 font-semibold">Mercy Connection: {mercyConnectionState.label}</p>
+          </div>
+          {server.status === 'running' && (
+            <button onClick={handleLaunchGame} disabled={launchingGame} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+              {launchingGame ? <Loader2 size={13} className="animate-spin" /> : <Gamepad2 size={13} />} Launch Game
+            </button>
+          )}
+        </div>
+        <ol className="mt-3 space-y-1.5 text-xs text-surface-400">
+          <li>1. Start the server (above) and launch Minecraft.</li>
+          <li>2. Your friends find this server through their own Mercy Launcher (Friends & Presence).</li>
+          <li>3. They click Join — accept the request if approval is required.</li>
+          <li>4. Mercy establishes the connection automatically — no router port forwarding needed.</li>
+        </ol>
+        <button onClick={() => setShowMercyAdvanced((v) => !v)} className="flex items-center gap-1 text-[11px] text-surface-600 hover:text-surface-300 mt-2">
+          <ChevronDown size={11} className={`transition-transform ${showMercyAdvanced ? 'rotate-180' : ''}`} /> Advanced
+        </button>
+        {showMercyAdvanced && (
+          <div className="mt-2 space-y-0.5 text-[11px] font-mono text-surface-500">
+            <p>Candidates: {connPlan?.candidates.length ?? 0}</p>
+            {connPlan?.candidates.map((c, i) => <p key={i}>&nbsp;&nbsp;- {c.strategy}: {c.address}</p>)}
+          </div>
+        )}
+      </Panel>
+
       {/* PRIMARY: everything a normal Minecraft player needs, one glance. */}
       <Panel>
         <div className="flex items-center justify-between mb-4">

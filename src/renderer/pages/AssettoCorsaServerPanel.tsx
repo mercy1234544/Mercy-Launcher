@@ -6,8 +6,10 @@ import {
   FlagTriangleRight, ArrowLeft, Play, Square, RotateCcw, Loader2, Terminal, Settings2, Users,
   Archive, FolderOpen, LayoutDashboard, Cpu, MemoryStick, Clock, Hash, Trash2, Save,
   AlertTriangle, File as FileIcon, Folder, ChevronRight, Copy, Trash, Puzzle, ShieldAlert, Info, CheckCircle2, XCircle,
+  Gamepad2, Share2, ChevronDown,
 } from 'lucide-react';
 import { Panel, SectionHeading, Toggle, EmptyState } from '../components/ui';
+import { launchGameFor } from '../lib/launchGame';
 import toast from 'react-hot-toast';
 
 const STATUS_META: Record<string, { label: string; dot: string; text: string }> = {
@@ -103,6 +105,18 @@ export default function AssettoCorsaServerPanel() {
   const handleStop = async () => { setBusy(true); await window.electronAPI.assettoCorsa.stop(server.id, false); setBusy(false); load(); };
   const handleForceStop = async () => { setBusy(true); await window.electronAPI.assettoCorsa.stop(server.id, true); setBusy(false); load(); };
   const handleRestart = async () => { setBusy(true); await window.electronAPI.assettoCorsa.restart(server.id); setBusy(false); load(); };
+  const [launchingGame, setLaunchingGame] = useState(false);
+  const handleLaunchGame = async () => {
+    setLaunchingGame(true);
+    try {
+      // Never acServer.exe (the dedicated server Mercy itself already runs)
+      // — this launches the PLAYER's own game client (Content Manager when
+      // installed, otherwise the base Assetto Corsa executable).
+      const result = await launchGameFor('assettocorsa');
+      if (result.success && result.note) toast(result.note, { icon: 'ℹ️' });
+      else if (!result.success) toast.error(result.error || 'Could not launch Assetto Corsa');
+    } finally { setLaunchingGame(false); }
+  };
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-5 max-w-5xl mx-auto pb-16">
@@ -119,6 +133,11 @@ export default function AssettoCorsaServerPanel() {
                 <button onClick={handleStart} disabled={busy} className="btn-primary text-xs py-2 px-3 flex items-center gap-1.5">{busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Start</button>
               ) : (
                 <>
+                  {server.status === 'running' && (
+                    <button onClick={handleLaunchGame} disabled={launchingGame} className="btn-primary text-xs py-2 px-3 flex items-center gap-1.5" title="Launch your Assetto Corsa game client (never the dedicated server)">
+                      {launchingGame ? <Loader2 size={13} className="animate-spin" /> : <Gamepad2 size={13} />} Launch Game
+                    </button>
+                  )}
                   <button onClick={handleRestart} disabled={busy} className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"><RotateCcw size={13} /> Restart</button>
                   <button onClick={handleStop} disabled={busy} className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"><Square size={13} /> Stop</button>
                   <button onClick={handleForceStop} disabled={busy} className="p-2 rounded-lg text-surface-500 hover:text-error hover:bg-overlay-6 transition-colors" title="Force stop"><AlertTriangle size={14} /></button>
@@ -151,6 +170,7 @@ export default function AssettoCorsaServerPanel() {
         <Tabs.List className="flex flex-wrap gap-1 mb-4" aria-label="Server management">
           {[
             { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+            { id: 'join', label: 'How to Join', icon: Share2 },
             { id: 'console', label: 'Console', icon: Terminal },
             { id: 'players', label: 'Players', icon: Users },
             { id: 'settings', label: 'Settings', icon: Settings2 },
@@ -170,6 +190,7 @@ export default function AssettoCorsaServerPanel() {
         </Tabs.List>
 
         <Tabs.Content value="overview" className="outline-none"><OverviewTab server={server} /></Tabs.Content>
+        <Tabs.Content value="join" className="outline-none"><HowToJoinTab server={server} onLaunchGame={handleLaunchGame} launchingGame={launchingGame} /></Tabs.Content>
         <Tabs.Content value="console" className="outline-none"><ConsoleTab server={server} /></Tabs.Content>
         <Tabs.Content value="players" className="outline-none"><PlayersTab /></Tabs.Content>
         <Tabs.Content value="settings" className="outline-none"><SettingsTab server={server} onChange={load} /></Tabs.Content>
@@ -272,6 +293,134 @@ function OverviewTab({ server }: { server: AssettoCorsaServer }) {
           <p className="text-xs text-surface-400">{server.lastError}</p>
         </Panel>
       )}
+      <StartupDiagnosticsPanel serverId={server.id} />
+    </div>
+  );
+}
+
+// ── Real startup diagnostics (Part 4) — collapsed by default (advanced,
+// not for normal players); every field reflects what was actually spawned/
+// observed, never secrets. ───────────────────────────────────────────────
+function StartupDiagnosticsPanel({ serverId }: { serverId: string }) {
+  const [open, setOpen] = useState(false);
+  const [diag, setDiag] = useState<AcStartupDiagnostics | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    window.electronAPI.assettoCorsa.startupDiagnostics(serverId).then(setDiag).catch(() => setDiag(null));
+  }, [open, serverId]);
+
+  return (
+    <Panel padding="sm">
+      <button onClick={() => setOpen((v) => !v)} className="w-full flex items-center justify-between text-xs font-semibold text-surface-400 uppercase tracking-wider">
+        Startup Diagnostics <ChevronDown size={13} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        diag ? (
+          <div className="mt-3 space-y-1 text-[11px] font-mono text-surface-300">
+            <p>Executable: <span className="text-surface-400">{diag.executablePath}</span></p>
+            <p>Working directory: <span className="text-surface-400">{diag.workingDirectory}</span></p>
+            <p>Config: <span className="text-surface-400">{diag.configPath}</span></p>
+            <p>Entry list: <span className="text-surface-400">{diag.entryListPath}</span></p>
+            <p>Track: <span className="text-surface-400">{diag.track}{diag.trackLayout ? ` (${diag.trackLayout})` : ''}</span></p>
+            <p>Cars: <span className="text-surface-400">{diag.cars.join(', ') || 'none'}</span></p>
+            <p>Ports: <span className="text-surface-400">TCP {diag.tcpPort} · UDP {diag.udpPort} · HTTP {diag.httpPort}</span></p>
+            <p>PID: <span className="text-surface-400">{diag.pid ?? 'not running'}</span></p>
+            <p>Started: <span className="text-surface-400">{new Date(diag.startedAt).toLocaleString()}</span></p>
+            {diag.exitedAt && (
+              <>
+                <p>Exited: <span className="text-surface-400">{new Date(diag.exitedAt).toLocaleString()}</span></p>
+                <p>Exit code / signal: <span className="text-surface-400">{diag.exitCode ?? 'null'} / {diag.exitSignal ?? 'null'}</span></p>
+              </>
+            )}
+            {diag.lastConsoleLines.length > 0 && (
+              <div className="pt-2">
+                <p className="text-surface-500 uppercase tracking-wider text-[10px] mb-1">Final console output</p>
+                <div className="rounded-lg bg-black/40 p-2 space-y-0.5 max-h-40 overflow-y-auto">
+                  {diag.lastConsoleLines.map((l, i) => <div key={i}>{l}</div>)}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="mt-3 text-[11px] text-surface-500">No diagnostics available yet — this server hasn't been started this session.</p>
+        )
+      )}
+    </Panel>
+  );
+}
+
+// ── How to Join — real, truthful instructions reflecting exactly what the
+// current implementation supports; never router port-forwarding, never a
+// public-IP instruction, and never claims relay availability that wasn't
+// actually confirmed by the same negotiation Join approval itself uses. ───
+function HowToJoinTab({ server, onLaunchGame, launchingGame }: { server: AssettoCorsaServer; onLaunchGame: () => void; launchingGame: boolean }) {
+  const [connPlan, setConnPlan] = useState<EndpointPlan | null | undefined>(undefined);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  useEffect(() => {
+    if (server.status !== 'running') { setConnPlan(undefined); return; }
+    let cancelled = false;
+    window.electronAPI.connection?.negotiateAssettoCorsaEndpoint?.(server.id).then((plan) => { if (!cancelled) setConnPlan(plan); }).catch(() => { if (!cancelled) setConnPlan(null); });
+    return () => { cancelled = true; };
+  }, [server.id, server.status]);
+
+  const connectionState: { label: string; tone: 'ok' | 'warn' | 'idle' } =
+    server.status !== 'running' ? { label: 'Start the server to enable joining', tone: 'idle' }
+    : connPlan === undefined ? { label: 'Checking Mercy connection…', tone: 'idle' }
+    : connPlan && (connPlan.candidates.length > 0 || connPlan.relayAvailable) ? { label: 'Ready to connect — friends can join now', tone: 'ok' }
+    : { label: connPlan?.unavailableExplanation ? `Mercy connection unavailable: ${connPlan.unavailableExplanation}` : 'Mercy connection unavailable', tone: 'warn' };
+
+  const steps = [
+    'Start the Assetto Corsa server (above).',
+    'Launch Assetto Corsa or Content Manager — use the "Launch Game" button.',
+    'Your friend finds this server through their own Mercy Launcher (Friends & Presence).',
+    'Your friend clicks Join.',
+    'Accept the request in Mercy if approval is required.',
+    'Mercy establishes the connection automatically — no router port forwarding needed.',
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Panel padding="sm" className={connectionState.tone === 'ok' ? 'border-emerald-500/30' : connectionState.tone === 'warn' ? 'border-amber-500/30' : ''}>
+        <div className="flex items-center gap-2">
+          {connectionState.tone === 'ok' ? <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
+            : connectionState.tone === 'warn' ? <XCircle size={14} className="text-amber-400 shrink-0" />
+            : <Info size={14} className="text-surface-500 shrink-0" />}
+          <p className="text-sm text-surface-200 font-semibold">{connectionState.label}</p>
+        </div>
+      </Panel>
+
+      <Panel>
+        <p className="text-xs font-bold text-surface-400 uppercase tracking-wider mb-3">How to Join</p>
+        <ol className="space-y-2">
+          {steps.map((s, i) => (
+            <li key={i} className="flex items-start gap-2.5 text-sm text-surface-300">
+              <span className="w-5 h-5 rounded-full bg-overlay-6 text-surface-400 text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+              {s}
+            </li>
+          ))}
+        </ol>
+        {server.status === 'running' && (
+          <button onClick={onLaunchGame} disabled={launchingGame} className="btn-primary text-xs py-2 px-4 mt-4 flex items-center gap-1.5">
+            {launchingGame ? <Loader2 size={13} className="animate-spin" /> : <Gamepad2 size={13} />} Launch Game
+          </button>
+        )}
+      </Panel>
+
+      <Panel padding="sm">
+        <button onClick={() => setShowAdvanced((v) => !v)} className="w-full flex items-center justify-between text-xs font-semibold text-surface-500">
+          Advanced (networking details) <ChevronDown size={13} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+        </button>
+        {showAdvanced && (
+          <div className="mt-3 space-y-1 text-[11px] font-mono text-surface-400">
+            <p>Mercy Server: {server.status}</p>
+            <p>AC Public Lobby: {server.lobbyStatus === 'unreachable' ? 'Unavailable (rejected as unreachable)' : 'Unknown'}</p>
+            <p>Mercy Connection candidates: {connPlan?.candidates.length ?? 0}</p>
+            {connPlan?.candidates.map((c, i) => <p key={i}>&nbsp;&nbsp;- {c.strategy}: {c.address}</p>)}
+            {connPlan?.unavailableExplanation && <p>Reason unavailable: {connPlan.unavailableExplanation}</p>}
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }

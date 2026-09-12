@@ -145,6 +145,7 @@ const electronAPI = {
     getAll: () => ipcRenderer.invoke('assettocorsa:getAll'),
     get: (id: string) => ipcRenderer.invoke('assettocorsa:get', id),
     consoleBuffer: (id: string) => ipcRenderer.invoke('assettocorsa:consoleBuffer', id),
+    startupDiagnostics: (id: string) => ipcRenderer.invoke('assettocorsa:startupDiagnostics', id),
     delete: (id: string, deleteFiles: boolean) => ipcRenderer.invoke('assettocorsa:delete', id, deleteFiles),
     create: (config: any) => ipcRenderer.invoke('assettocorsa:create', config),
     update: (id: string, patch: any) => ipcRenderer.invoke('assettocorsa:update', id, patch),
