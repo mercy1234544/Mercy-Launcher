@@ -237,6 +237,43 @@ returns table (
   where f.user_id = auth.uid();
 $$;
 
+-- ── 9b) Everyone Playing — real presence discovery across ALL users, not
+--      just friends, so people can find and befriend other real Mercy
+--      Launcher players. Deliberately narrower than get_friends_presence():
+--      it never reveals server id/name (that stays a friends-only, join-
+--      relevant detail), only that someone is real, online, and playing a
+--      real game right now — same privacy flags + 90s heartbeat timeout
+--      enforced the same way. is_friend/request_pending let the client show
+--      the correct action (Add Friend / Pending / Friends) without a second
+--      round trip, and without ever letting a client fabricate its own
+--      friendship state. ───────────────────────────────────────────────────
+create or replace function public.get_everyone_playing()
+returns table (
+  user_id uuid, username text, activity_label text, mercy_game_id text,
+  is_friend boolean, request_pending boolean
+) language sql stable security definer set search_path = public as $$
+  select
+    p.id, p.username,
+    case when (pr.activity->>'kind') = 'hosting'
+      then 'Playing/Hosting ' || initcap(pr.activity->>'mercyGameId')
+      else 'Playing ' || initcap(pr.activity->>'mercyGameId') end,
+    pr.activity->>'mercyGameId',
+    public.is_friend_of(p.id),
+    exists(
+      select 1 from public.friend_requests fr
+      where fr.status = 'pending'
+        and least(fr.requester_id, fr.addressee_id) = least(auth.uid(), p.id)
+        and greatest(fr.requester_id, fr.addressee_id) = greatest(auth.uid(), p.id)
+    )
+  from public.presence pr
+  join public.profiles p on p.id = pr.user_id
+  where p.id <> auth.uid()
+    and pr.appear_online = true
+    and pr.last_heartbeat > now() - interval '90 seconds'
+    and pr.show_current_game = true
+    and pr.activity is not null;
+$$;
+
 -- ── 10) Server registration — owner-only writes, metadata only. ────────────
 create or replace function public.upsert_server(p_id text, p_mercy_game_id text, p_edition text, p_display_name text, p_is_online boolean)
 returns void language plpgsql security definer set search_path = public as $$

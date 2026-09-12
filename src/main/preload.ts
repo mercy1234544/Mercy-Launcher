@@ -180,6 +180,9 @@ const electronAPI = {
     launch: (id: string) => ipcRenderer.invoke('games:launch', id),
     getLastScanAt: () => ipcRenderer.invoke('games:getLastScanAt'),
     isStale: () => ipcRenderer.invoke('games:isStale'),
+    addManual: (execPath: string, name?: string) => ipcRenderer.invoke('games:addManual', execPath, name),
+    removeManual: (id: string) => ipcRenderer.invoke('games:removeManual', id),
+    relocateManual: (id: string, newExecPath: string) => ipcRenderer.invoke('games:relocateManual', id, newExecPath),
   },
 
   presence: {

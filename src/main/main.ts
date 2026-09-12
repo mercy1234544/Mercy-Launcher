@@ -453,6 +453,12 @@ function registerIpcHandlers() {
   ipcMain.handle('games:launch', (_, id: string) => gameScanner.launch(id));
   ipcMain.handle('games:getLastScanAt', () => gameScanner.getLastScanAt());
   ipcMain.handle('games:isStale', () => gameScanner.isStale());
+  // Manual game paths (Part 1) — the file picker itself is a real, existing,
+  // main-process dialog; only a path the user just explicitly chose in it
+  // is ever accepted here, then re-verified on disk before being stored.
+  ipcMain.handle('games:addManual', (_, execPath: string, name?: string) => gameScanner.addManualGame(execPath, name));
+  ipcMain.handle('games:removeManual', (_, id: string) => gameScanner.removeManualGame(id));
+  ipcMain.handle('games:relocateManual', (_, id: string, newExecPath: string) => gameScanner.relocateManualGame(id, newExecPath));
 
   // Presence / Friends foundation (see PresenceManager.ts's own header comment).
   ipcMain.handle('presence:getLocal', () => presenceManager.getLocalPresence());

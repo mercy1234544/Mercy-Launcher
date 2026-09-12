@@ -5,7 +5,7 @@ const path = require('path');
 const {
   canSendFriendRequest, canRespondToFriendRequest, canRemoveFriend,
   isHeartbeatFresh, formatActivityLabel, buildPresenceForViewer,
-  authorizeJoinRequest, SlidingWindowRateLimiter, DEFAULT_PRESENCE_SETTINGS,
+  buildEveryonePlayingEntry, authorizeJoinRequest, SlidingWindowRateLimiter, DEFAULT_PRESENCE_SETTINGS,
 } = require(path.resolve(__dirname, '../../dist/main/services/FriendsPresenceLogic.js'));
 
 let pass = 0, fail = 0;
@@ -79,6 +79,31 @@ const selfView = buildPresenceForViewer({
   settings: DEFAULT_PRESENCE_SETTINGS, lastHeartbeatMs: null, nowMs: now, activity: hostingActivity, isFriend: false, isSelf: true,
 });
 ok('viewing your OWN presence always shows full detail regardless of your own privacy settings/heartbeat staleness', selfView.status === 'online' && selfView.serverName === 'My Survival Server');
+
+// ── Everyone Playing — real, non-friend-gated discovery, but never leaking
+//    server id/name regardless of the owner's own showCurrentServer setting ─
+const playingActivity = { mercyGameId: 'fivem', kind: 'playing' };
+const hostingForEveryone = { mercyGameId: 'assettocorsa', kind: 'hosting', serverId: 'srv-9', serverName: 'Secret Track Night' };
+ok('a stranger (not a friend) IS shown in Everyone Playing when the owner opted in — this list is deliberately not friend-gated', buildEveryonePlayingEntry({
+  settings: fullSettings, lastHeartbeatMs: now, nowMs: now, activity: playingActivity, isSelf: false,
+}).visible === true);
+ok('appearOnline=false (the real default) hides a user from Everyone Playing too', buildEveryonePlayingEntry({
+  settings: DEFAULT_PRESENCE_SETTINGS, lastHeartbeatMs: now, nowMs: now, activity: playingActivity, isSelf: false,
+}).visible === false);
+ok('showCurrentGame=false hides a user from Everyone Playing (there is no "online but unlabeled" entry in this list)', buildEveryonePlayingEntry({
+  settings: { appearOnline: true, showCurrentGame: false, showCurrentServer: true }, lastHeartbeatMs: now, nowMs: now, activity: playingActivity, isSelf: false,
+}).visible === false);
+ok('a stale heartbeat hides a user from Everyone Playing', buildEveryonePlayingEntry({
+  settings: fullSettings, lastHeartbeatMs: now - 200_000, nowMs: now, activity: playingActivity, isSelf: false,
+}).visible === false);
+ok('you never see yourself listed in Everyone Playing', buildEveryonePlayingEntry({
+  settings: fullSettings, lastHeartbeatMs: now, nowMs: now, activity: playingActivity, isSelf: true,
+}).visible === false);
+const everyoneHostingEntry = buildEveryonePlayingEntry({
+  settings: fullSettings, lastHeartbeatMs: now, nowMs: now, activity: hostingForEveryone, isSelf: false,
+});
+ok('even with showCurrentServer=true, Everyone Playing never exposes server id/name — that stays friends-only', !('serverId' in everyoneHostingEntry) && !('serverName' in everyoneHostingEntry));
+ok('Everyone Playing still honestly distinguishes Playing/Hosting in the label even though it hides which server', everyoneHostingEntry.activityLabel === 'Playing/Hosting Assetto Corsa');
 
 // ── Join authorization ───────────────────────────────────────────────────
 const validJoin = { requesterId: 'friend-1', hostId: 'host-1', serverOwnerId: 'host-1', serverIsOnline: true, isFriend: true };

@@ -33,6 +33,12 @@ const REDIRECT_PORT = 53682;
 const REDIRECT_URI = `http://127.0.0.1:${REDIRECT_PORT}/callback`;
 const OAUTH_SCOPES = 'identify guilds.members.read';
 const RECHECK_MS = 10 * 60 * 1000; // membership re-check interval
+/** Real inactivity policy (Part 7): a session found less than this old is
+ *  restored automatically; five hours or more genuinely idle requires
+ *  authenticating again. This is deliberately separate from, and never
+ *  weakens, Discord's own real token expiry — a token that's genuinely
+ *  expired/revoked before five hours still requires re-auth on its own. */
+export const SESSION_INACTIVITY_LIMIT_MS = 5 * 60 * 60 * 1000;
 
 export interface AccessStatus {
   configured: boolean;   // owner has pasted the IDs
@@ -51,6 +57,12 @@ interface StoredAuth {
   user?: { id: string; username: string };
   lastCheck?: number;
   lastResult?: { inGuild: boolean; hasAccess: boolean };
+  /** Updated on every successful login/status confirmation while Mercy
+   *  Launcher is actually running — the real "was this session genuinely
+   *  active recently" timestamp the 5-hour policy is measured against.
+   *  Never reset merely because the app closed (see this file's header on
+   *  where session state lives and why closing must not clear it). */
+  lastActiveAt: number;
 }
 
 const CLOSE_PAGE = `<!doctype html><html><body style="margin:0;background:#0b0e14;color:#dbe2ee;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="font-size:42px">✅</div><h2 style="margin:8px 0 4px">Verified with Discord</h2><p style="color:#8b94a7;margin:0">You can close this tab and return to Mercy Launcher.</p></div></body></html>`;
@@ -58,15 +70,48 @@ const CLOSE_PAGE = `<!doctype html><html><body style="margin:0;background:#0b0e1
 export class AccessManager {
   private file: string;
   private loginInFlight = false;
+  /** Single-flight guard for token refresh — the actual fix for the real
+   *  "reopen the app and get logged out" bug this file used to have: two
+   *  concurrent status() calls (e.g. two components each checking auth on
+   *  mount) both seeing a near-expiry token would previously each POST
+   *  their own refresh_token exchange. Discord rotates refresh tokens on
+   *  use, so whichever call lost the race would refresh with an
+   *  already-invalidated token, fail, and call save(null) — wiping out the
+   *  session the WINNING call had just successfully saved a moment earlier.
+   *  Concurrent callers now share one real in-flight refresh instead. */
+  private refreshInFlight: Promise<StoredAuth | null> | null = null;
 
-  constructor(userDataPath: string) {
+  private clientId: string;
+  private guildId: string;
+  private accessRoleId: string;
+
+  /** apiBase/clientId/guildId/accessRoleId are injectable ONLY for
+   *  deterministic tests to point at a real local fake Discord API with
+   *  real fake IDs — production always uses the real https://discord.com
+   *  and the real owner-configured IDs above, and never talks to anything
+   *  else. */
+  constructor(
+    userDataPath: string,
+    private apiBase: string = 'https://discord.com',
+    overrides: { clientId?: string; guildId?: string; accessRoleId?: string } = {},
+  ) {
     const dataDir = path.join(userDataPath, 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     this.file = path.join(dataDir, 'access.json');
+    this.clientId = overrides.clientId ?? DISCORD_CLIENT_ID;
+    this.guildId = overrides.guildId ?? DISCORD_GUILD_ID;
+    this.accessRoleId = overrides.accessRoleId ?? DISCORD_ACCESS_ROLE_ID;
   }
 
+  /** Corrupted/unreadable storage fails safely to "logged out", never
+   *  throws and never crashes the app — matches this file's own existing
+   *  honest-failure convention everywhere else. */
   private load(): StoredAuth | null {
-    try { return JSON.parse(fs.readFileSync(this.file, 'utf-8')); } catch { return null; }
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.file, 'utf-8'));
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.accessToken !== 'string' || typeof parsed.expiresAt !== 'number') return null;
+      return parsed;
+    } catch { return null; }
   }
   private save(a: StoredAuth | null) {
     try {
@@ -76,7 +121,7 @@ export class AccessManager {
   }
 
   isConfigured(): boolean {
-    return !DISCORD_CLIENT_ID.startsWith('PASTE') && !DISCORD_GUILD_ID.startsWith('PASTE');
+    return !this.clientId.startsWith('PASTE') && !this.guildId.startsWith('PASTE');
   }
 
   private notConfigured(): AccessStatus {
@@ -113,7 +158,11 @@ export class AccessManager {
         server.on('error', () => reject(new Error(`Port ${REDIRECT_PORT} is busy — close other apps and try again`)));
         server.listen(REDIRECT_PORT, '127.0.0.1', () => {
           const url =
-            `https://discord.com/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}` +
+            // Always the real discord.com — this opens in the user's real
+            // system browser for the interactive consent screen, never
+            // redirected to a test double even when apiBase is overridden
+            // for the token/API calls below.
+            `https://discord.com/oauth2/authorize?client_id=${this.clientId}` +
             `&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
             `&scope=${encodeURIComponent(OAUTH_SCOPES)}&state=${state}` +
             `&code_challenge=${challenge}&code_challenge_method=S256`;
@@ -125,13 +174,13 @@ export class AccessManager {
 
       // Exchange code → token (PKCE public client: no secret required)
       const body = new URLSearchParams({
-        client_id: DISCORD_CLIENT_ID,
+        client_id: this.clientId,
         grant_type: 'authorization_code',
         code,
         redirect_uri: REDIRECT_URI,
         code_verifier: verifier,
       });
-      const tok = await axios.post('https://discord.com/api/oauth2/token', body.toString(), {
+      const tok = await axios.post(`${this.apiBase}/api/oauth2/token`, body.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000,
       });
 
@@ -139,12 +188,17 @@ export class AccessManager {
         accessToken: tok.data.access_token,
         refreshToken: tok.data.refresh_token,
         expiresAt: Date.now() + (tok.data.expires_in ?? 604800) * 1000,
+        lastActiveAt: Date.now(),
       };
 
-      const me = await axios.get('https://discord.com/api/users/@me', {
+      const me = await axios.get(`${this.apiBase}/api/users/@me`, {
         headers: { Authorization: `Bearer ${auth.accessToken}` }, timeout: 15000,
       });
       auth.user = { id: me.data.id, username: me.data.global_name || me.data.username };
+      // A fresh login always persists the NEW account's session — if a
+      // different account was previously stored, this fully replaces it
+      // (never merges), matching Part 8's "restore the CURRENTLY
+      // authenticated account, not the previous one" requirement.
       this.save(auth);
 
       return this.status(true);
@@ -156,37 +210,74 @@ export class AccessManager {
     }
   }
 
-  /** Cached status; re-checks membership with Discord when stale or forced. */
+  /** The actual network refresh — factored out so concurrent callers can
+   *  share one in-flight call (see refreshInFlight's own comment on the
+   *  real bug this fixes). Returns the updated, already-saved StoredAuth on
+   *  success, or null on any real failure (network, revoked/invalid
+   *  refresh token, etc.) — never throws. */
+  private async doRefresh(current: StoredAuth): Promise<StoredAuth | null> {
+    if (!current.refreshToken) return null;
+    try {
+      const body = new URLSearchParams({
+        client_id: this.clientId, grant_type: 'refresh_token', refresh_token: current.refreshToken,
+      });
+      const tok = await axios.post(`${this.apiBase}/api/oauth2/token`, body.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000,
+      });
+      const updated: StoredAuth = {
+        ...current,
+        accessToken: tok.data.access_token,
+        refreshToken: tok.data.refresh_token ?? current.refreshToken,
+        expiresAt: Date.now() + (tok.data.expires_in ?? 604800) * 1000,
+        lastActiveAt: Date.now(),
+      };
+      this.save(updated);
+      return updated;
+    } catch {
+      return null;
+    }
+  }
+
+  private refreshTokenSingleFlight(current: StoredAuth): Promise<StoredAuth | null> {
+    if (!this.refreshInFlight) {
+      this.refreshInFlight = this.doRefresh(current).finally(() => { this.refreshInFlight = null; });
+    }
+    return this.refreshInFlight;
+  }
+
+  /** Cached status; re-checks membership with Discord when stale or forced.
+   *  Implements the real 5-hour inactivity policy (Part 7): a session found
+   *  less than 5 hours since its last confirmed activity is restored
+   *  automatically; one found genuinely idle 5+ hours requires
+   *  authenticating again — checked BEFORE touching the token at all, so a
+   *  merely-idle-but-still-valid token is never even given the chance to
+   *  fail differently. A real, server-side expiry/revocation (the refresh
+   *  call itself failing) still requires re-auth regardless of the
+   *  inactivity clock — this policy only ever adds a stricter local rule,
+   *  never a looser one than Discord's own. */
   async status(force = false): Promise<AccessStatus> {
     if (!this.isConfigured()) return this.notConfigured();
     let a = this.load();
     if (!a) return { configured: true, loggedIn: false, inGuild: false, hasAccess: false };
 
-    // Refresh the token if it's about to expire.
+    const inactiveMs = Date.now() - (a.lastActiveAt ?? 0);
+    if (inactiveMs >= SESSION_INACTIVITY_LIMIT_MS) {
+      this.save(null);
+      return { configured: true, loggedIn: false, inGuild: false, hasAccess: false, reason: 'Your session expired after 5 hours of inactivity — verify again.' };
+    }
+
+    // Refresh the token if it's about to expire — single-flighted so two
+    // concurrent status() calls never race each other's refresh attempt.
     if (Date.now() > a.expiresAt - 60_000) {
-      if (!a.refreshToken) { this.save(null); return { configured: true, loggedIn: false, inGuild: false, hasAccess: false, reason: 'Session expired — verify again' }; }
-      try {
-        const body = new URLSearchParams({
-          client_id: DISCORD_CLIENT_ID, grant_type: 'refresh_token', refresh_token: a.refreshToken,
-        });
-        const tok = await axios.post('https://discord.com/api/oauth2/token', body.toString(), {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000,
-        });
-        a = {
-          ...a,
-          accessToken: tok.data.access_token,
-          refreshToken: tok.data.refresh_token ?? a.refreshToken,
-          expiresAt: Date.now() + (tok.data.expires_in ?? 604800) * 1000,
-        };
-        this.save(a);
-      } catch {
-        this.save(null);
-        return { configured: true, loggedIn: false, inGuild: false, hasAccess: false, reason: 'Session expired — verify again' };
-      }
+      const refreshed = await this.refreshTokenSingleFlight(a);
+      if (!refreshed) { this.save(null); return { configured: true, loggedIn: false, inGuild: false, hasAccess: false, reason: 'Session expired — verify again' }; }
+      a = refreshed;
     }
 
     // Serve the cached membership result when fresh.
     if (!force && a.lastCheck && a.lastResult && Date.now() - a.lastCheck < RECHECK_MS) {
+      a.lastActiveAt = Date.now();
+      this.save(a);
       return {
         configured: true, loggedIn: true,
         inGuild: a.lastResult.inGuild, hasAccess: a.lastResult.hasAccess,
@@ -197,12 +288,12 @@ export class AccessManager {
 
     // Live membership (+ optional role) check.
     try {
-      const m = await axios.get(`https://discord.com/api/users/@me/guilds/${DISCORD_GUILD_ID}/member`, {
+      const m = await axios.get(`${this.apiBase}/api/users/@me/guilds/${this.guildId}/member`, {
         headers: { Authorization: `Bearer ${a.accessToken}` }, timeout: 15000,
       });
       const roles: string[] = m.data.roles || [];
-      const hasAccess = DISCORD_ACCESS_ROLE_ID ? roles.includes(DISCORD_ACCESS_ROLE_ID) : true;
-      a.lastCheck = Date.now(); a.lastResult = { inGuild: true, hasAccess };
+      const hasAccess = this.accessRoleId ? roles.includes(this.accessRoleId) : true;
+      a.lastCheck = Date.now(); a.lastResult = { inGuild: true, hasAccess }; a.lastActiveAt = Date.now();
       this.save(a);
       return {
         configured: true, loggedIn: true, inGuild: true, hasAccess,
@@ -212,7 +303,7 @@ export class AccessManager {
     } catch (e: any) {
       const notMember = e?.response?.status === 404;
       if (notMember) {
-        a.lastCheck = Date.now(); a.lastResult = { inGuild: false, hasAccess: false };
+        a.lastCheck = Date.now(); a.lastResult = { inGuild: false, hasAccess: false }; a.lastActiveAt = Date.now();
         this.save(a);
         return {
           configured: true, loggedIn: true, inGuild: false, hasAccess: false,
@@ -220,7 +311,11 @@ export class AccessManager {
           reason: this.denyReason(false),
         };
       }
-      // Network/API hiccup: fall back to the last known result rather than lock out.
+      // Network/API hiccup: fall back to the last known result rather than
+      // lock out — and still count this as real activity, since the user
+      // IS actively using the app right now, just offline/Discord is down.
+      a.lastActiveAt = Date.now();
+      this.save(a);
       return {
         configured: true, loggedIn: true,
         inGuild: a.lastResult?.inGuild ?? false,

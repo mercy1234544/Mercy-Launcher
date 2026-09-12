@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Gamepad2, Search, Loader2, Play, ExternalLink, Users, UserPlus, Check, X, WifiOff, RefreshCw } from 'lucide-react';
+import * as Popover from '@radix-ui/react-popover';
+import {
+  LayoutGrid, Gamepad2, Search, Loader2, Play, ExternalLink, Users, UserPlus, Check, X, WifiOff, RefreshCw,
+  FolderPlus, Settings, MapPin, Trash2, AlertTriangle, Globe2,
+} from 'lucide-react';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
 import { getGame } from '../config/games';
 import { useFriendsPresence } from '../stores/useFriendsPresence';
@@ -76,6 +80,36 @@ function DetectedGamesSection() {
     } finally { setLaunchingId(null); }
   };
 
+  // Manual game paths become part of this SAME unified list — never a
+  // separate "Manual Games" category (see GameScanner.addManualGame(), which
+  // already validates existence/is-a-file/normalization before this ever
+  // resolves). The picker only ever lets the user pick a real executable
+  // they explicitly select — never a path Mercy guesses or constructs.
+  const addGame = async () => {
+    const picked = await window.electronAPI.openFile([{ name: 'Executable', extensions: ['exe'] }]);
+    if (!picked) return;
+    const result = await window.electronAPI.games.addManual(picked);
+    if (!result.success) { toast.error(result.error || 'Could not add that game.'); return; }
+    if (result.game) setGames((prev) => [...prev, result.game!].sort((a, b) => a.name.localeCompare(b.name)));
+    setHasScanned(true);
+    toast.success(`Added ${result.game?.name ?? 'game'}`);
+  };
+
+  const locateGame = async (id: string) => {
+    const picked = await window.electronAPI.openFile([{ name: 'Executable', extensions: ['exe'] }]);
+    if (!picked) return;
+    const result = await window.electronAPI.games.relocateManual(id, picked);
+    if (!result.success) { toast.error(result.error || 'Could not update that path.'); return; }
+    if (result.game) setGames((prev) => prev.map((g) => (g.id === id ? result.game! : g)));
+    toast.success('Path updated');
+  };
+
+  const removeManualGame = async (id: string, name: string) => {
+    const ok = await window.electronAPI.games.removeManual(id);
+    if (!ok) { toast.error(`Could not remove ${name}`); return; }
+    setGames((prev) => prev.filter((g) => g.id !== id));
+  };
+
   const visibleGames = query.trim() ? games.filter((g) => g.name.toLowerCase().includes(query.trim().toLowerCase())) : games;
 
   return (
@@ -85,9 +119,14 @@ function DetectedGamesSection() {
           <Gamepad2 size={16} className="text-primary-300" />
           <p className="text-sm font-bold text-surface-100 uppercase tracking-wide">Games on this PC</p>
         </div>
-        <button onClick={scan} disabled={scanning} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-60">
-          {scanning ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} {scanning ? 'Scanning…' : hasScanned ? 'Scan Again' : 'Scan for Games'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={addGame} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5" title="Manually add a game by selecting its executable">
+            <FolderPlus size={13} /> Add Game
+          </button>
+          <button onClick={scan} disabled={scanning} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-60">
+            {scanning ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} {scanning ? 'Scanning…' : hasScanned ? 'Scan Again' : 'Scan for Games'}
+          </button>
+        </div>
       </div>
 
       {hasScanned && games.length > 0 && (
@@ -119,14 +158,23 @@ function DetectedGamesSection() {
                   <p className="text-sm font-semibold text-surface-100 truncate">{g.name}</p>
                   <p className="text-[10.5px] text-surface-500 truncate">{g.platformLabel}</p>
                 </div>
-                <span className={`text-[10px] font-semibold shrink-0 whitespace-nowrap ${statusMeta.className}`}>{statusMeta.label}</span>
+                {g.pathMissing ? (
+                  <span className="text-[10px] font-semibold shrink-0 whitespace-nowrap text-danger flex items-center gap-1"><AlertTriangle size={11} /> Path unavailable</span>
+                ) : (
+                  <span className={`text-[10px] font-semibold shrink-0 whitespace-nowrap ${statusMeta.className}`}>{statusMeta.label}</span>
+                )}
                 <div className="flex items-center gap-1.5 shrink-0">
                   {mercyGame && (
                     <button onClick={() => navigate(mercyGame.path)} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Open Mercy Server Tools"><ExternalLink size={12} /> Server Tools</button>
                   )}
-                  <button onClick={() => launch(g.id, g.name)} disabled={launchingId === g.id} className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1.5">
-                    {launchingId === g.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Launch
-                  </button>
+                  {g.pathMissing ? (
+                    <button onClick={() => locateGame(g.id)} className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1.5"><MapPin size={12} /> Locate</button>
+                  ) : (
+                    <button onClick={() => launch(g.id, g.name)} disabled={launchingId === g.id} className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1.5">
+                      {launchingId === g.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Launch
+                    </button>
+                  )}
+                  <GameSettingsMenu game={g} onLocate={() => locateGame(g.id)} onRemove={() => removeManualGame(g.id, g.name)} />
                 </div>
               </div>
             );
@@ -134,6 +182,52 @@ function DetectedGamesSection() {
         </div>
       )}
     </Panel>
+  );
+}
+
+// Small per-row gear — never more than a normal user needs: the real
+// detected path, which launcher/platform Mercy will actually use, and (only
+// for a manually-added game) Locate/Remove. Nothing here exposes anything a
+// normal user wasn't already shown; it's just a compact place to look
+// without cluttering the row itself.
+function GameSettingsMenu({ game, onLocate, onRemove }: { game: DetectedGame; onLocate: () => void; onRemove: () => void }) {
+  const [open, setOpen] = useState(false);
+  const isManual = game.platform === 'manual';
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-500 hover:text-surface-200 hover:bg-overlay-6 transition-colors shrink-0" title="Game settings">
+          <Settings size={13} />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="end" sideOffset={6} collisionPadding={12} className="z-50 w-72 rounded-xl border border-overlay-10 bg-surface-900/95 backdrop-blur-xl shadow-2xl p-3.5 space-y-2.5 mercy-pop">
+          <p className="text-sm font-bold text-surface-100 truncate">{game.name}</p>
+          <div className="space-y-1.5 text-[11px]">
+            <div>
+              <p className="text-surface-500">Launches via</p>
+              <p className="text-surface-200 font-medium">{game.platformLabel}</p>
+            </div>
+            <div>
+              <p className="text-surface-500">Executable</p>
+              <p className="text-surface-200 font-mono break-all">{game.executablePath}{game.pathMissing ? ' (not found)' : ''}</p>
+            </div>
+          </div>
+          {isManual ? (
+            <div className="flex items-center gap-2 pt-1">
+              <button onClick={() => { setOpen(false); onLocate(); }} className="btn-secondary text-xs py-1.5 px-2.5 flex-1 flex items-center justify-center gap-1.5">
+                <MapPin size={12} /> Locate…
+              </button>
+              <button onClick={() => { setOpen(false); onRemove(); }} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center justify-center gap-1.5 text-danger hover:bg-danger/10" title="Remove this manually added game">
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ) : (
+            <p className="text-[10.5px] text-surface-600 pt-1">Detected automatically — rescan if this ever moves.</p>
+          )}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
@@ -150,14 +244,23 @@ const PRIVACY_TOGGLES: { key: 'appearOnline' | 'showCurrentGame' | 'showCurrentS
 // configured (see lib/supabase.ts), so today this always renders the
 // honest "not deployed yet" state below — it is not hidden or faked once a
 // real project IS configured; the exact same code path handles both. ─────
+type PresenceView = 'friends' | 'friendsPlaying' | 'everyone';
+const PRESENCE_VIEWS: { key: PresenceView; label: string }[] = [
+  { key: 'friends', label: 'Friends' },
+  { key: 'friendsPlaying', label: 'Friends Playing' },
+  { key: 'everyone', label: 'Everyone Playing' },
+];
+
 function FriendsPresenceSection() {
   const {
-    connection, friends, incoming, outgoing, incomingJoinRequests, outgoingJoinRequests, connectionStatus, settings, loading, addFriendError,
-    init, teardown, addFriend, accept, decline, remove, updateSettings, join, approveJoin, declineJoin, connectToApprovedJoin,
+    connection, friends, everyone, incoming, outgoing, incomingJoinRequests, outgoingJoinRequests, connectionStatus, settings, loading, addFriendError,
+    init, teardown, addFriend, addFriendFromEveryone, accept, decline, remove, updateSettings, join, approveJoin, declineJoin, connectToApprovedJoin,
   } = useFriendsPresence();
   const [addUsername, setAddUsername] = useState('');
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [view, setView] = useState<PresenceView>('friends');
+  const [addingFromEveryone, setAddingFromEveryone] = useState<string | null>(null);
 
   useEffect(() => { init(); return () => teardown(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -186,6 +289,15 @@ function FriendsPresenceSection() {
       if (result.error) toast.error(result.error);
       else toast('Join request sent — waiting for the host to approve.', { icon: 'ℹ️' });
     } finally { setJoiningId(null); }
+  };
+
+  const handleAddFromEveryone = async (username: string) => {
+    setAddingFromEveryone(username);
+    try {
+      await addFriendFromEveryone(username);
+      const err = useFriendsPresence.getState().addFriendError;
+      if (err) toast.error(err); else toast.success(`Friend request sent to ${username}`);
+    } finally { setAddingFromEveryone(null); }
   };
 
   const handleApproveJoin = async (request: typeof incomingJoinRequests[number]) => {
@@ -290,26 +402,98 @@ function FriendsPresenceSection() {
             );
           })}
 
-          {friends.length === 0 ? (
-            <p className="text-xs text-surface-500 py-4">No friends yet — add one by username above.</p>
-          ) : (
-            <div className="space-y-2">
-              {friends.map((f) => (
-                <div key={f.friendId} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-3">
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${f.status === 'online' ? 'bg-success' : 'bg-surface-600'}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-surface-100 truncate">{f.username}</p>
-                    <p className="text-[11px] text-surface-500">{f.activityLabel || (f.status === 'online' ? 'Online' : 'Offline')}{f.serverName ? ` — ${f.serverName}` : ''}</p>
+          {/* Friends / Friends Playing / Everyone Playing — one shared list
+              surface, switched by a plain tab bar rather than three separate
+              panels, so scanning between them stays cheap. */}
+          <div className="flex items-center gap-1 mb-3 border-b border-overlay-6">
+            {PRESENCE_VIEWS.map((v) => (
+              <button
+                key={v.key}
+                onClick={() => setView(v.key)}
+                className={`text-xs font-semibold px-3 py-2 border-b-2 -mb-px transition-colors ${view === v.key ? 'border-primary-400 text-primary-300' : 'border-transparent text-surface-500 hover:text-surface-300'}`}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+
+          {view === 'friends' && (
+            friends.length === 0 ? (
+              <p className="text-xs text-surface-500 py-4">No friends yet — add one by username above.</p>
+            ) : (
+              <div className="space-y-2">
+                {friends.map((f) => (
+                  <div key={f.friendId} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-3">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${f.status === 'online' ? 'bg-success' : 'bg-surface-600'}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-surface-100 truncate">{f.username}</p>
+                      <p className="text-[11px] text-surface-500">{f.activityLabel || (f.status === 'online' ? 'Online' : 'Offline')}{f.serverName ? ` — ${f.serverName}` : ''}</p>
+                    </div>
+                    <button onClick={() => remove(f.friendId)} className="text-[11px] text-surface-500 hover:text-danger px-1">Remove</button>
+                    {f.serverId && (
+                      <button onClick={() => handleJoin(f)} disabled={joiningId === f.serverId} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+                        {joiningId === f.serverId ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Join
+                      </button>
+                    )}
                   </div>
-                  <button onClick={() => remove(f.friendId)} className="text-[11px] text-surface-500 hover:text-danger px-1">Remove</button>
-                  {f.serverId && (
-                    <button onClick={() => handleJoin(f)} disabled={joiningId === f.serverId} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
-                      {joiningId === f.serverId ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Join
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
+          )}
+
+          {view === 'friendsPlaying' && (() => {
+            const playing = friends.filter((f) => f.status === 'online' && f.activityLabel);
+            return playing.length === 0 ? (
+              <p className="text-xs text-surface-500 py-4">No friends are playing anything right now.</p>
+            ) : (
+              <div className="space-y-2">
+                {playing.map((f) => (
+                  <div key={f.friendId} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-3">
+                    <span className="w-2 h-2 rounded-full shrink-0 bg-success" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-surface-100 truncate">{f.username}</p>
+                      <p className="text-[11px] text-surface-500">{f.activityLabel}{f.serverName ? ` — ${f.serverName}` : ''}</p>
+                    </div>
+                    {f.serverId && (
+                      <button onClick={() => handleJoin(f)} disabled={joiningId === f.serverId} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+                        {joiningId === f.serverId ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Join
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {view === 'everyone' && (
+            everyone.length === 0 ? (
+              <EmptyState icon={Globe2} title="Nobody's visible right now" description="Other Mercy Launcher users who choose to appear online and share their current game will show up here — this never includes people who've kept their presence private." />
+            ) : (
+              <div className="space-y-2">
+                {everyone.map((p) => (
+                  <div key={p.userId} className="flex items-center gap-3 rounded-xl border border-overlay-4 bg-overlay-2 px-4 py-3">
+                    <span className="w-2 h-2 rounded-full shrink-0 bg-success" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-surface-100 truncate">{p.username}</p>
+                      <p className="text-[11px] text-surface-500">{p.activityLabel}</p>
+                    </div>
+                    {p.isFriend ? (
+                      <span className="text-[11px] text-surface-500 px-1">Friends</span>
+                    ) : p.requestPending ? (
+                      <span className="text-[11px] text-surface-500 px-1">Pending</span>
+                    ) : (
+                      <button
+                        onClick={() => handleAddFromEveryone(p.username)}
+                        disabled={addingFromEveryone === p.username}
+                        className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5"
+                      >
+                        {addingFromEveryone === p.username ? <Loader2 size={12} className="animate-spin" /> : <UserPlus size={12} />} Add Friend
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )
           )}
         </>
       )}

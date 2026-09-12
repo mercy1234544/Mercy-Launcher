@@ -211,6 +211,9 @@ interface ElectronAPI {
     launch: (id: string) => Promise<{ success: boolean; error?: string; note?: string }>;
     getLastScanAt: () => Promise<string | null>;
     isStale: () => Promise<boolean>;
+    addManual: (execPath: string, name?: string) => Promise<{ success: boolean; error?: string; game?: DetectedGame }>;
+    removeManual: (id: string) => Promise<boolean>;
+    relocateManual: (id: string, newExecPath: string) => Promise<{ success: boolean; error?: string; game?: DetectedGame }>;
   };
 
   presence: {
@@ -610,8 +613,9 @@ declare global {
     id: string; name: string; mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa' | null;
     mercyStatus: 'supported' | 'planned' | 'unsupported';
     installPath: string; executablePath: string;
-    platform: 'steam' | 'epic' | 'gog' | 'ubisoft' | 'rockstar' | 'ea' | 'microsoft' | 'direct';
+    platform: 'steam' | 'epic' | 'gog' | 'ubisoft' | 'rockstar' | 'ea' | 'microsoft' | 'direct' | 'manual';
     platformLabel: string; detectedAt: string;
+    pathMissing?: boolean;
   }
 
   // ── Presence/Friends types (mirror src/main/services/PresenceManager.ts

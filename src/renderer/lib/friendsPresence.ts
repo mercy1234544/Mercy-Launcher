@@ -92,6 +92,33 @@ export async function listOutgoingRequests(): Promise<ServiceResult<OutgoingFrie
   } catch (e) { return { data: [], error: friendlyError(e) }; }
 }
 
+export interface EveryonePlayingRow {
+  userId: string;
+  username: string;
+  activityLabel: string | null;
+  mercyGameId: string | null;
+  isFriend: boolean;
+  requestPending: boolean;
+}
+
+/** Real presence discovery across ALL users, not just friends — see
+ *  get_everyone_playing() in friends_presence_schema.sql, the actual
+ *  authority: it never requires friendship, but never exposes server id/
+ *  name either way (that stays a friends-only, join-relevant detail). */
+export async function getEveryonePlaying(): Promise<ServiceResult<EveryonePlayingRow[]>> {
+  if (!supabase) return { data: [], notConfigured: true };
+  try {
+    const { data, error } = await supabase.rpc('get_everyone_playing');
+    if (error) return { data: [], error: friendlyError(error) };
+    return {
+      data: (data || []).map((r: any) => ({
+        userId: r.user_id, username: r.username, activityLabel: r.activity_label,
+        mercyGameId: r.mercy_game_id, isFriend: r.is_friend, requestPending: r.request_pending,
+      })),
+    };
+  } catch (e) { return { data: [], error: friendlyError(e) }; }
+}
+
 export async function getFriendsPresence(): Promise<ServiceResult<FriendPresenceRow[]>> {
   if (!supabase) return { data: [], notConfigured: true };
   try {

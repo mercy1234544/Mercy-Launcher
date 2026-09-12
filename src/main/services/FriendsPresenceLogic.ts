@@ -160,6 +160,37 @@ export function buildPresenceForViewer(args: {
   };
 }
 
+// ── Everyone Playing ────────────────────────────────────────────────────────
+export interface EveryonePlayingEntry {
+  visible: boolean;
+  activityLabel: string | null;
+  mercyGameId: ActivityGameId | null;
+}
+
+/** "Everyone Playing" — real presence discovery across ALL users, not just
+ *  friends, so people can find and befriend other real players (never a
+ *  fabricated/sample list). Same privacy gate as buildPresenceForViewer
+ *  above, EXCEPT it never requires friendship and — regardless of the
+ *  owner's own showCurrentServer setting — never exposes server id/name at
+ *  all; that stays a friends-only, join-relevant detail shown only via
+ *  Friends/Friends Playing. Mirrored server-side by get_everyone_playing()
+ *  in the SQL schema, which is the actual authority this makes testable. */
+export function buildEveryonePlayingEntry(args: {
+  settings: PresenceSettings;
+  lastHeartbeatMs: number | null;
+  nowMs: number;
+  activity: RealActivity | null;
+  isSelf: boolean;
+}): EveryonePlayingEntry {
+  const { settings, lastHeartbeatMs, nowMs, activity, isSelf } = args;
+  const hidden: EveryonePlayingEntry = { visible: false, activityLabel: null, mercyGameId: null };
+  if (isSelf) return hidden; // never lists yourself
+  if (!settings.appearOnline || !settings.showCurrentGame) return hidden;
+  if (!isHeartbeatFresh(lastHeartbeatMs, nowMs)) return hidden;
+  if (!activity) return hidden;
+  return { visible: true, activityLabel: formatActivityLabel(activity), mercyGameId: activity.mercyGameId };
+}
+
 // ── Join authorization ──────────────────────────────────────────────────────
 export interface JoinAuthorizationInput {
   requesterId: string;

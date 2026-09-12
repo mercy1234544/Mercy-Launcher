@@ -22,8 +22,8 @@ import { create } from 'zustand';
 import { isSupabaseConfigured } from '../lib/supabase';
 import {
   sendFriendRequest, respondToFriendRequest, removeFriend, listIncomingRequests, listOutgoingRequests,
-  getFriendsPresence, sendHeartbeat, requestJoin, respondToJoinRequest, listJoinRequests, upsertServer, subscribeToFriendsUpdates,
-  FriendPresenceRow, IncomingFriendRequest, OutgoingFriendRequest, JoinRequestRow,
+  getFriendsPresence, getEveryonePlaying, sendHeartbeat, requestJoin, respondToJoinRequest, listJoinRequests, upsertServer, subscribeToFriendsUpdates,
+  FriendPresenceRow, EveryonePlayingRow, IncomingFriendRequest, OutgoingFriendRequest, JoinRequestRow,
 } from '../lib/friendsPresence';
 
 type PresenceSettings = { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean };
@@ -44,6 +44,9 @@ export interface GameConnectionStatus { state: GameConnectionState; detail?: str
 interface FriendsPresenceState {
   connection: ConnectionState;
   friends: FriendPresenceRow[];
+  /** Real, non-friend-gated presence discovery — see get_everyone_playing()
+   *  and this store's own refresh() for how it's fetched/gated. */
+  everyone: EveryonePlayingRow[];
   incoming: IncomingFriendRequest[];
   outgoing: OutgoingFriendRequest[];
   incomingJoinRequests: JoinRequestRow[];
@@ -72,6 +75,10 @@ interface FriendsPresenceState {
    *  connectionStatus[request.id] through the honest states above; never
    *  reports connected-* without a real, successful check. */
   connectToApprovedJoin: (request: JoinRequestRow) => Promise<void>;
+  /** Everyone Playing's own Add Friend action — reuses the exact same
+   *  addFriend() rules/backend as the Friends section's form; never a
+   *  separate, looser path. */
+  addFriendFromEveryone: (username: string) => Promise<void>;
 }
 
 let localPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -86,6 +93,7 @@ let lastHosted: { serverId: string; mercyGameId: 'fivem' | 'minecraft' | 'assett
 export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
   connection: isSupabaseConfigured() ? 'connecting' : 'unconfigured',
   friends: [],
+  everyone: [],
   incoming: [],
   outgoing: [],
   incomingJoinRequests: [],
@@ -162,12 +170,12 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
   refresh: async () => {
     if (!isSupabaseConfigured()) { set({ connection: 'unconfigured', loading: false }); return; }
     set({ loading: true });
-    const [friendsRes, incomingRes, outgoingRes, joinRes] = await Promise.all([
-      getFriendsPresence(), listIncomingRequests(), listOutgoingRequests(), listJoinRequests(),
+    const [friendsRes, everyoneRes, incomingRes, outgoingRes, joinRes] = await Promise.all([
+      getFriendsPresence(), getEveryonePlaying(), listIncomingRequests(), listOutgoingRequests(), listJoinRequests(),
     ]);
-    const anyError = friendsRes.error || incomingRes.error || outgoingRes.error || joinRes.error;
+    const anyError = friendsRes.error || everyoneRes.error || incomingRes.error || outgoingRes.error || joinRes.error;
     set({
-      friends: friendsRes.data, incoming: incomingRes.data, outgoing: outgoingRes.data,
+      friends: friendsRes.data, everyone: everyoneRes.data, incoming: incomingRes.data, outgoing: outgoingRes.data,
       incomingJoinRequests: joinRes.data.incoming, outgoingJoinRequests: joinRes.data.outgoing,
       connection: anyError ? 'unreachable' : 'connected', loading: false,
     });
@@ -179,6 +187,8 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
     if (result.error) { set({ addFriendError: result.error }); return; }
     await get().refresh();
   },
+
+  addFriendFromEveryone: async (username) => { await get().addFriend(username); },
 
   accept: async (id) => { await respondToFriendRequest(id, true); await get().refresh(); },
   decline: async (id) => { await respondToFriendRequest(id, false); await get().refresh(); },

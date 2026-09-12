@@ -59,7 +59,7 @@ export type MercyGameId = 'fivem' | 'minecraft' | 'assettocorsa';
  *  Soon", distinct from a game Mercy has no plans for at all.
  *  'unsupported' = just a detected game, nothing more. */
 export type MercyStatus = 'supported' | 'planned' | 'unsupported';
-export type DetectionPlatform = 'steam' | 'epic' | 'gog' | 'ubisoft' | 'rockstar' | 'ea' | 'microsoft' | 'direct';
+export type DetectionPlatform = 'steam' | 'epic' | 'gog' | 'ubisoft' | 'rockstar' | 'ea' | 'microsoft' | 'direct' | 'manual';
 
 export interface KnownGameDef {
   /** Stable id — for a curated (non-generic) entry only; generically
@@ -106,12 +106,32 @@ export interface DetectedGame {
    *  "GOG", "Ubisoft Connect", "Xbox/Microsoft Store", "FiveM", "Mojang". */
   platformLabel: string;
   detectedAt: string;
+  /** True only for a manually-added game whose executable was real and
+   *  confirmed to exist THE LAST TIME it was checked (scan time, or when
+   *  the entry was added/relocated) and no longer does. Never crashes or
+   *  silently drops the entry — the UI shows an honest "Path unavailable"
+   *  state and offers to locate it again. Always false/absent for an
+   *  auto-detected game (those are simply excluded if genuinely missing). */
+  pathMissing?: boolean;
 }
 
 const PLATFORM_LABELS: Record<DetectionPlatform, string> = {
   steam: 'Steam', epic: 'Epic Games', gog: 'GOG', ubisoft: 'Ubisoft Connect',
   rockstar: 'Rockstar Games', ea: 'EA', microsoft: 'Xbox/Microsoft Store', direct: 'Direct Install',
+  manual: 'Manually Added',
 };
+
+/** A user-provided game path (Part 1) — real, explicit, persisted
+ *  independent of any scan. Automatic detection will never be perfect
+ *  (unusual install locations, portable installs, modded setups), so this
+ *  is the honest fallback: the user selects the REAL executable themselves,
+ *  Mercy only ever verifies it (never fabricates or guesses). */
+export interface ManualGameEntry {
+  id: string;
+  name: string;
+  executablePath: string;
+  addedAt: string;
+}
 
 // Curated cross-reference list — deliberately small and maintainable (see
 // this file's header: generic launchers don't need an entry here at all,
@@ -262,7 +282,9 @@ export interface GameScannerOptions {
 
 export class GameScanner {
   private cacheFile: string;
+  private manualGamesFile: string;
   private cached: DetectedGame[] = [];
+  private manualGames: ManualGameEntry[] = [];
   private lastScanAt: string | null = null;
   /** Real, bounded default — see this file's header on why "configurable
    *  refresh interval" is implemented as this one sensible constant rather
@@ -273,6 +295,7 @@ export class GameScanner {
     const dataDir = path.join(userDataPath, 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     this.cacheFile = path.join(dataDir, 'detected-games.json');
+    this.manualGamesFile = path.join(dataDir, 'manual-games.json');
     try {
       if (fs.existsSync(this.cacheFile)) {
         const parsed = JSON.parse(fs.readFileSync(this.cacheFile, 'utf-8'));
@@ -280,6 +303,91 @@ export class GameScanner {
         this.lastScanAt = parsed.lastScanAt || null;
       }
     } catch { this.cached = []; this.lastScanAt = null; }
+    try {
+      if (fs.existsSync(this.manualGamesFile)) this.manualGames = JSON.parse(fs.readFileSync(this.manualGamesFile, 'utf-8')) || [];
+    } catch { this.manualGames = []; }
+  }
+
+  // ── Manual game paths (Part 1) — a real, explicit, persisted fallback for
+  // when automatic detection can't find (or misidentifies) a real install.
+  // Never trusts a renderer-supplied path as truth: every add/relocate
+  // verifies the real file on disk right now, and the unified list is kept
+  // in sync immediately rather than waiting for the next full rescan. ─────
+  getManualGames(): ManualGameEntry[] { return this.manualGames; }
+
+  private saveManualGames(): void {
+    try { fs.writeFileSync(this.manualGamesFile, JSON.stringify(this.manualGames, null, 2)); } catch {}
+  }
+
+  private persistCache(): void {
+    try { fs.writeFileSync(this.cacheFile, JSON.stringify({ games: this.cached, lastScanAt: this.lastScanAt }, null, 2)); } catch {}
+  }
+
+  private manualGameToDetected(entry: ManualGameEntry): DetectedGame {
+    return {
+      id: entry.id, name: entry.name, mercyGameId: null, mercyStatus: 'unsupported',
+      installPath: path.dirname(entry.executablePath), executablePath: entry.executablePath,
+      platform: 'manual', platformLabel: PLATFORM_LABELS.manual, detectedAt: new Date().toISOString(),
+      pathMissing: !fs.existsSync(entry.executablePath),
+    };
+  }
+
+  /** Real validation only: the path must actually exist and genuinely be a
+   *  file (never a directory mistaken for one, never assumed). Normalized
+   *  via path.resolve so equivalent paths (mixed slashes, redundant "..")
+   *  can't create confusing duplicate entries. Never executes the file —
+   *  this only ever records it for a later, explicit Launch click. */
+  addManualGame(execPath: string, name?: string): { success: boolean; error?: string; game?: DetectedGame } {
+    if (typeof execPath !== 'string' || !execPath.trim()) return { success: false, error: 'No path was provided.' };
+    const normalized = path.resolve(execPath);
+    let stat: fs.Stats;
+    try { stat = fs.statSync(normalized); } catch { return { success: false, error: 'That path does not exist.' }; }
+    if (!stat.isFile()) return { success: false, error: 'That path is not a file — select the actual game executable.' };
+    if (this.manualGames.some((m) => path.resolve(m.executablePath).toLowerCase() === normalized.toLowerCase())) {
+      return { success: false, error: 'This executable is already in your Library.' };
+    }
+    const entry: ManualGameEntry = {
+      id: `manual-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+      name: name?.trim() || path.basename(normalized, path.extname(normalized)),
+      executablePath: normalized, addedAt: new Date().toISOString(),
+    };
+    this.manualGames.push(entry);
+    this.saveManualGames();
+    const detected = this.manualGameToDetected(entry);
+    this.cached = [...this.cached.filter((g) => g.id !== detected.id), detected].sort((a, b) => a.name.localeCompare(b.name));
+    this.persistCache();
+    return { success: true, game: detected };
+  }
+
+  /** Removes a manually-added entry only — never touches an auto-detected
+   *  game (those aren't stored here at all). */
+  removeManualGame(id: string): boolean {
+    const before = this.manualGames.length;
+    this.manualGames = this.manualGames.filter((m) => m.id !== id);
+    if (this.manualGames.length === before) return false;
+    this.saveManualGames();
+    this.cached = this.cached.filter((g) => g.id !== id);
+    this.persistCache();
+    return true;
+  }
+
+  /** Re-points an existing manual entry at a new real path — the honest
+   *  "Locate" flow for when the original executable moved. Same real
+   *  validation as adding one fresh. */
+  relocateManualGame(id: string, newExecPath: string): { success: boolean; error?: string; game?: DetectedGame } {
+    const entry = this.manualGames.find((m) => m.id === id);
+    if (!entry) return { success: false, error: 'This manually added game was not found.' };
+    if (typeof newExecPath !== 'string' || !newExecPath.trim()) return { success: false, error: 'No path was provided.' };
+    const normalized = path.resolve(newExecPath);
+    let stat: fs.Stats;
+    try { stat = fs.statSync(normalized); } catch { return { success: false, error: 'That path does not exist.' }; }
+    if (!stat.isFile()) return { success: false, error: 'That path is not a file — select the actual game executable.' };
+    entry.executablePath = normalized;
+    this.saveManualGames();
+    const detected = this.manualGameToDetected(entry);
+    this.cached = this.cached.map((g) => (g.id === id ? detected : g));
+    this.persistCache();
+    return { success: true, game: detected };
   }
 
   getCached(): DetectedGame[] { return this.cached; }
@@ -566,11 +674,15 @@ if (Test-Path '${rootPath}') {
     for (const g of [...steam, ...epic, ...gog, ...ubisoft, ...rockstar, ...ea, ...microsoft, ...direct]) {
       if (!byId.has(g.id)) byId.set(g.id, g);
     }
-    const results = Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+    // Manual entries (Part 1) are never rediscovered by a rescan — they're
+    // merged back in fresh every time, with pathMissing re-checked for real
+    // right now rather than carried over stale from whenever they were added.
+    const manual = this.manualGames.map((m) => this.manualGameToDetected(m));
+    const results = Array.from(byId.values()).concat(manual).sort((a, b) => a.name.localeCompare(b.name));
 
     this.cached = results;
     this.lastScanAt = new Date().toISOString();
-    try { fs.writeFileSync(this.cacheFile, JSON.stringify({ games: results, lastScanAt: this.lastScanAt }, null, 2)); } catch {}
+    this.persistCache();
     return results;
   }
 

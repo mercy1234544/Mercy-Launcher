@@ -20,6 +20,12 @@ const OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 // The main-process guard caches the last authorization decision this long to
 // avoid a network round-trip on every protected IPC call.
 const GUARD_CACHE_MS = 60 * 1000;
+// Real inactivity policy: a session last confirmed less than this long ago
+// is restored automatically; one idle 5+ hours requires signing in again.
+// This is a LOCAL, additional rule — it never overrides or weakens a real
+// server-side revocation/expiry, which still applies regardless (see
+// status()'s own 401 handling below).
+export const SESSION_INACTIVITY_LIMIT_MS = 5 * 60 * 60 * 1000;
 
 interface Saved { token?: string; refreshToken?: string; username?: string; lastAuthorizedAt?: number; }
 export interface VSAuthStatus { enabled: boolean; authorized: boolean; username?: string; reason?: string; stale?: boolean; expiresAt?: number; entitlements?: string[]; }
@@ -28,7 +34,16 @@ export class VehicleStudioAuth {
   private file: string;
   // Last authorization decision, cached for the main-process IPC guard.
   private guardCache: { authorized: boolean; at: number } | null = null;
-  constructor(userDataPath: string) {
+  /** Single-flight guard for the real fix below: without this, two
+   *  concurrent status() calls (the Sidebar's account widget mounting at
+   *  the same time as another component's own auth check, say) both seeing
+   *  a 401 would each independently try to redeem the SAME refresh token.
+   *  If the backend rotates/invalidates it on use (a normal, expected
+   *  refresh-token behavior), the losing call's attempt fails and could
+   *  wipe the session the winning call just successfully restored. */
+  private refreshInFlight: Promise<Saved | null> | null = null;
+
+  constructor(userDataPath: string, private authBackendUrl: string = AUTH_BACKEND_URL) {
     const dir = path.join(userDataPath, 'data');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     this.file = path.join(dir, 'vst-auth.json');
@@ -38,12 +53,12 @@ export class VehicleStudioAuth {
   private save(s: Saved) { try { fs.writeFileSync(this.file, JSON.stringify(s), 'utf-8'); } catch {} }
   private clear() { try { if (fs.existsSync(this.file)) fs.unlinkSync(this.file); } catch {} }
 
-  isEnabled() { return !!AUTH_BACKEND_URL; }
+  isEnabled() { return !!this.authBackendUrl; }
 
   private async api(pathname: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), init?.timeoutMs ?? 8000);
-    try { return await fetch(`${AUTH_BACKEND_URL}${pathname}`, { ...init, signal: ctrl.signal }); }
+    try { return await fetch(`${this.authBackendUrl}${pathname}`, { ...init, signal: ctrl.signal }); }
     finally { clearTimeout(t); }
   }
 
@@ -53,11 +68,74 @@ export class VehicleStudioAuth {
     return { enabled: true, authorized: false, reason: 'offline' };
   }
 
-  /** The check the gate depends on — always confirmed against the backend. */
+  /** The real fix for the "closes the app, has to log back in shortly
+   *  after" bug: the session token this class talks to /session with is
+   *  short-lived by design (that's exactly WHY a refreshToken is issued and
+   *  stored alongside it) — but nothing here ever actually used it before.
+   *  A 401 immediately wiped the whole session, refreshToken included,
+   *  even though the real, intended recovery path (redeem the refresh
+   *  token for a new session token, exactly like the initial /verify flow)
+   *  was sitting right there unused. This calls the backend's own /refresh
+   *  endpoint — matching this file's other established endpoints
+   *  (/auth/discord, /verify, /session, /logout) and its own established
+   *  response-shape fallbacks — before ever giving up on a session that
+   *  still has a real, usable refresh token. Single-flighted so concurrent
+   *  callers never race each other's refresh attempt (see refreshInFlight's
+   *  own comment). Returns the updated Saved state on success, or null if
+   *  the refresh token itself is missing/rejected — a genuine, real
+   *  expiry/revocation this policy never overrides. */
+  private async doRefresh(s: Saved): Promise<Saved | null> {
+    if (!s.refreshToken) return null;
+    try {
+      const res = await this.api('/refresh', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: s.refreshToken }),
+      });
+      if (res.status !== 200) return null;
+      const j: any = await res.json().catch(() => ({}));
+      const token = j.sessionToken ?? j.session ?? j.token;
+      if (!token) return null;
+      const updated: Saved = {
+        token, refreshToken: j.refreshToken ?? s.refreshToken,
+        username: j.user?.discordUsername ?? j.username ?? s.username,
+        lastAuthorizedAt: Date.now(),
+      };
+      this.save(updated);
+      return updated;
+    } catch { return null; }
+  }
+
+  private refreshTokenSingleFlight(s: Saved): Promise<Saved | null> {
+    if (!this.refreshInFlight) {
+      this.refreshInFlight = this.doRefresh(s).finally(() => { this.refreshInFlight = null; });
+    }
+    return this.refreshInFlight;
+  }
+
+  /** The check the gate depends on — always confirmed against the backend,
+   *  subject to the real 5-hour inactivity policy checked first (Part 7):
+   *  a session confirmed less than 5 hours ago is restored automatically;
+   *  one genuinely idle 5+ hours requires signing in again, checked before
+   *  any network call so a clearly-idle session never even gets the chance
+   *  to succeed a stale refresh. A real server-side revocation/expiry (the
+   *  refresh call itself failing) still requires re-auth regardless of the
+   *  inactivity clock — this only ever adds a stricter local rule, never a
+   *  looser one than the backend's own. */
   async status(): Promise<VSAuthStatus> {
     if (!this.isEnabled()) return { enabled: false, authorized: true };
     const s = this.load();
     if (!s.token) return { enabled: true, authorized: false, reason: 'no_session' };
+
+    if (s.lastAuthorizedAt && Date.now() - s.lastAuthorizedAt >= SESSION_INACTIVITY_LIMIT_MS) {
+      this.clear();
+      this.setGuard(false);
+      return { enabled: true, authorized: false, reason: 'inactive_5h' };
+    }
+
+    return this.checkSession(s);
+  }
+
+  private async checkSession(s: Saved, alreadyRefreshed = false): Promise<VSAuthStatus> {
     try {
       const res = await this.api('/session', { headers: { Authorization: `Bearer ${s.token}` } });
       if (res.status === 200) {
@@ -73,7 +151,13 @@ export class VehicleStudioAuth {
         this.setGuard(true);
         return st;
       }
-      if (res.status === 401) { // definitively invalid/revoked/expired
+      if (res.status === 401) {
+        // The real recovery path: try the stored refresh token BEFORE
+        // giving up — never wipe a session that still has a usable one.
+        if (!alreadyRefreshed) {
+          const refreshed = await this.refreshTokenSingleFlight(s);
+          if (refreshed) return this.checkSession(refreshed, true);
+        }
         const j: any = await res.json().catch(() => ({}));
         this.clear();
         this.setGuard(false);
@@ -101,7 +185,7 @@ export class VehicleStudioAuth {
   /** Open the official Discord authorization flow in the system browser. */
   async startLogin(): Promise<{ ok: boolean; error?: string }> {
     if (!this.isEnabled()) return { ok: false, error: 'not_configured' };
-    await shell.openExternal(`${AUTH_BACKEND_URL}/auth/discord`);
+    await shell.openExternal(`${this.authBackendUrl}/auth/discord`);
     return { ok: true };
   }
 
