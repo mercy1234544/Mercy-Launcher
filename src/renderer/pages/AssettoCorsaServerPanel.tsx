@@ -42,15 +42,23 @@ export default function AssettoCorsaServerPanel() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [server, setServer] = useState<AssettoCorsaServer | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState('overview');
   const [runtimeRequired, setRuntimeRequired] = useState(false);
   const [settingUpRuntime, setSettingUpRuntime] = useState(false);
 
+  // Real failure isolation (Part 2): an honest, recoverable error state
+  // instead of a spinner that never resolves if the load genuinely fails.
   const load = async () => {
     if (!id) return;
-    const s = await window.electronAPI.assettoCorsa.get(id);
-    if (s) setServer(s);
+    try {
+      const s = await window.electronAPI.assettoCorsa.get(id);
+      if (s) { setServer(s); setLoadError(null); }
+      else setLoadError('This server could not be found — it may have been deleted.');
+    } catch (e: any) {
+      setLoadError(e?.message || 'Could not load this server.');
+    }
   };
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -68,7 +76,18 @@ export default function AssettoCorsaServerPanel() {
   if (!server) {
     return (
       <div className="p-6 max-w-5xl mx-auto">
-        <Panel className="flex items-center justify-center py-16"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>
+        {loadError ? (
+          <Panel className="flex flex-col items-center gap-3 py-16 text-center">
+            <AlertTriangle size={22} className="text-error" />
+            <p className="text-sm font-semibold text-surface-200">{loadError}</p>
+            <div className="flex items-center gap-2">
+              <button onClick={() => { setLoadError(null); load(); }} className="btn-secondary text-xs py-2 px-4">Retry</button>
+              <button onClick={() => navigate('/assetto-corsa')} className="btn-primary text-xs py-2 px-4">Back to Assetto Corsa</button>
+            </div>
+          </Panel>
+        ) : (
+          <Panel className="flex items-center justify-center py-16"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>
+        )}
       </div>
     );
   }

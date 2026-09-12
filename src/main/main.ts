@@ -1644,17 +1644,28 @@ function setupAutoUpdater() {
       percent: Math.round(progress.percent),
       transferred: progress.transferred,
       total: progress.total,
+      bytesPerSecond: progress.bytesPerSecond,
     });
   });
 
   autoUpdater.on('update-downloaded', (info) => {
-    console.log(`[AutoUpdater] Update downloaded: v${info.version} — installing and restarting...`);
+    console.log(`[AutoUpdater] Update downloaded: v${info.version} — ready, waiting for the user.`);
     mainWindow?.webContents.send('updater:status', {
       status: 'ready',
       version: info.version,
     });
-    // Auto-restart after a short delay to let the renderer show the status
-    setTimeout(triggerQuitAndInstall, 3000);
+    // NEVER auto-install here. The real bug this fixes: this used to call
+    // triggerQuitAndInstall() on an unconditional 3-second timer, which
+    // force-quit and restarted the whole app the moment ANY background
+    // check (autoDownload defaults on, plus a 15-minute re-check timer)
+    // finished downloading — regardless of what the user was doing. Confirmed
+    // in this exact installation's own main.log: every release this session
+    // shows "New version X has been downloaded" followed ~1-2 seconds later
+    // by "Install on explicit quitAndInstall" with zero user action in
+    // between. The update now only installs when the user explicitly clicks
+    // Restart in the UI (updater:install IPC, below) or the next time they
+    // quit the app themselves — autoInstallOnAppQuit (already set) handles
+    // that naturally, which is electron-updater's own intended safe pattern.
   });
 
   autoUpdater.on('error', (err) => {

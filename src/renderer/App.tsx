@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AnimatePresence } from 'framer-motion';
 import { TooltipProvider } from './components/ui/Tooltip';
@@ -39,9 +39,59 @@ import AssettoCorsaContent from './pages/AssettoCorsaContent';
 import Settings from './pages/Settings';
 import AdminPanel from './pages/AdminPanel';
 import VehicleStudio from './pages/VehicleStudio';
+import ErrorBoundary from './components/ErrorBoundary';
 import { useAuth } from './stores/useAuth';
 import { useAppAuth } from './stores/useAppAuth';
 import { useTheme } from './stores/useTheme';
+
+// Wraps only the routed page content (never the Sidebar/TitleBar chrome) —
+// a crash on one page never takes the whole app shell down with it, and
+// navigating to a different page (the resetKey changing) is real recovery.
+function RoutedContent() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <ErrorBoundary resetKey={location.pathname} onNavigateHome={() => navigate('/')}>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/fivem" element={<FiveMHub />} />
+        <Route path="/browse-servers" element={<BrowseServers />} />
+        <Route path="/my-servers" element={<AllServers />} />
+        <Route path="/mercy-servers/:game" element={<MercyServers />} />
+        <Route path="/minecraft" element={<MinecraftHub />} />
+        <Route path="/minecraft/create" element={<MinecraftServerWizard />} />
+        <Route path="/minecraft/server/:id" element={<MinecraftServerPanel />} />
+        <Route path="/minecraft/marketplace" element={<MinecraftMarketplace />} />
+        <Route path="/assetto-corsa" element={<AssettoCorsaHub />} />
+        <Route path="/assetto-corsa/create" element={<AssettoCorsaServerWizard />} />
+        <Route path="/assetto-corsa/server/:id" element={<AssettoCorsaServerPanel />} />
+        <Route path="/assetto-corsa/content" element={<AssettoCorsaContent />} />
+        <Route path="/beamng" element={<ComingSoon />} />
+        <Route path="/library" element={<Library />} />
+        <Route path="/downloads" element={<Downloads />} />
+        <Route path="/servers" element={<ServerPanel />} />
+        <Route path="/server/:id" element={<ServerPanel />} />
+        <Route path="/create" element={<ServerWizard />} />
+        <Route path="/resources" element={<ResourceManager />} />
+        <Route path="/organizer" element={<ResourceOrganizer />} />
+        <Route path="/startup" element={<StartupManager />} />
+        <Route path="/health" element={<HealthScanner />} />
+        <Route path="/backups" element={<BackupManager />} />
+        <Route path="/files" element={<FileExplorer />} />
+        <Route path="/editor" element={<ServerCfgEditor />} />
+        <Route path="/marketplace" element={<Marketplace />} />
+        <Route path="/import" element={<ImportResources />} />
+        <Route path="/updater" element={<ResourceUpdater />} />
+        <Route path="/vehicles" element={<VehiclePackManager />} />
+        <Route path="/console" element={<ServerConsole />} />
+        <Route path="/livery" element={<LiveryEditor />} />
+        <Route path="/vehicle-studio" element={<VehicleStudio />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/admin" element={<AdminPanel />} />
+      </Routes>
+    </ErrorBoundary>
+  );
+}
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -81,43 +131,7 @@ export default function App() {
       {!showSplash && (
         <Layout>
           <AnimatePresence mode="wait">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/fivem" element={<FiveMHub />} />
-              <Route path="/browse-servers" element={<BrowseServers />} />
-              <Route path="/my-servers" element={<AllServers />} />
-              <Route path="/mercy-servers/:game" element={<MercyServers />} />
-              <Route path="/minecraft" element={<MinecraftHub />} />
-              <Route path="/minecraft/create" element={<MinecraftServerWizard />} />
-              <Route path="/minecraft/server/:id" element={<MinecraftServerPanel />} />
-              <Route path="/minecraft/marketplace" element={<MinecraftMarketplace />} />
-              <Route path="/assetto-corsa" element={<AssettoCorsaHub />} />
-              <Route path="/assetto-corsa/create" element={<AssettoCorsaServerWizard />} />
-              <Route path="/assetto-corsa/server/:id" element={<AssettoCorsaServerPanel />} />
-              <Route path="/assetto-corsa/content" element={<AssettoCorsaContent />} />
-              <Route path="/beamng" element={<ComingSoon />} />
-              <Route path="/library" element={<Library />} />
-              <Route path="/downloads" element={<Downloads />} />
-              <Route path="/servers" element={<ServerPanel />} />
-              <Route path="/server/:id" element={<ServerPanel />} />
-              <Route path="/create" element={<ServerWizard />} />
-              <Route path="/resources" element={<ResourceManager />} />
-              <Route path="/organizer" element={<ResourceOrganizer />} />
-              <Route path="/startup" element={<StartupManager />} />
-              <Route path="/health" element={<HealthScanner />} />
-              <Route path="/backups" element={<BackupManager />} />
-              <Route path="/files" element={<FileExplorer />} />
-              <Route path="/editor" element={<ServerCfgEditor />} />
-              <Route path="/marketplace" element={<Marketplace />} />
-              <Route path="/import" element={<ImportResources />} />
-              <Route path="/updater" element={<ResourceUpdater />} />
-              <Route path="/vehicles" element={<VehiclePackManager />} />
-              <Route path="/console" element={<ServerConsole />} />
-              <Route path="/livery" element={<LiveryEditor />} />
-              <Route path="/vehicle-studio" element={<VehicleStudio />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/admin" element={<AdminPanel />} />
-            </Routes>
+            <RoutedContent />
           </AnimatePresence>
         </Layout>
       )}

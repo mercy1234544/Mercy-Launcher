@@ -441,9 +441,12 @@ interface ElectronAPI {
     install: () => Promise<void>;
     getVersion: () => Promise<string>;
     onStatus: (callback: (data: {
-      status: 'available' | 'current' | 'downloading' | 'ready' | 'error';
+      status: 'checking' | 'available' | 'current' | 'downloading' | 'ready' | 'error';
       version?: string;
       percent?: number;
+      transferred?: number;
+      total?: number;
+      bytesPerSecond?: number;
       error?: string;
     }) => void) => () => void;
   };

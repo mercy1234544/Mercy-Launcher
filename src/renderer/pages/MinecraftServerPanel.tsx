@@ -53,15 +53,25 @@ export default function MinecraftServerPanel() {
   const [searchParams] = useSearchParams();
   const { upsertServer } = useMinecraftStore();
   const [server, setServer] = useState<MinecraftServer | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const validTabs = ['overview', 'connect', 'console', 'properties', 'players', 'backups', 'files', 'content', 'worlds', 'packs', 'danger'];
   const requestedTab = searchParams.get('tab');
   const [tab, setTab] = useState(requestedTab && validTabs.includes(requestedTab) ? requestedTab : 'overview');
 
+  // Real failure isolation (Part 2): a failed load must produce an honest,
+  // recoverable error state — never leave the page stuck on a spinner
+  // forever, and never let an unhandled rejection here be the reason this
+  // page never renders anything.
   const load = async () => {
     if (!id) return;
-    const s = await window.electronAPI.minecraft.get(id);
-    if (s) { setServer(s); upsertServer(s); }
+    try {
+      const s = await window.electronAPI.minecraft.get(id);
+      if (s) { setServer(s); setLoadError(null); upsertServer(s); }
+      else setLoadError('This server could not be found — it may have been deleted.');
+    } catch (e: any) {
+      setLoadError(e?.message || 'Could not load this server.');
+    }
   };
   useEffect(() => { load(); }, [id]);
 
@@ -77,7 +87,18 @@ export default function MinecraftServerPanel() {
   if (!server) {
     return (
       <div className="p-6 max-w-5xl mx-auto">
-        <Panel className="flex items-center justify-center py-16"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>
+        {loadError ? (
+          <Panel className="flex flex-col items-center gap-3 py-16 text-center">
+            <AlertTriangle size={22} className="text-error" />
+            <p className="text-sm font-semibold text-surface-200">{loadError}</p>
+            <div className="flex items-center gap-2">
+              <button onClick={() => { setLoadError(null); load(); }} className="btn-secondary text-xs py-2 px-4">Retry</button>
+              <button onClick={() => navigate('/minecraft')} className="btn-primary text-xs py-2 px-4">Back to Minecraft</button>
+            </div>
+          </Panel>
+        ) : (
+          <Panel className="flex items-center justify-center py-16"><Loader2 size={20} className="animate-spin text-primary-400" /></Panel>
+        )}
       </div>
     );
   }
