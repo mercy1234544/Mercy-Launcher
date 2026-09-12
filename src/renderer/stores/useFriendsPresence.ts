@@ -19,7 +19,7 @@
 // "unavailable, no relay configured"), mints a real single-use HMAC join
 // token bound to that endpoint, and only then marks the request authorized.
 import { create } from 'zustand';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import {
   sendFriendRequest, respondToFriendRequest, removeFriend, listIncomingRequests, listOutgoingRequests,
   getFriendsPresence, getEveryonePlaying, sendHeartbeat, requestJoin, respondToJoinRequest, listJoinRequests, upsertServer, subscribeToFriendsUpdates,
@@ -221,10 +221,25 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
     // main.ts's two negotiate* IPC handlers) but share the exact same
     // negotiator/relay/tunnel code underneath — never a second, parallel
     // connection system per game.
+    // Registering this server with the Mercy relay authenticates the HOST
+    // role, which the relay now verifies against a real Supabase session
+    // (see signaling/auth.js's verifyHostToken on the Linux backend) — never
+    // the HMAC join token minted below by createJoinToken(), which is a
+    // separate credential for the CLIENT role on this one approved
+    // join_requests row. A missing/expired session must fail honestly here,
+    // not silently substitute that HMAC token.
+    const { data: sessionData, error: sessionError } = supabase
+      ? await supabase.auth.getSession()
+      : { data: { session: null }, error: null };
+    const supabaseAccessToken = sessionData?.session?.access_token;
+    if (sessionError || !supabaseAccessToken) {
+      return { error: 'Not signed in to Mercy — cannot register this server with the relay. Please sign in and try again.' };
+    }
+
     const mercyGameId = request.mercyGameId === 'assettocorsa' ? 'assettocorsa' as const : 'minecraft' as const;
     const plan = mercyGameId === 'assettocorsa'
-      ? await window.electronAPI?.connection?.negotiateAssettoCorsaEndpoint?.(request.serverId).catch(() => null)
-      : await window.electronAPI?.connection?.negotiateMinecraftEndpoint?.(request.serverId).catch(() => null);
+      ? await window.electronAPI?.connection?.negotiateAssettoCorsaEndpoint?.(request.serverId, supabaseAccessToken).catch(() => null)
+      : await window.electronAPI?.connection?.negotiateMinecraftEndpoint?.(request.serverId, supabaseAccessToken).catch(() => null);
     const best = plan?.candidates?.[0] ?? null;
     // relayIdUdp is set only for Assetto Corsa's dual TCP+UDP relay case
     // (see main.ts's negotiateAssettoCorsaEndpoint and

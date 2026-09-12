@@ -200,8 +200,10 @@ const electronAPI = {
   },
 
   connection: {
-    negotiateMinecraftEndpoint: (serverId: string) => ipcRenderer.invoke('connection:negotiateMinecraftEndpoint', serverId),
-    negotiateAssettoCorsaEndpoint: (serverId: string) => ipcRenderer.invoke('connection:negotiateAssettoCorsaEndpoint', serverId),
+    negotiateMinecraftEndpoint: (serverId: string, supabaseAccessToken?: string) =>
+      ipcRenderer.invoke('connection:negotiateMinecraftEndpoint', serverId, supabaseAccessToken),
+    negotiateAssettoCorsaEndpoint: (serverId: string, supabaseAccessToken?: string) =>
+      ipcRenderer.invoke('connection:negotiateAssettoCorsaEndpoint', serverId, supabaseAccessToken),
     connectViaRelay: (args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) =>
       ipcRenderer.invoke('connection:connectViaRelay', args),
     teardownRelayHost: (serverId: string) => ipcRenderer.invoke('connection:teardownRelayHost', serverId),

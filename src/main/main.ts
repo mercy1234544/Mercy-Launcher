@@ -483,16 +483,29 @@ function registerIpcHandlers() {
   const relayConnectionManager = new RelayConnectionManager(process.env.MERCY_RELAY_WS_URL || null);
   ipcMain.handle('presence:createJoinToken', (_, serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string; relayId?: string } | null) =>
     presenceManager.createJoinToken(serverId, mercyGameId, ttlMs, endpoint));
-  ipcMain.handle('connection:negotiateMinecraftEndpoint', async (_, serverId: string) => {
+  ipcMain.handle('connection:negotiateMinecraftEndpoint', async (_, serverId: string, supabaseAccessToken?: string) => {
     const info = await minecraftManager.getConnectionInfo(serverId);
     if (!info) return null;
     const lanAddress = info.lanAddress ? info.lanAddress.split(':').slice(0, -1).join(':') : null;
     const transport = info.edition === 'bedrock' ? 'udp' as const : 'tcp' as const;
     const portListening = info.edition === 'bedrock' ? (info.raknet?.reachable ?? null) : info.portListening;
-    const relay = relayConnectionManager.isConfigured()
-      ? { manager: relayConnectionManager, serverId, game: 'minecraft' as const, sessionToken: presenceManager.createJoinToken(serverId, 'minecraft', 60 * 60 * 1000) }
+    // Relay registration authenticates the HOST role. The Linux relay now
+    // verifies role:'host' hellos against a real Supabase session
+    // (signaling/auth.js's verifyHostToken -> supabase.auth.getUser()), not
+    // a local HS256 secret — so this needs the caller's real Supabase access
+    // token, never PresenceManager.createJoinToken()'s HMAC join token
+    // (that token authorizes one specific approved join_requests row for the
+    // CLIENT role and is a completely separate credential — see
+    // respondToJoinRequest's own token param below). No token means no
+    // relay attempt; direct/LAN candidates are unaffected either way.
+    const relay = relayConnectionManager.isConfigured() && supabaseAccessToken
+      ? { manager: relayConnectionManager, serverId, game: 'minecraft' as const, sessionToken: supabaseAccessToken }
       : null;
-    return connectionNegotiator.planHostEndpoint({ lanAddress, port: info.port, portListening, transport }, relay);
+    const plan = await connectionNegotiator.planHostEndpoint({ lanAddress, port: info.port, portListening, transport }, relay);
+    if (plan.candidates.length === 0 && relayConnectionManager.isConfigured() && !supabaseAccessToken) {
+      return { ...plan, unavailableExplanation: 'Not signed in to Mercy — cannot use the relay for this connection. Sign in and try again.' };
+    }
+    return plan;
   });
   // Real negotiation sourced from AssettoCorsaManager's own real facts (UDP
   // port, PID-scoped listening check) — but NOT a plain reuse of
@@ -506,7 +519,7 @@ function registerIpcHandlers() {
   // dual-transport handling — this registers/requests TWO independent
   // relay channels (see RelayConnectionManager's own ::transport-scoped
   // keying) rather than inventing a new protocol message for it.
-  ipcMain.handle('connection:negotiateAssettoCorsaEndpoint', async (_, serverId: string) => {
+  ipcMain.handle('connection:negotiateAssettoCorsaEndpoint', async (_, serverId: string, supabaseAccessToken?: string) => {
     const info = await assettoCorsaManager.getConnectionInfo(serverId);
     if (!info) return null;
 
@@ -526,8 +539,16 @@ function registerIpcHandlers() {
     if (!info.portListening) {
       return { candidates: [], relayAvailable: false, unavailableExplanation: 'The Assetto Corsa server\'s UDP port is not currently confirmed listening.' };
     }
+    // See negotiateMinecraftEndpoint's comment above: this must be the
+    // caller's real Supabase access token, not the HMAC join token — the
+    // relay verifies role:'host' hellos against Supabase Auth now, and a
+    // missing token must fail honestly rather than silently reuse the wrong
+    // credential.
+    if (!supabaseAccessToken) {
+      return { candidates: [], relayAvailable: false, unavailableExplanation: 'Not signed in to Mercy — cannot use the relay for this connection. Sign in and try again.' };
+    }
 
-    const sessionToken = presenceManager.createJoinToken(serverId, 'assettocorsa', 60 * 60 * 1000);
+    const sessionToken = supabaseAccessToken;
     const [tcpReg, udpReg] = await Promise.all([
       relayConnectionManager.ensureHostRegistered(serverId, 'assettocorsa', 'tcp', info.port, sessionToken),
       relayConnectionManager.ensureHostRegistered(serverId, 'assettocorsa', 'udp', info.port, sessionToken),

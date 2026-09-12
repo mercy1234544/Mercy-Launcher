@@ -231,8 +231,8 @@ interface ElectronAPI {
   };
 
   connection: {
-    negotiateMinecraftEndpoint: (serverId: string) => Promise<EndpointPlan | null>;
-    negotiateAssettoCorsaEndpoint: (serverId: string) => Promise<EndpointPlan | null>;
+    negotiateMinecraftEndpoint: (serverId: string, supabaseAccessToken?: string) => Promise<EndpointPlan | null>;
+    negotiateAssettoCorsaEndpoint: (serverId: string, supabaseAccessToken?: string) => Promise<EndpointPlan | null>;
     connectViaRelay: (args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) => Promise<RelayConnectResult>;
     teardownRelayHost: (serverId: string) => Promise<void>;
   };
