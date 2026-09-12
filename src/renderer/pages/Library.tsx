@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as Popover from '@radix-ui/react-popover';
 import {
   LayoutGrid, Gamepad2, Search, Loader2, Play, ExternalLink, Users, UserPlus, Check, X, WifiOff, RefreshCw,
-  FolderPlus, Settings, MapPin, Trash2, AlertTriangle, Globe2,
+  FolderPlus, Settings, MapPin, Trash2, AlertTriangle, Globe2, RotateCcw,
 } from 'lucide-react';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
 import { getGame } from '../config/games';
@@ -95,13 +95,29 @@ function DetectedGamesSection() {
     toast.success(`Added ${result.game?.name ?? 'game'}`);
   };
 
-  const locateGame = async (id: string) => {
+  // A manually-ADDED game's own path is relocated in place (relocateManual);
+  // any OTHER detected game (Steam/Epic/Microsoft Store/etc.) gets a path
+  // OVERRIDE layered on top of its normal detection instead — this is what
+  // lets a user correct a bad automatic detection (e.g. an unresolved
+  // Microsoft Store app id) without duplicating it into a second, separate
+  // "Manual Games" entry.
+  const changePath = async (id: string) => {
+    const game = games.find((g) => g.id === id);
     const picked = await window.electronAPI.openFile([{ name: 'Executable', extensions: ['exe'] }]);
     if (!picked) return;
-    const result = await window.electronAPI.games.relocateManual(id, picked);
+    const result = game?.platform === 'manual'
+      ? await window.electronAPI.games.relocateManual(id, picked)
+      : await window.electronAPI.games.setPathOverride(id, picked);
     if (!result.success) { toast.error(result.error || 'Could not update that path.'); return; }
     if (result.game) setGames((prev) => prev.map((g) => (g.id === id ? result.game! : g)));
     toast.success('Path updated');
+  };
+
+  const resetPath = async (id: string) => {
+    const result = await window.electronAPI.games.clearPathOverride(id);
+    if (!result.success) return;
+    if (result.game) setGames((prev) => prev.map((g) => (g.id === id ? result.game! : g)));
+    toast.success('Restored automatic detection');
   };
 
   const removeManualGame = async (id: string, name: string) => {
@@ -168,13 +184,13 @@ function DetectedGamesSection() {
                     <button onClick={() => navigate(mercyGame.path)} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Open Mercy Server Tools"><ExternalLink size={12} /> Server Tools</button>
                   )}
                   {g.pathMissing ? (
-                    <button onClick={() => locateGame(g.id)} className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1.5"><MapPin size={12} /> Locate</button>
+                    <button onClick={() => changePath(g.id)} className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1.5"><MapPin size={12} /> Locate</button>
                   ) : (
                     <button onClick={() => launch(g.id, g.name)} disabled={launchingId === g.id} className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1.5">
                       {launchingId === g.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Launch
                     </button>
                   )}
-                  <GameSettingsMenu game={g} onLocate={() => locateGame(g.id)} onRemove={() => removeManualGame(g.id, g.name)} />
+                  <GameSettingsMenu game={g} onChangePath={() => changePath(g.id)} onResetPath={() => resetPath(g.id)} onRemove={() => removeManualGame(g.id, g.name)} />
                 </div>
               </div>
             );
@@ -186,11 +202,12 @@ function DetectedGamesSection() {
 }
 
 // Small per-row gear — never more than a normal user needs: the real
-// detected path, which launcher/platform Mercy will actually use, and (only
-// for a manually-added game) Locate/Remove. Nothing here exposes anything a
-// normal user wasn't already shown; it's just a compact place to look
-// without cluttering the row itself.
-function GameSettingsMenu({ game, onLocate, onRemove }: { game: DetectedGame; onLocate: () => void; onRemove: () => void }) {
+// detected path/launch mechanism, and a way to correct it when automatic
+// detection is wrong (e.g. a Microsoft Store/Xbox-app game whose activation
+// id couldn't be resolved) — never limited to manually-added games only.
+function GameSettingsMenu({ game, onChangePath, onResetPath, onRemove }: {
+  game: DetectedGame; onChangePath: () => void; onResetPath: () => void; onRemove: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const isManual = game.platform === 'manual';
   return (
@@ -206,25 +223,27 @@ function GameSettingsMenu({ game, onLocate, onRemove }: { game: DetectedGame; on
           <div className="space-y-1.5 text-[11px]">
             <div>
               <p className="text-surface-500">Launches via</p>
-              <p className="text-surface-200 font-medium">{game.platformLabel}</p>
+              <p className="text-surface-200 font-medium">{game.platformLabel}{game.pathOverridden ? ' (path overridden)' : ''}</p>
             </div>
             <div>
               <p className="text-surface-500">Executable</p>
-              <p className="text-surface-200 font-mono break-all">{game.executablePath}{game.pathMissing ? ' (not found)' : ''}</p>
+              <p className="text-surface-200 font-mono break-all">{game.executablePath || '(resolved automatically at launch)'}{game.pathMissing ? ' (not found)' : ''}</p>
             </div>
           </div>
-          {isManual ? (
-            <div className="flex items-center gap-2 pt-1">
-              <button onClick={() => { setOpen(false); onLocate(); }} className="btn-secondary text-xs py-1.5 px-2.5 flex-1 flex items-center justify-center gap-1.5">
-                <MapPin size={12} /> Locate…
-              </button>
+          <div className="flex items-center gap-2 pt-1">
+            <button onClick={() => { setOpen(false); onChangePath(); }} className="btn-secondary text-xs py-1.5 px-2.5 flex-1 flex items-center justify-center gap-1.5">
+              <MapPin size={12} /> {isManual ? 'Locate…' : 'Change Path…'}
+            </button>
+            {isManual ? (
               <button onClick={() => { setOpen(false); onRemove(); }} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center justify-center gap-1.5 text-danger hover:bg-danger/10" title="Remove this manually added game">
                 <Trash2 size={12} />
               </button>
-            </div>
-          ) : (
-            <p className="text-[10.5px] text-surface-600 pt-1">Detected automatically — rescan if this ever moves.</p>
-          )}
+            ) : game.pathOverridden && (
+              <button onClick={() => { setOpen(false); onResetPath(); }} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center justify-center gap-1.5" title="Restore automatic detection">
+                <RotateCcw size={12} />
+              </button>
+            )}
+          </div>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

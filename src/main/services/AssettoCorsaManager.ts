@@ -392,6 +392,42 @@ export class AssettoCorsaManager {
     };
   }
 
+  /** This machine's own real, non-internal IPv4 address — never a
+   *  fabricated/example address, null when none is found. Same real
+   *  technique MinecraftManager.getLanAddress() already uses; kept as its
+   *  own small copy here rather than a shared abstraction, matching this
+   *  file's own header note on why AC isn't folded into a generic
+   *  "GameServerManager" — there are too few real implementations to
+   *  compare against to safely extract shared code yet. */
+  private getLanAddress(): string | null {
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const iface of ifaces[name] || []) {
+        if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+      }
+    }
+    return null;
+  }
+
+  /** Real connection facts for THIS server, for the exact same join-
+   *  negotiation flow Minecraft already uses (see
+   *  ConnectionNegotiator.planHostEndpoint(), which is game-agnostic and
+   *  requires nothing AC-specific — this is the one piece that was
+   *  missing). `portListening` is never assumed true just because the
+   *  process is running: it's the real, PID-scoped OS query
+   *  (isProcessListeningOnUdpPort — the same technique that fixed the
+   *  "UDP port never came up" readiness bug) confirming the real UDP game
+   *  socket is genuinely bound right now. */
+  async getConnectionInfo(id: string): Promise<{ lanAddress: string | null; port: number; portListening: boolean | null } | null> {
+    const server = this.getServer(id);
+    if (!server) return null;
+    const proc = this.processes.get(id);
+    const portListening = server.status === 'running' && server.pid
+      ? await this.isProcessListeningOnUdpPort(server.pid, server.udpPort)
+      : (proc ? null : false); // 'starting' with no confirmed bind yet is honestly unknown, not false
+    return { lanAddress: this.getLanAddress(), port: server.udpPort, portListening };
+  }
+
   /** Real per-server content staging — the root-cause fix for "file not
    *  found" errors under content/... for cars/tracks that genuinely DO
    *  exist in contentRoot. The real acServer.exe process resolves

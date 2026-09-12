@@ -212,16 +212,26 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
   },
 
   approveJoin: async (request) => {
-    // Minecraft only this milestone (Phase 5) — negotiate a real endpoint
-    // on THIS machine (LAN, then UPnP, then the real Mercy relay — see
-    // ConnectionNegotiator's own direct-first priority), then mint a real,
-    // single-use, short-lived token bound to it. A relay candidate is only
-    // ever produced after a real, successful registration round trip —
-    // never assumed available.
-    const plan = await window.electronAPI?.connection?.negotiateMinecraftEndpoint?.(request.serverId).catch(() => null);
+    // Negotiate a real endpoint on THIS machine (LAN, then UPnP, then the
+    // real Mercy relay — see ConnectionNegotiator's own direct-first
+    // priority), then mint a real, single-use, short-lived token bound to
+    // it. A relay candidate is only ever produced after a real, successful
+    // registration round trip — never assumed available. Minecraft and
+    // Assetto Corsa each source their own real connectivity facts (see
+    // main.ts's two negotiate* IPC handlers) but share the exact same
+    // negotiator/relay/tunnel code underneath — never a second, parallel
+    // connection system per game.
+    const mercyGameId = request.mercyGameId === 'assettocorsa' ? 'assettocorsa' as const : 'minecraft' as const;
+    const plan = mercyGameId === 'assettocorsa'
+      ? await window.electronAPI?.connection?.negotiateAssettoCorsaEndpoint?.(request.serverId).catch(() => null)
+      : await window.electronAPI?.connection?.negotiateMinecraftEndpoint?.(request.serverId).catch(() => null);
     const best = plan?.candidates?.[0] ?? null;
-    const endpoint = best ? { strategy: best.strategy, address: best.address, relayId: best.relayId } : null;
-    const token = await window.electronAPI?.presence?.createJoinToken?.(request.serverId, 'minecraft', JOIN_TOKEN_TTL_MS, endpoint).catch(() => null);
+    // relayIdUdp is set only for Assetto Corsa's dual TCP+UDP relay case
+    // (see main.ts's negotiateAssettoCorsaEndpoint and
+    // RelayConnectionManager's ::transport-scoped keying) — absent/undefined
+    // for every other game, which only ever needs one relay channel.
+    const endpoint = best ? { strategy: best.strategy, address: best.address, relayId: best.relayId, relayIdUdp: best.relayIdUdp } : null;
+    const token = await window.electronAPI?.presence?.createJoinToken?.(request.serverId, mercyGameId, JOIN_TOKEN_TTL_MS, endpoint).catch(() => null);
     const result = await respondToJoinRequest(request.id, true, token || undefined, endpoint);
     if (result.error) return { error: result.error };
     await get().refresh();
@@ -234,7 +244,10 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
     const key = request.id;
     const setStatus = (status: GameConnectionStatus) => set((s) => ({ connectionStatus: { ...s.connectionStatus, [key]: status } }));
     if (!request.endpoint) { setStatus({ state: 'failed', detail: 'The host did not provide a connection endpoint.' }); return; }
-    const transport: 'tcp' | 'udp' = request.edition === 'bedrock' ? 'udp' : 'tcp';
+    // Bedrock (RakNet) and Assetto Corsa's own game port are both real UDP
+    // protocols — see TunnelProxy.ts's own header on why a TCP proxy is
+    // structurally incapable of carrying either.
+    const transport: 'tcp' | 'udp' = request.edition === 'bedrock' || request.mercyGameId === 'assettocorsa' ? 'udp' : 'tcp';
 
     if (request.endpoint.strategy === 'lan-direct' || request.endpoint.strategy === 'upnp-direct') {
       // Reported as the real, negotiated address — not independently
@@ -255,6 +268,27 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
       if (!request.endpoint.relayId || !request.token) { setStatus({ state: 'failed', detail: 'Missing relay authorization.' }); return; }
       setStatus({ state: 'connecting-relay' });
       const listenPort = 40000 + Math.floor(Math.random() * 5000);
+
+      // Assetto Corsa needs BOTH a TCP and a UDP relay channel to the same
+      // local port (see main.ts's negotiateAssettoCorsaEndpoint) — connect
+      // both, sharing the SAME listenPort (a TCP listener and a UDP socket
+      // can coexist on one port number; they're independent namespaces).
+      // Every other game only ever has relayIdUdp unset and takes the
+      // original single-channel path unchanged.
+      if (request.endpoint.relayIdUdp) {
+        const [tcpResult, udpResult]: { success: boolean; localAddress?: string; reason?: string }[] = await Promise.all([
+          window.electronAPI?.connection?.connectViaRelay?.({
+            joinRequestId: request.id, relayId: request.endpoint.relayId, token: request.token!, transport: 'tcp', listenPort,
+          }).catch((e) => ({ success: false, reason: e?.message })) as Promise<any>,
+          window.electronAPI?.connection?.connectViaRelay?.({
+            joinRequestId: request.id, relayId: request.endpoint.relayIdUdp, token: request.token!, transport: 'udp', listenPort,
+          }).catch((e) => ({ success: false, reason: e?.message })) as Promise<any>,
+        ]);
+        if (tcpResult?.success && udpResult?.success) setStatus({ state: 'connected-relay', localAddress: tcpResult.localAddress });
+        else setStatus({ state: 'failed', detail: tcpResult?.reason || udpResult?.reason || 'Could not connect through the Mercy relay (TCP+UDP).' });
+        return;
+      }
+
       const result: { success: boolean; localAddress?: string; reason?: string } | undefined = await window.electronAPI?.connection?.connectViaRelay?.({
         joinRequestId: request.id, relayId: request.endpoint.relayId, token: request.token, transport, listenPort,
       }).catch((e) => ({ success: false, reason: e?.message }));

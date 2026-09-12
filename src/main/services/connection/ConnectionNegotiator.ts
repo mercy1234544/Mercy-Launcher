@@ -37,6 +37,15 @@ export interface EndpointCandidate {
   /** 'relay' only — the real relay's own identifier for this host
    *  registration, required by the joining side's connectViaRelay() call. */
   relayId?: string;
+  /** Set only when a SECOND, independent UDP relay registration exists for
+   *  the same server alongside the primary (TCP) one — Assetto Corsa needs
+   *  both a TCP and a UDP relay channel to the same real port (see
+   *  RelayConnectionManager's own header on why). Absent for every other
+   *  game today, which only ever needs one transport. Never set by
+   *  planHostEndpoint() itself (this is a single-transport function) — only
+   *  by a caller that explicitly negotiated a second transport, such as
+   *  main.ts's Assetto-Corsa-specific negotiation handler. */
+  relayIdUdp?: string;
   note: string;
 }
 

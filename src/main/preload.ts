@@ -183,6 +183,8 @@ const electronAPI = {
     addManual: (execPath: string, name?: string) => ipcRenderer.invoke('games:addManual', execPath, name),
     removeManual: (id: string) => ipcRenderer.invoke('games:removeManual', id),
     relocateManual: (id: string, newExecPath: string) => ipcRenderer.invoke('games:relocateManual', id, newExecPath),
+    setPathOverride: (id: string, execPath: string) => ipcRenderer.invoke('games:setPathOverride', id, execPath),
+    clearPathOverride: (id: string) => ipcRenderer.invoke('games:clearPathOverride', id),
   },
 
   presence: {
@@ -198,6 +200,7 @@ const electronAPI = {
 
   connection: {
     negotiateMinecraftEndpoint: (serverId: string) => ipcRenderer.invoke('connection:negotiateMinecraftEndpoint', serverId),
+    negotiateAssettoCorsaEndpoint: (serverId: string) => ipcRenderer.invoke('connection:negotiateAssettoCorsaEndpoint', serverId),
     connectViaRelay: (args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) =>
       ipcRenderer.invoke('connection:connectViaRelay', args),
     teardownRelayHost: (serverId: string) => ipcRenderer.invoke('connection:teardownRelayHost', serverId),

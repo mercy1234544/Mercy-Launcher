@@ -185,6 +185,7 @@ export default function AssettoCorsaServerPanel() {
 // ── Overview ──────────────────────────────────────────────────────────────
 function OverviewTab({ server }: { server: AssettoCorsaServer }) {
   const [stats, setStats] = useState<{ pid: number | null; uptimeMs: number | null; cpuPercent: number | null; memoryBytes: number | null; metricsAvailable: boolean } | null>(null);
+  const [connPlan, setConnPlan] = useState<EndpointPlan | null | undefined>(undefined);
   const isRunning = server.status === 'running' || server.status === 'starting';
 
   useEffect(() => {
@@ -195,6 +196,17 @@ function OverviewTab({ server }: { server: AssettoCorsaServer }) {
     const t = setInterval(poll, 3000);
     return () => { cancelled = true; clearInterval(t); };
   }, [server.id, isRunning]);
+
+  // Real check of whether a friend could actually reach this server right
+  // now — the SAME negotiation a friend's Join approval actually uses (see
+  // useFriendsPresence.ts's approveJoin), never a separate, only-for-display
+  // guess. Only meaningful once the real UDP port is confirmed bound.
+  useEffect(() => {
+    if (server.status !== 'running') { setConnPlan(undefined); return; }
+    let cancelled = false;
+    window.electronAPI.connection?.negotiateAssettoCorsaEndpoint?.(server.id).then((plan) => { if (!cancelled) setConnPlan(plan); }).catch(() => { if (!cancelled) setConnPlan(null); });
+    return () => { cancelled = true; };
+  }, [server.id, server.status]);
 
   const cards = [
     { label: 'Mercy Server', value: server.status === 'running' ? 'Running' : server.status === 'starting' ? 'Starting' : server.status === 'stopping' ? 'Stopping' : server.status === 'error' ? 'Error' : 'Stopped', icon: FlagTriangleRight },
@@ -232,6 +244,23 @@ function OverviewTab({ server }: { server: AssettoCorsaServer }) {
           {server.lobbyStatus === 'unreachable' && (
             <p className="text-[11px] text-surface-500 mt-1">This only affects public matchmaking visibility. Friends can still connect directly, over LAN, or through the Mercy relay.</p>
           )}
+        </Panel>
+      )}
+      {/* Real result of the SAME negotiation a friend's Join approval uses
+          (never a separate, display-only guess) — distinct from both
+          "Mercy Server" (is the local process/port genuinely up) and
+          "AC Public Lobby" (does the official lobby accept it) above. */}
+      {server.status === 'running' && (
+        <Panel padding="sm">
+          <div className="flex items-center gap-2">
+            {connPlan === undefined ? (
+              <><Loader2 size={13} className="animate-spin text-surface-500 shrink-0" /><p className="text-xs text-surface-400">Checking Mercy Connection…</p></>
+            ) : connPlan && (connPlan.candidates.length > 0 || connPlan.relayAvailable) ? (
+              <><CheckCircle2 size={13} className="text-emerald-400 shrink-0" /><p className="text-xs text-surface-300"><span className="font-semibold">Mercy Connection:</span> Ready — friends can join {connPlan.candidates[0]?.strategy === 'relay' ? 'through the Mercy relay' : 'directly'}, no port forwarding required.</p></>
+            ) : (
+              <><XCircle size={13} className="text-amber-400 shrink-0" /><p className="text-xs text-surface-300"><span className="font-semibold">Mercy Connection:</span> {connPlan?.unavailableExplanation || 'Not available yet.'}</p></>
+            )}
+          </div>
         </Panel>
       )}
       {server.pid && isRunning && (

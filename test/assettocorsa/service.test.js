@@ -343,10 +343,20 @@ async function runLifecycleTests(mgr, serverId, serverPath, port) {
   ok('getProcessStats returns a real PID while running', stats.pid === afterStart.pid);
   ok('getProcessStats reports uptime while running', typeof stats.uptimeMs === 'number' && stats.uptimeMs >= 0);
 
+  // getConnectionInfo() — the real facts the Mercy relay/join negotiation
+  // (ConnectionNegotiator.planHostEndpoint, already game-agnostic) needs to
+  // offer a friend a real connection to THIS server without port forwarding.
+  const connInfoRunning = await mgr.getConnectionInfo(serverId);
+  ok('getConnectionInfo reports the real configured UDP port while running', connInfoRunning?.port === port);
+  ok('getConnectionInfo confirms the port is genuinely listening via the real PID-scoped check, not assumed from status alone', connInfoRunning?.portListening === true);
+  ok('getConnectionInfo reports a real, non-fabricated LAN address (or honestly null) — never a placeholder', connInfoRunning?.lanAddress === null || typeof connInfoRunning?.lanAddress === 'string');
+
   mgr.stopServer(serverId, false);
   await new Promise((resolve) => { const check = () => (!mgr.isRunning(serverId) ? resolve() : setTimeout(check, 200)); check(); });
   ok('stopServer genuinely terminates the real process', !mgr.isRunning(serverId));
   ok('an intentional stop leaves status as stopped, not error', mgr.getServer(serverId).status === 'stopped');
+  const connInfoStopped = await mgr.getConnectionInfo(serverId);
+  ok('getConnectionInfo honestly reports the port as not listening once the server is genuinely stopped', connInfoStopped?.portListening === false);
   const statsAfterStop = await mgr.getProcessStats(serverId);
   ok('getProcessStats reports no PID after a real stop', statsAfterStop.pid === null && statsAfterStop.metricsAvailable === false);
 

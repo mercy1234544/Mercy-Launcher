@@ -18,6 +18,7 @@
 // test, not a claimed cross-machine test (see Step 13's own requirement not
 // to fabricate one).
 const net = require('net');
+const dgram = require('dgram');
 const path = require('path');
 const WebSocket = require('ws');
 const { RelayConnectionManager } = require(path.resolve(__dirname, '../../dist/main/services/connection/RelayConnectionManager.js'));
@@ -79,6 +80,14 @@ function startEchoServer() {
   });
 }
 
+function startUdpEchoServer() {
+  return new Promise((resolve) => {
+    const server = dgram.createSocket('udp4');
+    server.on('message', (msg, rinfo) => server.send(msg, rinfo.port, rinfo.address));
+    server.bind(0, '127.0.0.1', () => resolve({ server, port: server.address().port }));
+  });
+}
+
 (async () => {
   const { wss, port: relayPort } = await startFakeRelay();
   const relayUrl = `ws://127.0.0.1:${relayPort}`;
@@ -134,6 +143,54 @@ function startEchoServer() {
 
   const deniedRelayId = await requesterManager.connectViaRelay('join-req-3', 'not-a-real-relay-id', 'client-token', 'tcp', clientListenPort + 2);
   ok('requesting relay for an unregistered relayId is honestly denied', deniedRelayId.success === false);
+
+  // ── Assetto Corsa's real requirement: BOTH TCP and UDP registered for
+  // the SAME serverId, independently — TCP for the connection handshake/
+  // chat, UDP for real-time car data (the same convention every AC
+  // dedicated-server port-forwarding guide documents: forward both
+  // protocols on the same port number). Proves the ::transport-scoped
+  // registration key actually allows this, and that a single teardownHost
+  // call tears down both. ─────────────────────────────────────────────────
+  const { server: udpEchoServer, port: udpEchoPort } = await startUdpEchoServer();
+  const dualManager = new RelayConnectionManager(relayUrl);
+  const [tcpReg, udpReg] = await Promise.all([
+    dualManager.ensureHostRegistered('srv-dual', 'assettocorsa', 'tcp', echoPort, 'dual-host-token'),
+    dualManager.ensureHostRegistered('srv-dual', 'assettocorsa', 'udp', udpEchoPort, 'dual-host-token'),
+  ]);
+  ok('registering the SAME serverId for TCP succeeds', tcpReg.success === true);
+  ok('registering the SAME serverId for UDP succeeds independently of the TCP registration', udpReg.success === true);
+  ok('TCP and UDP registrations for the same server get genuinely DIFFERENT relayIds — two independent channels, not one shared/overwritten one', tcpReg.relayId !== udpReg.relayId);
+
+  const dualRequester = new RelayConnectionManager(relayUrl);
+  const dualTcpListenPort = clientListenPort + 10;
+  const dualUdpListenPort = clientListenPort + 11;
+  const [tcpClientResult, udpClientResult] = await Promise.all([
+    dualRequester.connectViaRelay('join-req-dual', tcpReg.relayId, 'dual-client-token', 'tcp', dualTcpListenPort),
+    dualRequester.connectViaRelay('join-req-dual', udpReg.relayId, 'dual-client-token', 'udp', dualUdpListenPort),
+  ]);
+  ok('the client side can join BOTH the TCP and UDP channels for the same join request', tcpClientResult.success === true && udpClientResult.success === true);
+
+  const tcpRoundTrip = await new Promise((resolve, reject) => {
+    const c = net.createConnection({ host: '127.0.0.1', port: dualTcpListenPort }, () => c.write(Buffer.from('ac-tcp')));
+    c.on('data', (d) => { c.end(); resolve(d.toString()); });
+    c.on('error', reject);
+    setTimeout(() => reject(new Error('tcp timed out')), 5000);
+  });
+  ok('real TCP bytes genuinely round-trip over the dedicated TCP channel', tcpRoundTrip === 'ac-tcp');
+
+  const udpRoundTrip = await new Promise((resolve, reject) => {
+    const c = dgram.createSocket('udp4');
+    c.on('message', (msg) => { c.close(); resolve(msg.toString()); });
+    c.send(Buffer.from('ac-udp'), dualUdpListenPort, '127.0.0.1');
+    setTimeout(() => reject(new Error('udp timed out')), 5000);
+  });
+  ok('real UDP datagrams genuinely round-trip over the SEPARATE UDP channel, independent of the TCP one', udpRoundTrip === 'ac-udp');
+
+  dualManager.teardownHost('srv-dual');
+  const afterDualTeardownTcp = await dualRequester.connectViaRelay('join-req-dual-2', tcpReg.relayId, 'dual-client-token', 'tcp', dualTcpListenPort + 1);
+  const afterDualTeardownUdp = await dualRequester.connectViaRelay('join-req-dual-3', udpReg.relayId, 'dual-client-token', 'udp', dualUdpListenPort + 1);
+  ok('a single teardownHost() call tears down BOTH the TCP and UDP registrations for that server, not just one', afterDualTeardownTcp.success === false && afterDualTeardownUdp.success === false);
+  udpEchoServer.close();
 
   wss.close();
   echoServer.close();

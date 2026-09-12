@@ -186,6 +186,77 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const resultsMs = await scannerMs.scan();
     ok('Microsoft Store: curated allowlist match finds the real installed UWP game with the correct mercyGameId', resultsMs.some((g) => g.platform === 'microsoft' && g.mercyGameId === 'minecraft'));
 
+    // ── Microsoft Store/Xbox launch-id fix: the real reported bug was
+    // launch() using Mercy's own internal game id ("minecraft-uwp") as if
+    // it were a real Windows AUMID, which silently opened a bare Explorer
+    // window instead of launching anything. The fix resolves a REAL AUMID
+    // via Get-StartApps (startAppsOverride here stands in for that real,
+    // machine-specific query) and never falls back to a fabricated one. ──
+    const msKnownWithFallback = [{
+      id: 'minecraft-uwp', name: 'Minecraft (Microsoft Store)', mercyGameId: 'minecraft', mercyStatus: 'supported',
+      microsoftPackageFamilyName: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe', microsoftDisplayNameFallback: 'Minecraft',
+    }];
+    const scannerMsAumid = new GameScanner(userDataRoot, {
+      steamPathOverride: null, knownGames: msKnownWithFallback, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {},
+      microsoftPackagesOverride: [{ packageFamilyName: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe', installLocation: path.join(base, 'minecraft-uwp') }],
+      startAppsOverride: [{ name: 'Minecraft', appId: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe!App' }],
+    });
+    const resultsMsAumid = await scannerMsAumid.scan();
+    const mcUwp = resultsMsAumid.find((g) => g.id === 'microsoft-minecraft-uwp');
+    ok('a real AUMID is resolved and stored on the detected game, distinct from Mercy\'s own internal id', mcUwp?.microsoftAppId === 'Microsoft.MinecraftUWP_8wekyb3d8bbwe!App');
+    ok('the resolved AUMID is never just the internal game id (the actual root cause of the reported bug)', mcUwp?.microsoftAppId !== mcUwp?.id.replace('microsoft-', ''));
+
+    // Xbox-app-managed install (e.g. under C:\XboxGames\...) where the
+    // legacy package-family Get-AppxPackage lookup finds nothing, but the
+    // real Start Menu tile ("Minecraft") still resolves via the display-
+    // name fallback — this is what makes detection resilient to Microsoft
+    // having moved distribution without this scanner knowing the exact
+    // modern package family name.
+    const scannerXboxApp = new GameScanner(userDataRoot, {
+      steamPathOverride: null, knownGames: msKnownWithFallback, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {},
+      microsoftPackagesOverride: [], // Get-AppxPackage-style lookup finds nothing
+      startAppsOverride: [{ name: 'Minecraft', appId: 'Microsoft.MinecraftUWP.XboxApp_8wekyb3d8bbwe!App' }],
+    });
+    // microsoftPackagesOverride: [] short-circuits scanMicrosoftStore entirely in
+    // the current implementation (see its own early-return), so exercise the
+    // real non-override branch's fallback resolution directly instead.
+    const resolvedFallbackId = await scannerXboxApp.resolveMicrosoftAppId?.(msKnownWithFallback[0]);
+    ok('resolveMicrosoftAppId is exposed for real, deterministic testing of the display-name fallback', typeof scannerXboxApp.resolveMicrosoftAppId === 'function');
+    ok('the display-name fallback resolves a real AUMID even when the package-family match fails entirely', resolvedFallbackId === 'Microsoft.MinecraftUWP.XboxApp_8wekyb3d8bbwe!App');
+
+    // ── Path overrides (gear/settings "Change Path") — corrects an
+    // ALREADY-DETECTED game's launch path without creating a duplicate
+    // manual entry, and without ever fabricating a value. ─────────────────
+    const overrideExe = path.join(base, 'user-selected-minecraft.exe');
+    fs.writeFileSync(overrideExe, 'stand-in exe');
+    const badOverride = scannerMsAumid.setPathOverride(mcUwp.id, path.join(base, 'does-not-exist.exe'));
+    ok('setPathOverride refuses a path that does not actually exist', badOverride.success === false);
+    const goodOverride = scannerMsAumid.setPathOverride(mcUwp.id, overrideExe);
+    ok('setPathOverride accepts a real, verified executable', goodOverride.success === true);
+    ok('the override is applied immediately, without waiting for a rescan', scannerMsAumid.getCached().find((g) => g.id === mcUwp.id)?.executablePath === path.resolve(overrideExe));
+    ok('the overridden game is flagged as pathOverridden', scannerMsAumid.getCached().find((g) => g.id === mcUwp.id)?.pathOverridden === true);
+    ok('an override for an unknown game id is rejected honestly', scannerMsAumid.setPathOverride('not-a-real-id', overrideExe).success === false);
+
+    // Persists across a fresh GameScanner instance reading the same real
+    // userData directory (exactly like an app restart).
+    const reopened = new GameScanner(userDataRoot, {
+      steamPathOverride: null, knownGames: msKnownWithFallback, fallbackLibraryFoldersOverride: [],
+      epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {},
+      microsoftPackagesOverride: [{ packageFamilyName: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe', installLocation: path.join(base, 'minecraft-uwp') }],
+      startAppsOverride: [{ name: 'Minecraft', appId: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe!App' }],
+    });
+    await reopened.scan();
+    ok('a path override survives an app restart (a fresh GameScanner reading the same userData)', reopened.getCached().find((g) => g.id === mcUwp.id)?.executablePath === path.resolve(overrideExe));
+
+    const cleared = scannerMsAumid.clearPathOverride(mcUwp.id);
+    ok('clearPathOverride restores normal (non-overridden) state', cleared.success === true && cleared.game?.pathOverridden === false);
+    ok('clearing an override for a game with none is reported honestly, not as a fake success', scannerMsAumid.clearPathOverride(mcUwp.id).success === false);
+
     // ── Multi-drive: Steam library on a "second drive" (a second real folder) ─
     const steamPrimary = path.join(base, 'steam-multi-primary');
     const steamSecondary = path.join(base, 'steam-multi-secondary');

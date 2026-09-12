@@ -32,27 +32,39 @@ interface HostRegistration {
 }
 
 export class RelayConnectionManager {
-  /** Keyed by serverId — a Mercy Launcher instance can host more than one
-   *  Mercy-managed server at once, each needing its own registration. */
+  /** Keyed by `${serverId}::${transport}`, NOT just serverId — Assetto
+   *  Corsa genuinely needs BOTH a TCP and a UDP registration for the SAME
+   *  server (TCP for the connection handshake/chat, UDP for real-time car
+   *  data — the same real, documented convention every AC dedicated-server
+   *  port-forwarding guide uses: forward BOTH protocols on the same port
+   *  number). Minecraft/FiveM only ever register one transport per server,
+   *  so for them this key is functionally identical to keying by serverId
+   *  alone — this change is additive, not a behavior change for them. */
   private hostRegistrations = new Map<string, HostRegistration>();
 
   constructor(private relayUrl: string | null) {}
 
   isConfigured(): boolean { return !!this.relayUrl; }
 
+  private key(serverId: string, transport: RelayTransport): string { return `${serverId}::${transport}`; }
+
   /** HOST side: connect to the relay (if not already connected for this
-   *  server), authenticate with the given session token, and register this
-   *  server's real local port. Real network call — fails honestly if the
-   *  relay is unreachable, rejects the token, or times out. Idempotent:
-   *  calling this again for a serverId that's already registered just
-   *  returns the existing relayId without a second round trip. */
+   *  server+transport), authenticate with the given session token, and
+   *  register this server's real local port. Real network call — fails
+   *  honestly if the relay is unreachable, rejects the token, or times out.
+   *  Idempotent: calling this again for a server+transport that's already
+   *  registered just returns the existing relayId without a second round
+   *  trip. Call once per transport a game actually needs (see class header)
+   *  — each produces its own independent relayId/signaling connection, so
+   *  a caller needing both TCP and UDP (Assetto Corsa) calls this twice. */
   async ensureHostRegistered(
     serverId: string, game: RelayProtocolGame, transport: RelayTransport, localPort: number, sessionToken: string,
   ): Promise<RelayHostResult> {
     if (!this.relayUrl) return { success: false, reason: 'No Mercy relay is configured.' };
-    const existing = this.hostRegistrations.get(serverId);
+    const key = this.key(serverId, transport);
+    const existing = this.hostRegistrations.get(key);
     if (existing && existing.client.getState() === 'ready') return { success: true, relayId: existing.relayId };
-    if (existing) this.teardownHost(serverId);
+    if (existing) this.teardownRegistration(key);
 
     return new Promise((resolve) => {
       let settled = false;
@@ -62,7 +74,7 @@ export class RelayConnectionManager {
       const client = new RelaySignalingClient(this.relayUrl!, {
         onHostRegistered: (relayId) => {
           clearTimeout(timer);
-          this.hostRegistrations.set(serverId, { client, relayId, localPort, transport, channels: new Map(), proxies: new Map() });
+          this.hostRegistrations.set(key, { client, relayId, localPort, transport, channels: new Map(), proxies: new Map() });
           finish({ success: true, relayId });
         },
         // See class header: this manager treats a relay-granted arriving on
@@ -70,9 +82,9 @@ export class RelayConnectionManager {
         // against one of our registrations succeeded" — the documented
         // interpretation of protocol.ts's generic RelayGrantedMessage,
         // since the protocol defines no separate host-notification message.
-        onRelayGranted: (channelId) => this.handleHostRelayGranted(serverId, channelId),
-        onRelayClosed: (channelId) => this.handleHostRelayClosed(serverId, channelId),
-        onRelayData: (channelId, data) => this.hostRegistrations.get(serverId)?.channels.get(channelId)?.handleIncomingData(data),
+        onRelayGranted: (channelId) => this.handleHostRelayGranted(key, channelId),
+        onRelayClosed: (channelId) => this.handleHostRelayClosed(key, channelId),
+        onRelayData: (channelId, data) => this.hostRegistrations.get(key)?.channels.get(channelId)?.handleIncomingData(data),
       });
 
       client.connect(sessionToken, 'host').then(() => {
@@ -81,8 +93,8 @@ export class RelayConnectionManager {
     });
   }
 
-  private async handleHostRelayGranted(serverId: string, channelId: string): Promise<void> {
-    const reg = this.hostRegistrations.get(serverId);
+  private async handleHostRelayGranted(key: string, channelId: string): Promise<void> {
+    const reg = this.hostRegistrations.get(key);
     if (!reg) return;
     const channel = new RelayDataChannel(reg.client, channelId);
     reg.channels.set(channelId, channel);
@@ -91,8 +103,8 @@ export class RelayConnectionManager {
     try { await proxy.start(); } catch { reg.channels.delete(channelId); reg.proxies.delete(channelId); }
   }
 
-  private handleHostRelayClosed(serverId: string, channelId: string): void {
-    const reg = this.hostRegistrations.get(serverId);
+  private handleHostRelayClosed(key: string, channelId: string): void {
+    const reg = this.hostRegistrations.get(key);
     if (!reg) return;
     reg.channels.get(channelId)?.handleRemoteClose();
     reg.proxies.get(channelId)?.stop();
@@ -100,16 +112,24 @@ export class RelayConnectionManager {
     reg.proxies.delete(channelId);
   }
 
-  /** Real cleanup — closes every relayed connection for this server and
-   *  disconnects its signaling socket. Called when the server actually
-   *  stops (see the caller in main.ts), never left to time out on its own
-   *  when the real state is already known. */
-  teardownHost(serverId: string): void {
-    const reg = this.hostRegistrations.get(serverId);
+  private teardownRegistration(key: string): void {
+    const reg = this.hostRegistrations.get(key);
     if (!reg) return;
     for (const proxy of reg.proxies.values()) proxy.stop();
     reg.client.close();
-    this.hostRegistrations.delete(serverId);
+    this.hostRegistrations.delete(key);
+  }
+
+  /** Real cleanup — closes every relayed connection for this server (every
+   *  transport it registered, TCP and/or UDP) and disconnects its
+   *  signaling socket(s). Called when the server actually stops (see the
+   *  caller in main.ts), never left to time out on its own when the real
+   *  state is already known. */
+  teardownHost(serverId: string): void {
+    const prefix = `${serverId}::`;
+    for (const key of Array.from(this.hostRegistrations.keys())) {
+      if (key.startsWith(prefix)) this.teardownRegistration(key);
+    }
   }
 
   /** CLIENT side: connect to the relay, authenticate with the join token

@@ -459,6 +459,8 @@ function registerIpcHandlers() {
   ipcMain.handle('games:addManual', (_, execPath: string, name?: string) => gameScanner.addManualGame(execPath, name));
   ipcMain.handle('games:removeManual', (_, id: string) => gameScanner.removeManualGame(id));
   ipcMain.handle('games:relocateManual', (_, id: string, newExecPath: string) => gameScanner.relocateManualGame(id, newExecPath));
+  ipcMain.handle('games:setPathOverride', (_, id: string, execPath: string) => gameScanner.setPathOverride(id, execPath));
+  ipcMain.handle('games:clearPathOverride', (_, id: string) => gameScanner.clearPathOverride(id));
 
   // Presence / Friends foundation (see PresenceManager.ts's own header comment).
   ipcMain.handle('presence:getLocal', () => presenceManager.getLocalPresence());
@@ -490,6 +492,61 @@ function registerIpcHandlers() {
       ? { manager: relayConnectionManager, serverId, game: 'minecraft' as const, sessionToken: presenceManager.createJoinToken(serverId, 'minecraft', 60 * 60 * 1000) }
       : null;
     return connectionNegotiator.planHostEndpoint({ lanAddress, port: info.port, portListening, transport }, relay);
+  });
+  // Real negotiation sourced from AssettoCorsaManager's own real facts (UDP
+  // port, PID-scoped listening check) — but NOT a plain reuse of
+  // planHostEndpoint(), because Assetto Corsa has a real requirement
+  // Minecraft/FiveM don't: a normal client connection needs BOTH a TCP and
+  // a UDP path to the SAME port (TCP for the connection handshake/chat, UDP
+  // for real-time car data — the same convention every AC dedicated-server
+  // port-forwarding guide documents). LAN-direct already covers both
+  // transports for free (the friend's own OS/game client dials both
+  // protocols at that one address), so only the relay path needs explicit
+  // dual-transport handling — this registers/requests TWO independent
+  // relay channels (see RelayConnectionManager's own ::transport-scoped
+  // keying) rather than inventing a new protocol message for it.
+  ipcMain.handle('connection:negotiateAssettoCorsaEndpoint', async (_, serverId: string) => {
+    const info = await assettoCorsaManager.getConnectionInfo(serverId);
+    if (!info) return null;
+
+    if (info.lanAddress) {
+      return {
+        candidates: [{
+          strategy: 'lan-direct' as const, address: `${info.lanAddress}:${info.port}`,
+          note: 'Works only if the joining friend is on this same local network. Assetto Corsa needs both TCP and UDP on this port, which a LAN connection provides automatically.',
+        }],
+        relayAvailable: false, unavailableExplanation: null,
+      };
+    }
+
+    if (!relayConnectionManager.isConfigured()) {
+      return { candidates: [], relayAvailable: false, unavailableExplanation: 'No Mercy relay is configured, and no local network address was found for this server.' };
+    }
+    if (!info.portListening) {
+      return { candidates: [], relayAvailable: false, unavailableExplanation: 'The Assetto Corsa server\'s UDP port is not currently confirmed listening.' };
+    }
+
+    const sessionToken = presenceManager.createJoinToken(serverId, 'assettocorsa', 60 * 60 * 1000);
+    const [tcpReg, udpReg] = await Promise.all([
+      relayConnectionManager.ensureHostRegistered(serverId, 'assettocorsa', 'tcp', info.port, sessionToken),
+      relayConnectionManager.ensureHostRegistered(serverId, 'assettocorsa', 'udp', info.port, sessionToken),
+    ]);
+    if (tcpReg.success && tcpReg.relayId && udpReg.success && udpReg.relayId) {
+      return {
+        candidates: [{
+          strategy: 'relay' as const, address: `relay:${tcpReg.relayId}+${udpReg.relayId}`,
+          relayId: tcpReg.relayId, relayIdUdp: udpReg.relayId,
+          note: 'Connects through the Mercy relay service (TCP + UDP) — no port forwarding required.',
+        }],
+        relayAvailable: true, unavailableExplanation: null,
+      };
+    }
+    // A real registration failure on EITHER transport means the connection
+    // genuinely wouldn't work (AC needs both) — honest failure, never a
+    // half-working candidate. Tear down whichever one DID succeed so it
+    // doesn't leak an unused relay registration.
+    if (tcpReg.success || udpReg.success) relayConnectionManager.teardownHost(serverId);
+    return { candidates: [], relayAvailable: false, unavailableExplanation: tcpReg.reason || udpReg.reason || 'Could not reach the Mercy relay.' };
   });
   // CLIENT side: once a friend's join request comes back authorized with a
   // strategy:'relay' endpoint, this actually connects to the relay and

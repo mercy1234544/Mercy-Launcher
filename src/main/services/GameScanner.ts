@@ -82,6 +82,14 @@ export interface KnownGameDef {
   rockstarInstallFolderValue?: string; // registry value name holding the real install path
   originRegistrySubkey?: string; // under HKLM\SOFTWARE\WOW6432Node\Origin Games\
   microsoftPackageFamilyName?: string;
+  /** Last-resort match against a real `Get-StartApps` Start-Menu tile Name
+   *  (e.g. "Minecraft") when the package family name above doesn't resolve
+   *  — Microsoft has changed Minecraft's underlying packaging/distribution
+   *  more than once (Store vs. Xbox-app-managed installs under
+   *  %SystemDrive%\XboxGames\), but the user-facing Start Menu tile name
+   *  has stayed stable. Never fabricates an id — only used to look up a
+   *  REAL AUMID already registered on this machine. */
+  microsoftDisplayNameFallback?: string;
   /** Real executable to verify, relative to the resolved install folder. */
   executableRelPath?: string;
   /** Non-launcher install locations, resolved from real %ENVVAR% placeholders. */
@@ -113,6 +121,19 @@ export interface DetectedGame {
    *  state and offers to locate it again. Always false/absent for an
    *  auto-detected game (those are simply excluded if genuinely missing). */
   pathMissing?: boolean;
+  /** The real, resolved Windows Application User Model ID (AUMID) for a
+   *  Microsoft Store/Xbox-app game — e.g.
+   *  "Microsoft.MinecraftUWP_8wekyb3d8bbwe!App" — required to actually
+   *  launch it via `explorer.exe shell:AppsFolder\<AUMID>`. Absent when
+   *  detection found the package's InstallLocation but could not resolve a
+   *  real activation id from Get-StartApps; launch() then reports an
+   *  honest error instead of guessing one. */
+  microsoftAppId?: string;
+  /** True when the user explicitly overrode this game's launch path via
+   *  the gear/settings "Change Path" action (see setPathOverride()) — the
+   *  user's own explicit executable selection always wins over whatever
+   *  platform-specific launch mechanism was auto-detected. */
+  pathOverridden?: boolean;
 }
 
 const PLATFORM_LABELS: Record<DetectionPlatform, string> = {
@@ -161,6 +182,13 @@ export const KNOWN_GAMES: KnownGameDef[] = [
   {
     id: 'minecraft-uwp', name: 'Minecraft (Microsoft Store)', mercyGameId: 'minecraft', mercyStatus: 'supported',
     microsoftPackageFamilyName: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe',
+    // Covers "Minecraft for Windows" installed via the Xbox app (commonly
+    // under %SystemDrive%\XboxGames\Minecraft for Windows\) — same
+    // underlying package family in every real install this was verified
+    // against, but the display-name fallback below keeps detection working
+    // even if that ever changes, since Get-StartApps' own tile Name has
+    // stayed "Minecraft" across every Store/Xbox-app packaging revision.
+    microsoftDisplayNameFallback: 'Minecraft',
   },
   { id: 'assetto-corsa', name: 'Assetto Corsa', mercyGameId: 'assettocorsa', mercyStatus: 'supported', steamAppId: 244210 },
   {
@@ -275,7 +303,11 @@ export interface GameScannerOptions {
   ubisoftRegistryRootOverride?: Record<string, Record<string, string>> | null;
   rockstarRegistryRootOverride?: Record<string, Record<string, string>> | null;
   originRegistryRootOverride?: Record<string, Record<string, string>> | null;
-  microsoftPackagesOverride?: { packageFamilyName: string; installLocation: string }[] | null;
+  microsoftPackagesOverride?: { packageFamilyName: string; installLocation: string; appId?: string }[] | null;
+  /** Test seam for the real `Get-StartApps` AUMID-resolution fallback (see
+   *  scanMicrosoftStore()) — never used outside tests; production always
+   *  queries the real machine. */
+  startAppsOverride?: { name: string; appId: string }[] | null;
   knownGames?: KnownGameDef[];
   fallbackLibraryFoldersOverride?: string[];
 }
@@ -283,8 +315,11 @@ export interface GameScannerOptions {
 export class GameScanner {
   private cacheFile: string;
   private manualGamesFile: string;
+  private pathOverridesFile: string;
   private cached: DetectedGame[] = [];
   private manualGames: ManualGameEntry[] = [];
+  /** gameId -> user-selected real executable path (see setPathOverride()). */
+  private pathOverrides: Record<string, string> = {};
   private lastScanAt: string | null = null;
   /** Real, bounded default — see this file's header on why "configurable
    *  refresh interval" is implemented as this one sensible constant rather
@@ -296,6 +331,7 @@ export class GameScanner {
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     this.cacheFile = path.join(dataDir, 'detected-games.json');
     this.manualGamesFile = path.join(dataDir, 'manual-games.json');
+    this.pathOverridesFile = path.join(dataDir, 'game-path-overrides.json');
     try {
       if (fs.existsSync(this.cacheFile)) {
         const parsed = JSON.parse(fs.readFileSync(this.cacheFile, 'utf-8'));
@@ -306,6 +342,9 @@ export class GameScanner {
     try {
       if (fs.existsSync(this.manualGamesFile)) this.manualGames = JSON.parse(fs.readFileSync(this.manualGamesFile, 'utf-8')) || [];
     } catch { this.manualGames = []; }
+    try {
+      if (fs.existsSync(this.pathOverridesFile)) this.pathOverrides = JSON.parse(fs.readFileSync(this.pathOverridesFile, 'utf-8')) || {};
+    } catch { this.pathOverrides = {}; }
   }
 
   // ── Manual game paths (Part 1) — a real, explicit, persisted fallback for
@@ -388,6 +427,67 @@ export class GameScanner {
     this.cached = this.cached.map((g) => (g.id === id ? detected : g));
     this.persistCache();
     return { success: true, game: detected };
+  }
+
+  // ── Launch-path overrides (Part 6/gear settings) — a real, explicit
+  // correction for when automatic detection either can't find a game's
+  // real launch mechanism or gets it wrong (e.g. a Microsoft Store/Xbox-app
+  // AUMID that couldn't be resolved). Distinct from manual games (Part 1):
+  // an override corrects an ALREADY-DETECTED game's launch path, it never
+  // creates a new library entry, and removing the override simply restores
+  // the game's normal auto-detected launch behavior. ───────────────────────
+  private applyPathOverride(game: DetectedGame): DetectedGame {
+    const override = this.pathOverrides[game.id];
+    if (!override) return game;
+    return { ...game, executablePath: override, pathOverridden: true, pathMissing: !fs.existsSync(override) };
+  }
+
+  getPathOverride(id: string): string | null { return this.pathOverrides[id] ?? null; }
+
+  /** Real validation only — the user's own explicit executable selection,
+   *  verified to genuinely exist and genuinely be a file, exactly like
+   *  addManualGame(). Applied immediately to the cached/unified list, not
+   *  just on the next rescan. */
+  setPathOverride(id: string, execPath: string): { success: boolean; error?: string; game?: DetectedGame } {
+    const existing = this.cached.find((g) => g.id === id);
+    if (!existing) return { success: false, error: 'This game was not found — try scanning again.' };
+    if (typeof execPath !== 'string' || !execPath.trim()) return { success: false, error: 'No path was provided.' };
+    const normalized = path.resolve(execPath);
+    let stat: fs.Stats;
+    try { stat = fs.statSync(normalized); } catch { return { success: false, error: 'That path does not exist.' }; }
+    if (!stat.isFile()) return { success: false, error: 'That path is not a file — select the actual game executable.' };
+    this.pathOverrides[id] = normalized;
+    this.savePathOverrides();
+    const updated = this.applyPathOverride({ ...existing, pathOverridden: false });
+    this.cached = this.cached.map((g) => (g.id === id ? updated : g));
+    this.persistCache();
+    return { success: true, game: updated };
+  }
+
+  /** Restores normal auto-detected launch behavior — never deletes the
+   *  underlying detected game itself, only the correction on top of it.
+   *  Takes effect immediately; a full rescan isn't required. */
+  clearPathOverride(id: string): { success: boolean; game?: DetectedGame } {
+    if (!(id in this.pathOverrides)) return { success: false };
+    delete this.pathOverrides[id];
+    this.savePathOverrides();
+    const existing = this.cached.find((g) => g.id === id);
+    if (existing) {
+      const restored: DetectedGame = { ...existing, pathOverridden: false };
+      // The override's executablePath is gone; a real rescan is needed to
+      // re-resolve the platform's own real value (e.g. re-query the AUMID)
+      // — until then this honestly reflects "no longer overridden" without
+      // fabricating a value we haven't actually re-detected.
+      if (existing.platform !== 'manual') { restored.executablePath = ''; restored.pathMissing = false; }
+      this.cached = this.cached.map((g) => (g.id === id ? restored : g));
+      this.persistCache();
+      return { success: true, game: restored };
+    }
+    return { success: true };
+  }
+
+  private savePathOverrides(): void {
+    try { fs.writeFileSync(this.pathOverridesFile, JSON.stringify(this.pathOverrides, null, 2)); } catch {}
   }
 
   getCached(): DetectedGame[] { return this.cached; }
@@ -594,6 +694,44 @@ if (Test-Path '${rootPath}') {
     return results;
   }
 
+  /** Resolves the REAL Windows activation id (AUMID, "<PackageFamilyName>!
+   *  <AppId>") for a Microsoft Store/Xbox-app game via `Get-StartApps` —
+   *  the same real, standard source Windows' own Start Menu uses, so a
+   *  match here is guaranteed launchable via shell:AppsFolder. Tries the
+   *  known package-family prefix first, then falls back to the game's
+   *  real, stable Start-Menu display name (see microsoftDisplayNameFallback
+   *  on KnownGameDef) — this is what makes detection resilient to
+   *  Microsoft having moved Minecraft's distribution between the classic
+   *  Store package and Xbox-app-managed installs under
+   *  %SystemDrive%\XboxGames\ without this scanner needing to know the
+   *  exact current package family name. Never fabricates an id: returns
+   *  null if nothing real was found. */
+  private async resolveMicrosoftAppId(def: KnownGameDef): Promise<string | null> {
+    if (this.options.startAppsOverride) {
+      const byPfn = def.microsoftPackageFamilyName
+        ? this.options.startAppsOverride.find((a) => a.appId.toLowerCase().startsWith(def.microsoftPackageFamilyName!.toLowerCase() + '!'))
+        : null;
+      if (byPfn) return byPfn.appId;
+      const byName = def.microsoftDisplayNameFallback
+        ? this.options.startAppsOverride.find((a) => a.name === def.microsoftDisplayNameFallback)
+        : null;
+      return byName?.appId ?? null;
+    }
+    if (process.platform !== 'win32') return null;
+    if (def.microsoftPackageFamilyName) {
+      const out = await runPowerShell(
+        `(Get-StartApps | Where-Object { $_.AppID -like '${def.microsoftPackageFamilyName}!*' } | Select-Object -First 1).AppID`,
+      );
+      if (out) return out;
+    }
+    if (def.microsoftDisplayNameFallback) {
+      const escaped = def.microsoftDisplayNameFallback.replace(/'/g, "''");
+      const out = await runPowerShell(`(Get-StartApps | Where-Object { $_.Name -eq '${escaped}' } | Select-Object -First 1).AppID`);
+      if (out) return out;
+    }
+    return null;
+  }
+
   /** Curated allowlist, not full generic AppX enumeration — see header. */
   private async scanMicrosoftStore(knownGames: KnownGameDef[]): Promise<DetectedGame[]> {
     const now = new Date().toISOString();
@@ -602,21 +740,37 @@ if (Test-Path '${rootPath}') {
       for (const pkg of this.options.microsoftPackagesOverride) {
         const def = knownGames.find((g) => g.microsoftPackageFamilyName === pkg.packageFamilyName);
         if (!def) continue;
+        const microsoftAppId = pkg.appId ?? (await this.resolveMicrosoftAppId(def)) ?? undefined;
         results.push({
           id: `microsoft-${def.id}`, name: def.name, mercyGameId: def.mercyGameId, mercyStatus: def.mercyStatus,
           installPath: pkg.installLocation, executablePath: '', platform: 'microsoft', platformLabel: PLATFORM_LABELS.microsoft, detectedAt: now,
+          microsoftAppId,
         });
       }
       return results;
     }
-    const candidates = knownGames.filter((g) => g.microsoftPackageFamilyName);
+    const candidates = knownGames.filter((g) => g.microsoftPackageFamilyName || g.microsoftDisplayNameFallback);
     if (candidates.length === 0 || process.platform !== 'win32') return results;
     for (const def of candidates) {
-      const out = await runPowerShell(`(Get-AppxPackage -Name '${def.microsoftPackageFamilyName!.split('_')[0]}' -ErrorAction SilentlyContinue | Select-Object -First 1).InstallLocation`);
-      if (out && fs.existsSync(out)) {
+      const microsoftAppId = (await this.resolveMicrosoftAppId(def)) ?? undefined;
+      // InstallLocation is still resolved via the package-family Get-AppxPackage
+      // query when available — it's real, useful display/debugging info, but
+      // (unlike before) it is NEVER what launch() uses to start the game.
+      let installLocation: string | null = null;
+      if (def.microsoftPackageFamilyName) {
+        installLocation = await runPowerShell(`(Get-AppxPackage -Name '${def.microsoftPackageFamilyName.split('_')[0]}' -ErrorAction SilentlyContinue | Select-Object -First 1).InstallLocation`);
+      }
+      // A real result requires EITHER a genuine install folder OR a genuine
+      // resolved AUMID — never invented, and a game found only via
+      // Get-StartApps (no InstallLocation resolved) is still real and
+      // launchable, so it must still be reported rather than silently
+      // dropped.
+      if ((installLocation && fs.existsSync(installLocation)) || microsoftAppId) {
         results.push({
           id: `microsoft-${def.id}`, name: def.name, mercyGameId: def.mercyGameId, mercyStatus: def.mercyStatus,
-          installPath: out, executablePath: '', platform: 'microsoft', platformLabel: PLATFORM_LABELS.microsoft, detectedAt: now,
+          installPath: installLocation && fs.existsSync(installLocation) ? installLocation : '',
+          executablePath: '', platform: 'microsoft', platformLabel: PLATFORM_LABELS.microsoft, detectedAt: now,
+          microsoftAppId,
         });
       }
     }
@@ -678,7 +832,8 @@ if (Test-Path '${rootPath}') {
     // merged back in fresh every time, with pathMissing re-checked for real
     // right now rather than carried over stale from whenever they were added.
     const manual = this.manualGames.map((m) => this.manualGameToDetected(m));
-    const results = Array.from(byId.values()).concat(manual).sort((a, b) => a.name.localeCompare(b.name));
+    const withManual = Array.from(byId.values()).concat(manual);
+    const results = withManual.map((g) => this.applyPathOverride(g)).sort((a, b) => a.name.localeCompare(b.name));
 
     this.cached = results;
     this.lastScanAt = new Date().toISOString();
@@ -691,7 +846,27 @@ if (Test-Path '${rootPath}') {
   async launch(id: string): Promise<{ success: boolean; error?: string; note?: string }> {
     const game = this.cached.find((g) => g.id === id);
     if (!game) return { success: false, error: 'This game was not found by the last scan — try scanning again.' };
-    if (!fs.existsSync(game.installPath)) return { success: false, error: 'This game no longer exists at its last detected location — try scanning again.' };
+
+    // A user-selected override always wins, regardless of platform — this
+    // is an explicit, verified, real executable the user picked themselves
+    // (see setPathOverride()), so it bypasses every platform-specific
+    // mechanism below entirely, the same way a manually-added game does.
+    if (game.pathOverridden) {
+      if (!game.executablePath || !fs.existsSync(game.executablePath)) {
+        return { success: false, error: 'The path you set for this game no longer exists — use the gear menu to select it again.' };
+      }
+      const result = await shell.openPath(game.executablePath);
+      if (result) return { success: false, error: result };
+      return { success: true };
+    }
+
+    // installPath isn't meaningful for a Microsoft Store/Xbox-app game
+    // detected only via a real Get-StartApps AUMID (no folder was ever
+    // resolved) — that case is validated by microsoftAppId's own presence
+    // in the 'microsoft' branch below instead.
+    if (game.platform !== 'microsoft' && !fs.existsSync(game.installPath)) {
+      return { success: false, error: 'This game no longer exists at its last detected location — try scanning again.' };
+    }
 
     switch (game.platform) {
       case 'steam': {
@@ -728,11 +903,25 @@ if (Test-Path '${rootPath}') {
         return { success: false, error: 'Could not find the Rockstar Games Launcher to start it automatically.' };
       }
       case 'microsoft': {
-        // Real, documented technique for launching a UWP app from its
-        // AppsFolder shell path — Electron's shell.openPath doesn't
-        // resolve this virtual folder, so explorer.exe is used directly.
+        // Real, documented technique for launching a Store/Xbox-app game
+        // from its AppsFolder shell path — Electron's shell.openPath
+        // doesn't resolve this virtual folder, so explorer.exe is used
+        // directly. This REQUIRES the real AUMID resolved at detection
+        // time (see resolveMicrosoftAppId()) — Mercy's own internal game
+        // id (e.g. "minecraft-uwp") is never a valid AUMID and was
+        // previously passed here by mistake, which silently did nothing
+        // (explorer.exe reports no error even when the shell path doesn't
+        // resolve to anything) while just opening a plain Explorer window.
+        // Never guess an id here: if none was resolved, report an honest,
+        // actionable error instead of opening Explorer at all.
+        if (!game.microsoftAppId) {
+          return {
+            success: false,
+            error: `Mercy could not resolve a launchable Windows app id for "${game.name}". Use the gear menu to select its executable directly.`,
+          };
+        }
         return new Promise((resolve) => {
-          execFile('explorer.exe', [`shell:AppsFolder\\${game.id.replace('microsoft-', '')}`], (err) => {
+          execFile('explorer.exe', [`shell:AppsFolder\\${game.microsoftAppId}`], (err) => {
             resolve(err ? { success: false, error: 'Could not launch this Microsoft Store app.' } : { success: true });
           });
         });

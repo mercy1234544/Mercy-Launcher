@@ -172,7 +172,7 @@ export async function requestJoin(serverId: string): Promise<{ data?: { id: stri
 }
 
 export async function respondToJoinRequest(
-  requestId: string, approve: boolean, token?: string, endpoint?: { strategy: string; address: string } | null,
+  requestId: string, approve: boolean, token?: string, endpoint?: { strategy: string; address: string; relayId?: string; relayIdUdp?: string } | null,
 ): Promise<{ error?: string; notConfigured?: boolean }> {
   if (!supabase) return { notConfigured: true };
   try {
@@ -187,7 +187,7 @@ export async function respondToJoinRequest(
 export interface JoinRequestRow {
   id: string; requesterId: string; requesterUsername: string; hostId: string; serverId: string;
   status: 'pending' | 'authorized' | 'denied' | 'expired';
-  endpoint: { strategy: string; address: string; relayId?: string } | null;
+  endpoint: { strategy: string; address: string; relayId?: string; relayIdUdp?: string } | null;
   /** Only meaningful to the REQUESTER (RLS scopes the row to the two real
    *  parties either way) — the opaque HMAC credential the host minted,
    *  needed to authenticate to the relay when endpoint.strategy is

@@ -215,6 +215,8 @@ interface ElectronAPI {
     addManual: (execPath: string, name?: string) => Promise<{ success: boolean; error?: string; game?: DetectedGame }>;
     removeManual: (id: string) => Promise<boolean>;
     relocateManual: (id: string, newExecPath: string) => Promise<{ success: boolean; error?: string; game?: DetectedGame }>;
+    setPathOverride: (id: string, execPath: string) => Promise<{ success: boolean; error?: string; game?: DetectedGame }>;
+    clearPathOverride: (id: string) => Promise<{ success: boolean; game?: DetectedGame }>;
   };
 
   presence: {
@@ -229,6 +231,7 @@ interface ElectronAPI {
 
   connection: {
     negotiateMinecraftEndpoint: (serverId: string) => Promise<EndpointPlan | null>;
+    negotiateAssettoCorsaEndpoint: (serverId: string) => Promise<EndpointPlan | null>;
     connectViaRelay: (args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) => Promise<RelayConnectResult>;
     teardownRelayHost: (serverId: string) => Promise<void>;
   };
@@ -618,6 +621,8 @@ declare global {
     platform: 'steam' | 'epic' | 'gog' | 'ubisoft' | 'rockstar' | 'ea' | 'microsoft' | 'direct' | 'manual';
     platformLabel: string; detectedAt: string;
     pathMissing?: boolean;
+    microsoftAppId?: string;
+    pathOverridden?: boolean;
   }
 
   // ── Presence/Friends types (mirror src/main/services/PresenceManager.ts
@@ -635,7 +640,7 @@ declare global {
   // ── Connection negotiation types (mirror
   // src/main/services/connection/ConnectionNegotiator.ts) ────────────────────
   type EndpointStrategy = 'lan-direct' | 'upnp-direct' | 'relay';
-  interface EndpointCandidate { strategy: EndpointStrategy; address: string; relayId?: string; note: string; }
+  interface EndpointCandidate { strategy: EndpointStrategy; address: string; relayId?: string; relayIdUdp?: string; note: string; }
   interface EndpointPlan { candidates: EndpointCandidate[]; relayAvailable: boolean; unavailableExplanation: string | null; }
   interface RelayConnectResult { success: boolean; localAddress?: string; reason?: string; }
 
