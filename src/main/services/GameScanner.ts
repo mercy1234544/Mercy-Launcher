@@ -94,6 +94,11 @@ export interface KnownGameDef {
   executableRelPath?: string;
   /** Non-launcher install locations, resolved from real %ENVVAR% placeholders. */
   directPaths?: string[];
+  /** Only set for a curated entry that is ITSELF a launcher application
+   *  rather than a game (e.g. Content Manager, Minecraft Launcher) — see
+   *  DetectedGame.category. Absent (defaults to 'game') for every actual
+   *  game entry. */
+  category?: 'game' | 'launcher';
 }
 
 export interface DetectedGame {
@@ -134,6 +139,18 @@ export interface DetectedGame {
    *  user's own explicit executable selection always wins over whatever
    *  platform-specific launch mechanism was auto-detected. */
   pathOverridden?: boolean;
+  /** Real, conservative categorization — only 'game' or 'launcher', never a
+   *  guess at Utilities/Creative/Communication/etc. This scanner detects
+   *  games (and a small curated set of real game-adjacent launcher
+   *  applications, e.g. Content Manager) — it has no reliable detection
+   *  source for general-purpose software, and deliberately doesn't invent
+   *  one; see this file's header. Always set by scan() itself (see
+   *  classifyCategory()) before results are cached/returned — optional here
+   *  only so every individual per-platform result-construction site doesn't
+   *  need to set it; absent/undefined should be read as 'game'. Defaults to
+   *  'game' for every generically discovered Steam/Epic/GOG/Ubisoft title
+   *  and every manually-added game. */
+  category?: 'game' | 'launcher';
 }
 
 const PLATFORM_LABELS: Record<DetectionPlatform, string> = {
@@ -178,6 +195,7 @@ export const KNOWN_GAMES: KnownGameDef[] = [
     id: 'minecraft-launcher', name: 'Minecraft Launcher', mercyGameId: 'minecraft', mercyStatus: 'supported',
     executableRelPath: 'MinecraftLauncher.exe',
     directPaths: ['%ProgramFiles(x86)%\\Minecraft Launcher', '%ProgramFiles%\\Minecraft Launcher'],
+    category: 'launcher',
   },
   {
     id: 'minecraft-uwp', name: 'Minecraft (Microsoft Store)', mercyGameId: 'minecraft', mercyStatus: 'supported',
@@ -204,6 +222,7 @@ export const KNOWN_GAMES: KnownGameDef[] = [
     id: 'content-manager', name: 'Content Manager', mercyGameId: null, mercyStatus: 'unsupported',
     executableRelPath: 'Content Manager.exe',
     directPaths: ['%LOCALAPPDATA%\\AcTools Content Manager'],
+    category: 'launcher',
   },
   { id: 'beamng-drive', name: 'BeamNG.drive', mercyGameId: null, mercyStatus: 'planned', steamAppId: 284160 },
   { id: 'gta5', name: 'Grand Theft Auto V', mercyGameId: null, mercyStatus: 'unsupported', steamAppId: 271590, epicAppName: '9d2d0eb64d5c44529cece33fe2a46482', rockstarRegistrySubkey: 'Grand Theft Auto V', rockstarInstallFolderValue: 'InstallFolder' },
@@ -436,6 +455,18 @@ export class GameScanner {
   // an override corrects an ALREADY-DETECTED game's launch path, it never
   // creates a new library entry, and removing the override simply restores
   // the game's normal auto-detected launch behavior. ───────────────────────
+  /** Only a curated KNOWN_GAMES entry can ever be 'launcher' — every
+   *  generically discovered Steam/Epic/GOG/Ubisoft title and every
+   *  manually-added game is honestly 'game' by default, never guessed from
+   *  its name. Curated ids get a stable prefix per detection method
+   *  (direct-/microsoft-), stripped here to look the definition back up. */
+  private classifyCategory(game: DetectedGame, knownGames: KnownGameDef[]): 'game' | 'launcher' {
+    if (game.platform === 'manual') return 'game';
+    const rawId = game.id.replace(/^(direct-|microsoft-)/, '');
+    const def = knownGames.find((k) => k.id === rawId);
+    return def?.category ?? 'game';
+  }
+
   private applyPathOverride(game: DetectedGame): DetectedGame {
     const override = this.pathOverrides[game.id];
     if (!override) return game;
@@ -833,7 +864,8 @@ if (Test-Path '${rootPath}') {
     // right now rather than carried over stale from whenever they were added.
     const manual = this.manualGames.map((m) => this.manualGameToDetected(m));
     const withManual = Array.from(byId.values()).concat(manual);
-    const results = withManual.map((g) => this.applyPathOverride(g)).sort((a, b) => a.name.localeCompare(b.name));
+    const categorized = withManual.map((g) => ({ ...g, category: this.classifyCategory(g, knownGames) }));
+    const results = categorized.map((g) => this.applyPathOverride(g)).sort((a, b) => a.name.localeCompare(b.name));
 
     this.cached = results;
     this.lastScanAt = new Date().toISOString();
@@ -921,8 +953,29 @@ if (Test-Path '${rootPath}') {
           };
         }
         return new Promise((resolve) => {
-          execFile('explorer.exe', [`shell:AppsFolder\\${game.microsoftAppId}`], (err) => {
-            resolve(err ? { success: false, error: 'Could not launch this Microsoft Store app.' } : { success: true });
+          execFile('explorer.exe', [`shell:AppsFolder\\${game.microsoftAppId}`], (err: any) => {
+            // explorer.exe's own exit code is NOT a reliable success signal
+            // here. explorer.exe is always already running as the desktop
+            // shell, so invoking it again just hands the request off to
+            // that existing process via DDE — the new, short-lived process
+            // Node actually spawned routinely exits with a non-zero code
+            // (commonly 1) REGARDLESS of whether the shell namespace
+            // navigation (and therefore the real app launch) succeeded.
+            // This is a well-documented Windows quirk, not a Mercy bug, and
+            // was the exact real cause of a production false error report:
+            // Minecraft (Bedrock/Microsoft Store) opened successfully every
+            // time, but Mercy still showed "Could not launch this Microsoft
+            // Store app." because execFile's callback treats any non-zero
+            // exit as a failure.
+            //
+            // A genuine spawn failure (explorer.exe itself missing/unusable
+            // — effectively never happens on a real Windows install) is a
+            // different, real error: Node reports that with a STRING
+            // err.code (e.g. 'ENOENT'), never a bare exit-code number. Only
+            // that case is treated as an actual failure here — the routine
+            // non-zero exit from a successful hand-off is not.
+            const genuineSpawnFailure = !!err && typeof err.code === 'string';
+            resolve(genuineSpawnFailure ? { success: false, error: 'Could not launch this Microsoft Store app.' } : { success: true });
           });
         });
       }

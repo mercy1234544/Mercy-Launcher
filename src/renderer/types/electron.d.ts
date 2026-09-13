@@ -634,6 +634,7 @@ declare global {
     pathMissing?: boolean;
     microsoftAppId?: string;
     pathOverridden?: boolean;
+    category?: 'game' | 'launcher';
   }
 
   // ── Presence/Friends types (mirror src/main/services/PresenceManager.ts

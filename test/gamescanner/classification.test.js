@@ -86,6 +86,14 @@ function mkEpicManifest(dir, { displayName, installLocation, appName }) {
     ok('Content Manager is detected as a real, legitimate application when actually installed', !!cm && cm.platform === 'direct');
     ok('Content Manager is never misclassified as a dev tool/plugin by the non-game name filter', !!cm);
 
+    // ── Category classification (game vs. launcher) — conservative: only
+    //    curated entries can ever be 'launcher', everything else is 'game'.
+    ok('Content Manager (a curated real launcher application) is categorized as "launcher"', cm?.category === 'launcher');
+    const portal2 = results.find((g) => g.name === 'Portal 2');
+    ok('a generically-discovered Steam game defaults to category "game"', portal2?.category === 'game');
+    const epicGame = results.find((g) => g.name === 'A Real Epic Game');
+    ok('a generically-discovered Epic game defaults to category "game"', epicGame?.category === 'game');
+
     console.log(`\nGAME CLASSIFICATION TESTS: ${pass} passed, ${fail} failed`);
   } finally {
     try { fs.rmSync(userDataRoot, { recursive: true, force: true }); } catch {}

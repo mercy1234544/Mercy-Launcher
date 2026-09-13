@@ -5,9 +5,10 @@ import {
   LayoutGrid, Gamepad2, Search, Loader2, Play, ExternalLink, Users, UserPlus, Check, X, WifiOff, RefreshCw,
   FolderPlus, Settings, MapPin, Trash2, AlertTriangle, Globe2, RotateCcw,
 } from 'lucide-react';
-import { Panel, SectionHeading, EmptyState } from '../components/ui';
+import { Panel, SectionHeading, EmptyState, Toggle } from '../components/ui';
 import { getGame } from '../config/games';
 import { useFriendsPresence } from '../stores/useFriendsPresence';
+import { useLibraryPrefs } from '../stores/useLibraryPrefs';
 import toast from 'react-hot-toast';
 
 // The Library is ONE unified list of games detected on this PC, plus a
@@ -18,11 +19,18 @@ import toast from 'react-hot-toast';
 // is shown as a plain badge on that same row rather than as a separate
 // section a user has to switch into.
 export default function Library() {
+  const { showDetectedApps, setShowDetectedApps } = useLibraryPrefs();
   return (
     <div className="p-7 max-w-6xl mx-auto space-y-6">
-      <SectionHeading icon={LayoutGrid} title="Library" subtitle="Games on this PC, and who's playing." />
+      <div className="flex items-center justify-between gap-4">
+        <SectionHeading icon={LayoutGrid} title="Library" subtitle="Games on this PC, and who's playing." />
+        <label className="flex items-center gap-2 text-xs text-surface-400 shrink-0 cursor-pointer select-none" title="Show or hide the 'Games on this PC' section below">
+          Show detected apps
+          <Toggle checked={showDetectedApps} onChange={setShowDetectedApps} />
+        </label>
+      </div>
 
-      <DetectedGamesSection />
+      {showDetectedApps && <DetectedGamesSection />}
 
       <FriendsPresenceSection />
     </div>
@@ -172,7 +180,9 @@ function DetectedGamesSection() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-surface-100 truncate">{g.name}</p>
-                  <p className="text-[10.5px] text-surface-500 truncate">{g.platformLabel}</p>
+                  <p className="text-[10.5px] text-surface-500 truncate">
+                    {g.platformLabel}{g.category === 'launcher' ? ' · Launcher' : ''}
+                  </p>
                 </div>
                 {g.pathMissing ? (
                   <span className="text-[10px] font-semibold shrink-0 whitespace-nowrap text-danger flex items-center gap-1"><AlertTriangle size={11} /> Path unavailable</span>
