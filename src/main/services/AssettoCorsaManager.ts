@@ -302,6 +302,12 @@ export class AssettoCorsaManager {
   private processes: Map<string, ChildProcess> = new Map();
   private consoleBuffers: Map<string, string[]> = new Map();
   private intentionalStop: Set<string> = new Set();
+  /** Set the moment LOBBY_SELF_SHUTDOWN_PATTERN is seen in this run's
+   *  output — consulted (and cleared) in the exit handler so the resulting
+   *  clean exit gets a real, specific lastError instead of a generic note.
+   *  Never persisted; a fresh run always starts clean, same as
+   *  intentionalStop above. */
+  private lobbySelfShutdown: Set<string> = new Set();
   private resourceSamples: Map<string, { cpuMs: number; sampledAt: number }> = new Map();
   /** Real startup diagnostics (Part 4) — one entry per server, replaced on
    *  every real start attempt. Never secrets (password/adminPassword are
@@ -1098,6 +1104,21 @@ export class AssettoCorsaManager {
    *  acServer builds don't silently stop this from being detected. */
   private static readonly LOBBY_REJECTION_PATTERN = /invalid\s*server.*port\s*forwarding/i;
 
+  /** The real, distinct, more severe follow-on: after enough failed lobby
+   *  registration attempts (5, in every real acServer.exe build this was
+   *  verified against — including its own "RACHED" typo, matched
+   *  tolerantly here), the dedicated-server EXECUTABLE ITSELF decides to
+   *  exit — this is not Mercy killing anything. Reproduced directly by
+   *  running this exact server's real acServer.exe standalone (outside
+   *  Mercy entirely) with registerToLobby enabled on a network with no
+   *  port forwarding: it retries 5 times, then prints this line and exits
+   *  cleanly (code 0) on its own. Without detecting this specific,
+   *  well-known shutdown reason, Mercy only ever logged a generic "check
+   *  the console output above" note and left lastError empty — leaving the
+   *  user with a real, actionable cause (port forwarding vs. Mercy-only
+   *  relay play) with no clear explanation anywhere in the UI. */
+  private static readonly LOBBY_SELF_SHUTDOWN_PATTERN = /lobby\s*could\s*not\s*be\s*r\w*ched.*shutting\s*server\s*down/i;
+
   async startServer(id: string): Promise<{ success: boolean; error?: string; runtimeRequired?: boolean }> {
     const server = this.getServer(id);
     if (!server) return { success: false, error: 'Server not found.' };
@@ -1137,6 +1158,7 @@ export class AssettoCorsaManager {
     }
 
     this.intentionalStop.delete(id);
+    this.lobbySelfShutdown.delete(id);
     server.status = 'starting';
     server.lastError = null;
     server.lobbyStatus = 'unknown'; // this run's own outcome — never carried over from a previous run
@@ -1164,15 +1186,21 @@ export class AssettoCorsaManager {
     });
 
     const scanForLobbyRejection = (line: string) => {
-      if (server.lobbyStatus === 'unreachable') return; // already recorded for this run
-      if (!AssettoCorsaManager.LOBBY_REJECTION_PATTERN.test(line)) return;
-      server.lobbyStatus = 'unreachable';
-      this.save();
-      // Reuses the existing statusChange channel (never `status` itself,
-      // which stays about the LOCAL process) — the renderer's existing
-      // listener already re-fetches the full server record on this event,
-      // so this needs no new IPC channel to reach the UI.
-      this.broadcast('assettocorsa:statusChange', { serverId: id, status: server.status });
+      if (server.lobbyStatus !== 'unreachable' && AssettoCorsaManager.LOBBY_REJECTION_PATTERN.test(line)) {
+        server.lobbyStatus = 'unreachable';
+        this.save();
+        // Reuses the existing statusChange channel (never `status` itself,
+        // which stays about the LOCAL process) — the renderer's existing
+        // listener already re-fetches the full server record on this event,
+        // so this needs no new IPC channel to reach the UI.
+        this.broadcast('assettocorsa:statusChange', { serverId: id, status: server.status });
+      }
+      // The real acServer.exe binary itself is about to exit on its own —
+      // recorded now (before the 'exit' event fires) so the exit handler
+      // below can give a real, specific reason instead of a generic note.
+      if (!this.lobbySelfShutdown.has(id) && AssettoCorsaManager.LOBBY_SELF_SHUTDOWN_PATTERN.test(line)) {
+        this.lobbySelfShutdown.add(id);
+      }
     };
     proc.stdout?.on('data', (chunk: Buffer) => {
       for (const line of chunk.toString().split(/\r?\n/)) { if (line) { this.appendConsole(id, line); scanForLobbyRejection(line); } }
@@ -1185,6 +1213,8 @@ export class AssettoCorsaManager {
       this.resourceSamples.delete(id);
       const wasIntentional = this.intentionalStop.has(id);
       this.intentionalStop.delete(id);
+      const gaveUpOnLobby = this.lobbySelfShutdown.has(id);
+      this.lobbySelfShutdown.delete(id);
       const current = this.getServer(id);
 
       const diag = this.startupDiagnostics.get(id);
@@ -1212,6 +1242,17 @@ export class AssettoCorsaManager {
       if (wasIntentional) {
         current.status = 'stopped';
         this.appendConsole(id, `[Mercy] Assetto Corsa server stopped.`);
+      } else if (gaveUpOnLobby) {
+        // The real, identified cause (verified against this exact binary's
+        // own real output — see LOBBY_SELF_SHUTDOWN_PATTERN): acServer.exe
+        // itself gave up and exited after 5 failed public-lobby
+        // registration attempts. Still a clean exit (code 0) — this is not
+        // a crash — but it is a genuine, actionable failure the user
+        // deserves a real explanation for, not just a "check the console"
+        // pointer.
+        current.status = 'stopped';
+        current.lastError = 'This server shut itself down because it could not register with the public Assetto Corsa lobby after 5 attempts. This happens when "Register to Public Lobby" is enabled but this server\'s port is not reachable from the internet (no port forwarding, or behind CGNAT/a strict router). Turn off "Register to Public Lobby" in Settings if you only want to connect through Mercy (friends can still join via relay/direct connect — no port forwarding needed for that), or set up port forwarding on your router if you want this server listed publicly.';
+        this.appendConsole(id, `[Mercy] ${current.lastError}`);
       } else if (cleanExit) {
         current.status = 'stopped';
         this.appendConsole(id, `[Mercy] Assetto Corsa server stopped (exit code 0). Mercy did not request this stop — check the console output above for the real reason (e.g. the server's own configuration or content).`);

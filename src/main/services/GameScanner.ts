@@ -859,6 +859,30 @@ if (Test-Path '${rootPath}') {
     for (const g of [...steam, ...epic, ...gog, ...ubisoft, ...rockstar, ...ea, ...microsoft, ...direct]) {
       if (!byId.has(g.id)) byId.set(g.id, g);
     }
+
+    // Content Manager has no installer/registry entry of its own — real
+    // installs are commonly a portable Content Manager.exe dropped directly
+    // into the Assetto Corsa game folder itself, which the single curated
+    // %LOCALAPPDATA%\AcTools Content Manager\ path above never covers (that
+    // folder is Content Manager's own DATA/cache directory, not necessarily
+    // where the executable lives — confirmed on a real machine where it
+    // held only Cache.data/Logs/Presets, no .exe at all). This checks
+    // alongside whatever install path THIS SAME scan just found for
+    // Assetto Corsa itself — never a hardcoded/guessed path — so it stays
+    // correct regardless of where Steam/Epic/etc. actually put the game.
+    if (!Array.from(byId.values()).some((g) => g.id === 'content-manager' || g.id.endsWith('-content-manager'))) {
+      const ac = Array.from(byId.values()).find((g) => g.mercyGameId === 'assettocorsa' && g.installPath);
+      if (ac) {
+        const candidate = path.join(ac.installPath, 'Content Manager.exe');
+        if (fs.existsSync(candidate)) {
+          byId.set('direct-content-manager', {
+            id: 'direct-content-manager', name: 'Content Manager', mercyGameId: null, mercyStatus: 'unsupported',
+            installPath: ac.installPath, executablePath: candidate, platform: 'direct',
+            platformLabel: 'Content Manager', detectedAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
     // Manual entries (Part 1) are never rediscovered by a rescan — they're
     // merged back in fresh every time, with pathMissing re-checked for real
     // right now rather than carried over stale from whenever they were added.

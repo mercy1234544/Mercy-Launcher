@@ -7,12 +7,24 @@
 // itself manages; this is specifically the PLAYER's own game client.
 //
 // Content Manager (a real, legitimate third-party AC launcher — see
-// GameScanner.ts's own KNOWN_GAMES entry) is deliberately preferred over
-// the base Assetto Corsa executable when it's actually installed, since
-// that's the normal way many real AC players already launch/manage the
-// game — never a fabricated preference, just picking the more commonly
-// used REAL detected entry when both exist.
+// GameScanner.ts's own KNOWN_GAMES entry) is REQUIRED for Assetto Corsa
+// multiplayer through Mercy — plain acs.exe/AssettoCorsa.exe just opens the
+// single-player menu with no way to hand it a specific server to join, so
+// "Launch Game" for AC never falls back to it. This used to silently do
+// exactly that: pickLaunchTarget matched on the literal id 'content-manager',
+// but GameScanner's own curated-direct-detection path actually produces
+// 'direct-content-manager' (see GameScanner.ts's scanDirect() — every
+// direct-detected entry is prefixed) — a real id never once matched here,
+// so this "preference" was silent dead code and every AC launch fell
+// straight through to plain Assetto Corsa. isContentManager() below matches
+// on the real id pattern AND by name (so a manually-added Content Manager —
+// see Library's "Add Game", which assigns a random manual-* id — is
+// recognized too, not just an auto-detected one).
 export type LaunchGameGameId = 'minecraft' | 'assettocorsa' | 'fivem';
+
+function isContentManager(g: DetectedGame): boolean {
+  return g.id === 'content-manager' || g.id.endsWith('-content-manager') || g.name.trim().toLowerCase() === 'content manager';
+}
 
 export interface LaunchGameResult {
   success: boolean;
@@ -29,9 +41,12 @@ export interface LaunchGameResult {
  *  cache; the caller decides whether to trigger a fresh scan first). */
 function pickLaunchTarget(games: DetectedGame[], gameId: LaunchGameGameId, edition?: 'java' | 'bedrock' | null): DetectedGame | null {
   if (gameId === 'assettocorsa') {
-    const contentManager = games.find((g) => g.id === 'content-manager');
-    if (contentManager) return contentManager;
-    return games.find((g) => g.mercyGameId === 'assettocorsa') ?? null;
+    // Content Manager only — never plain Assetto Corsa. See this file's
+    // header: plain acs.exe/AssettoCorsa.exe has no way to be pointed at a
+    // specific server, so falling back to it here would silently launch
+    // the wrong thing rather than fail honestly. If Content Manager isn't
+    // detected, the caller's notDetected path handles telling the user why.
+    return games.find(isContentManager) ?? null;
   }
   if (gameId === 'minecraft') {
     const candidates = games.filter((g) => g.mercyGameId === 'minecraft');
@@ -58,7 +73,9 @@ export async function launchGameFor(gameId: LaunchGameGameId, edition?: 'java' |
   if (!target) {
     return {
       success: false, notDetected: true,
-      error: `Mercy couldn't find a real installed ${gameId === 'assettocorsa' ? 'Assetto Corsa or Content Manager' : gameId === 'minecraft' ? 'Minecraft' : 'FiveM'} application on this PC. Add it from the Library (gear icon → Change Path) once you know where it's installed.`,
+      error: gameId === 'assettocorsa'
+        ? `Mercy couldn't find Content Manager on this PC — it's required to launch Assetto Corsa multiplayer through Mercy (plain Assetto Corsa can't be pointed at a specific server). Add it from the Library ("Add Game") by selecting its executable once you know where it's installed.`
+        : `Mercy couldn't find a real installed ${gameId === 'minecraft' ? 'Minecraft' : 'FiveM'} application on this PC. Add it from the Library (gear icon → Change Path) once you know where it's installed.`,
     };
   }
   return window.electronAPI.games.launch(target.id);
