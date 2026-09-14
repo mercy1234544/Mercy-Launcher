@@ -11,6 +11,24 @@ const presenceRepo = require('./repo/presence');
 const serversRepo = require('./repo/servers');
 const joinsRepo = require('./repo/joins');
 const logger = require('../shared/logger');
+const rateLimit = require('./rateLimit');
+
+// General per-IP ceiling across every route (protects the process itself).
+const GENERAL_LIMIT = { maxHits: 300, windowMs: 5 * 60_000 };
+// Tighter limit on username-enumeration-sensitive / Supabase-auth-triggering
+// writes (every request here also costs one supabase.auth.getUser() call).
+const SEND_REQUEST_LIMIT = { maxHits: 20, windowMs: 60_000 };
+
+/** Trusts X-Real-IP only when the immediate TCP peer is the local nginx
+ * (matches nginx's own `set_real_ip_from 127.0.0.1` trust boundary) — never
+ * trusts a client-supplied header from a connection that reached this
+ * process directly. */
+function getClientIp(req) {
+  const peer = req.socket.remoteAddress || 'unknown';
+  const isLoopback = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
+  if (isLoopback && req.headers['x-real-ip']) return req.headers['x-real-ip'];
+  return peer;
+}
 
 const ROUTES = [];
 function route(method, pattern, handler) {
@@ -72,6 +90,9 @@ route('GET', '/v1/everyone', async (req) => {
 });
 
 route('POST', '/v1/friends/requests', async (req) => {
+  if (!rateLimit.hit(`send-request:${getClientIp(req)}`, SEND_REQUEST_LIMIT)) {
+    throw new ApiError('RATE_LIMITED', 'Too many friend requests sent. Try again shortly.', 429);
+  }
   const userId = await requireAuth(req);
   const body = await readBody(req);
   const row = await friendsRepo.sendFriendRequest(userId, body.username);
@@ -147,6 +168,9 @@ route('GET', '/v1/joins', async (req) => {
 // ---------------------------------------------------------------------------
 
 async function handleRequest(req, res, pathname) {
+  if (pathname !== '/v1/health' && !rateLimit.hit(`general:${getClientIp(req)}`, GENERAL_LIMIT)) {
+    return send(res, 429, { error: 'RATE_LIMITED', message: 'Too many requests.' });
+  }
   for (const r of ROUTES) {
     if (r.method !== req.method) continue;
     const match = pathname.match(r.regex);

@@ -25,9 +25,19 @@ const { verifyAccessToken } = require('./auth');
 const pubsub = require('./pubsub');
 const logger = require('../shared/logger');
 const env = require('./env');
+const rateLimit = require('./rateLimit');
+
+const HELLO_LIMIT = { maxHits: 30, windowMs: 60_000 };
+
+function getClientIp(req) {
+  const peer = req.socket.remoteAddress || 'unknown';
+  const isLoopback = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
+  if (isLoopback && req.headers['x-real-ip']) return req.headers['x-real-ip'];
+  return peer;
+}
 
 function attachWsServer(httpServer, path) {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: env.WS_MAX_MESSAGE_BYTES });
 
   httpServer.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://localhost');
@@ -40,10 +50,15 @@ function attachWsServer(httpServer, path) {
     });
   });
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    if (wss.clients.size > env.MAX_CONCURRENT_CONNECTIONS) {
+      ws.close(1013, 'Server at capacity');
+      return;
+    }
     let userId = null;
     let unsubscribe = null;
     let isAlive = true;
+    const clientIp = getClientIp(req);
 
     const helloTimer = setTimeout(() => {
       if (!userId) {
@@ -83,6 +98,11 @@ function attachWsServer(httpServer, path) {
 
       if (msg.type === 'hello') {
         if (userId) return; // only one hello per connection
+        if (!rateLimit.hit(`ws-hello:${clientIp}`, HELLO_LIMIT)) {
+          send(ws, { type: 'hello-rejected', code: 'RATE_LIMITED', reason: 'Too many attempts.' });
+          ws.close(1008, 'Rate limited');
+          return;
+        }
         const result = await verifyAccessToken(msg.token);
         if (!result.valid) {
           send(ws, { type: 'hello-rejected', code: result.code, reason: result.reason });

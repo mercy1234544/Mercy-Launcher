@@ -26,7 +26,20 @@ async function verifyAccessToken(token) {
     logger.error('token verification error', { error: e.message });
     return { valid: false, code: 'SERVER_ERROR', reason: 'Auth service unreachable.' };
   }
-  if (error || !data || !data.user || typeof data.user.id !== 'string') {
+  if (error) {
+    // Supabase returning an error object (rather than throwing) can still
+    // mean "its own backend is down", not "this token is invalid" — a
+    // 5xx/429 from GoTrue must not be reported as AUTH_ERROR, the exact
+    // collapse the original bug report was about (a transient failure
+    // rendered as if the user or their credential were the problem).
+    const status = error.status || error.statusCode;
+    if (typeof status === 'number' && (status >= 500 || status === 429)) {
+      logger.error('auth backend error', { status, error: error.message });
+      return { valid: false, code: 'SERVER_ERROR', reason: 'Auth service unreachable.' };
+    }
+    return { valid: false, code: 'AUTH_ERROR', reason: 'Invalid or expired token.' };
+  }
+  if (!data || !data.user || typeof data.user.id !== 'string') {
     return { valid: false, code: 'AUTH_ERROR', reason: 'Invalid or expired token.' };
   }
   return { valid: true, userId: data.user.id };
