@@ -527,7 +527,7 @@ function registerIpcHandlers() {
       return {
         candidates: [{
           strategy: 'lan-direct' as const, address: `${info.lanAddress}:${info.port}`,
-          note: 'Works only if the joining friend is on this same local network. Assetto Corsa needs both TCP and UDP on this port, which a LAN connection provides automatically.',
+          note: `Works only if the joining friend is on this same local network. Assetto Corsa needs both TCP and UDP on this port, which a LAN connection provides automatically. Content Manager also needs the HTTP query port: ${info.httpPort}.`,
         }],
         relayAvailable: false, unavailableExplanation: null,
       };
@@ -549,26 +549,34 @@ function registerIpcHandlers() {
     }
 
     const sessionToken = supabaseAccessToken;
-    const [tcpReg, udpReg] = await Promise.all([
+    // Three registrations, not two: the real game port needs both TCP
+    // (handshake/chat) and UDP (car data), AND a real AC client (Content
+    // Manager especially) separately queries the HTTP port for server/car/
+    // track info as part of a normal connection — never tunneled before,
+    // which meant a friend joining through the relay had no way to reach
+    // it. See RelayConnectionManager's own header on why this doesn't
+    // collide with the game-port TCP registration despite both being 'tcp'.
+    const [tcpReg, udpReg, httpReg] = await Promise.all([
       relayConnectionManager.ensureHostRegistered(serverId, 'assettocorsa', 'tcp', info.port, sessionToken),
       relayConnectionManager.ensureHostRegistered(serverId, 'assettocorsa', 'udp', info.port, sessionToken),
+      relayConnectionManager.ensureHostRegistered(serverId, 'assettocorsa', 'tcp', info.httpPort, sessionToken),
     ]);
-    if (tcpReg.success && tcpReg.relayId && udpReg.success && udpReg.relayId) {
+    if (tcpReg.success && tcpReg.relayId && udpReg.success && udpReg.relayId && httpReg.success && httpReg.relayId) {
       return {
         candidates: [{
-          strategy: 'relay' as const, address: `relay:${tcpReg.relayId}+${udpReg.relayId}`,
-          relayId: tcpReg.relayId, relayIdUdp: udpReg.relayId,
-          note: 'Connects through the Mercy relay service (TCP + UDP) — no port forwarding required.',
+          strategy: 'relay' as const, address: `relay:${tcpReg.relayId}+${udpReg.relayId}+${httpReg.relayId}`,
+          relayId: tcpReg.relayId, relayIdUdp: udpReg.relayId, relayIdHttp: httpReg.relayId,
+          note: 'Connects through the Mercy relay service (TCP + UDP + HTTP) — no port forwarding required.',
         }],
         relayAvailable: true, unavailableExplanation: null,
       };
     }
-    // A real registration failure on EITHER transport means the connection
-    // genuinely wouldn't work (AC needs both) — honest failure, never a
-    // half-working candidate. Tear down whichever one DID succeed so it
+    // A real registration failure on ANY of the three means the connection
+    // genuinely wouldn't work (AC needs all three) — honest failure, never
+    // a half-working candidate. Tear down whichever DID succeed so it
     // doesn't leak an unused relay registration.
-    if (tcpReg.success || udpReg.success) relayConnectionManager.teardownHost(serverId);
-    return { candidates: [], relayAvailable: false, unavailableExplanation: tcpReg.reason || udpReg.reason || 'Could not reach the Mercy relay.' };
+    if (tcpReg.success || udpReg.success || httpReg.success) relayConnectionManager.teardownHost(serverId);
+    return { candidates: [], relayAvailable: false, unavailableExplanation: tcpReg.reason || udpReg.reason || httpReg.reason || 'Could not reach the Mercy relay.' };
   });
   // CLIENT side: once a friend's join request comes back authorized with a
   // strategy:'relay' endpoint, this actually connects to the relay and

@@ -652,7 +652,7 @@ declare global {
   // ── Connection negotiation types (mirror
   // src/main/services/connection/ConnectionNegotiator.ts) ────────────────────
   type EndpointStrategy = 'lan-direct' | 'upnp-direct' | 'relay';
-  interface EndpointCandidate { strategy: EndpointStrategy; address: string; relayId?: string; relayIdUdp?: string; note: string; }
+  interface EndpointCandidate { strategy: EndpointStrategy; address: string; relayId?: string; relayIdUdp?: string; relayIdHttp?: string; note: string; }
   interface EndpointPlan { candidates: EndpointCandidate[]; relayAvailable: boolean; unavailableExplanation: string | null; }
   interface RelayConnectResult { success: boolean; localAddress?: string; reason?: string; }
 

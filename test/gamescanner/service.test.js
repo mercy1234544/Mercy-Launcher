@@ -54,7 +54,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scanner1 = new GameScanner(userDataRoot, {
       steamPathOverride: steamRoot, knownGames: fixtureKnown, fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const results1 = await scanner1.scan();
     ok('Steam: generic enumeration finds a game with NO curated KNOWN_GAMES entry at all (real "broad list" behavior)', results1.some((g) => g.name === 'Some Random Steam Game' && g.mercyStatus === 'unsupported'));
@@ -70,7 +70,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scanner2 = new GameScanner(userDataRoot, {
       steamPathOverride: null, knownGames: fixtureKnown, fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: epicDir, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const results2 = await scanner2.scan();
     ok('Epic: generic enumeration finds a game with no curated entry', results2.some((g) => g.name === 'Some Epic-Only Game' && g.platform === 'epic'));
@@ -88,7 +88,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scanner3 = new GameScanner(userDataRoot, {
       steamPathOverride: steamRoot, knownGames: fixtureKnownWithFiveM, fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: epicDir, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const results3 = await scanner3.scan();
     const fivemEntry = results3.find((g) => g.mercyGameId === 'fivem');
@@ -107,7 +107,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scannerNoFiveM = new GameScanner(userDataRoot, {
       steamPathOverride: steamRoot, knownGames: fixtureKnownNoFiveMInstall, fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const resultsNoFiveM = await scannerNoFiveM.scan();
     ok('GTA V alone (no real FiveM install anywhere) never causes a fabricated FiveM entry', resultsNoFiveM.some((g) => g.name === 'Grand Theft Auto V') && !resultsNoFiveM.some((g) => g.mercyGameId === 'fivem'));
@@ -127,12 +127,12 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scannerGog = new GameScanner(userDataRoot, {
       steamPathOverride: null, knownGames: [], fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: gogFixture, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const resultsGog = await scannerGog.scan();
     ok('GOG: generic registry enumeration finds a real installed game with its real display name', resultsGog.some((g) => g.name === 'A Real GOG Game' && g.platform === 'gog'));
     const gogFixtureMissing = { 'GOGGAME-99999': { gameName: 'Uninstalled Game', path: path.join(base, 'does-not-exist') } };
-    const scannerGogMissing = new GameScanner(userDataRoot, { steamPathOverride: null, knownGames: [], fallbackLibraryFoldersOverride: [], epicManifestsDirOverride: null, gogRegistryRootOverride: gogFixtureMissing, ubisoftRegistryRootOverride: {}, rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [] });
+    const scannerGogMissing = new GameScanner(userDataRoot, { steamPathOverride: null, knownGames: [], fallbackLibraryFoldersOverride: [], epicManifestsDirOverride: null, gogRegistryRootOverride: gogFixtureMissing, ubisoftRegistryRootOverride: {}, rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null });
     const resultsGogMissing = await scannerGogMissing.scan();
     ok('GOG: a registry entry pointing at a path that does not really exist is never reported', resultsGogMissing.length === 0);
 
@@ -142,7 +142,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scannerUbi = new GameScanner(userDataRoot, {
       steamPathOverride: null, knownGames: [], fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: ubisoftFixture,
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const resultsUbi = await scannerUbi.scan();
     const ubiEntry = resultsUbi.find((g) => g.platform === 'ubisoft');
@@ -155,7 +155,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scannerRockstar = new GameScanner(userDataRoot, {
       steamPathOverride: null, knownGames: fixtureKnown, fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: rockstarFixture, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: rockstarFixture, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const resultsRockstar = await scannerRockstar.scan();
     const rockstarGta = resultsRockstar.find((g) => g.platform === 'rockstar');
@@ -169,7 +169,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scannerEa = new GameScanner(userDataRoot, {
       steamPathOverride: null, knownGames: eaKnown, fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: originFixture, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: originFixture, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const resultsEa = await scannerEa.scan();
     ok('EA/Origin: curated registry lookup finds a real installed game', resultsEa.some((g) => g.name === 'Fixture EA Game' && g.platform === 'ea'));
@@ -218,7 +218,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
       steamPathOverride: null, knownGames: msKnownWithFallback, fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
       rockstarRegistryRootOverride: {}, originRegistryRootOverride: {},
-      microsoftPackagesOverride: [], // Get-AppxPackage-style lookup finds nothing
+      microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null, // Get-AppxPackage-style lookup finds nothing
       startAppsOverride: [{ name: 'Minecraft', appId: 'Microsoft.MinecraftUWP.XboxApp_8wekyb3d8bbwe!App' }],
     });
     // microsoftPackagesOverride: [] short-circuits scanMicrosoftStore entirely in
@@ -266,7 +266,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scannerMultiDrive = new GameScanner(userDataRoot, {
       steamPathOverride: steamPrimary, knownGames: [], fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const resultsMultiDrive = await scannerMultiDrive.scan();
     ok('Steam multi-library: a game installed in a SECOND real library folder is found via the real libraryfolders.vdf', resultsMultiDrive.some((g) => g.name === 'Second Drive Game'));
@@ -278,7 +278,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scannerDup = new GameScanner(userDataRoot, {
       steamPathOverride: dupSteamRoot, knownGames: [], fallbackLibraryFoldersOverride: [dupSteamRoot],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const resultsDup = await scannerDup.scan();
     ok('the same real Steam library reachable via two paths never produces duplicate game entries', resultsDup.filter((g) => g.name === 'Dup Test Game').length === 1);
@@ -290,7 +290,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName, launchExec
     const scannerInvalid = new GameScanner(userDataRoot, {
       steamPathOverride: invalidSteamRoot, knownGames: [], fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const resultsInvalid = await scannerInvalid.scan();
     ok('an incomplete/invalid Steam manifest is skipped, not fabricated into a broken entry', resultsInvalid.length === 0);

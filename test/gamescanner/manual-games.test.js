@@ -15,7 +15,7 @@ function mkTempRoot() { return fs.mkdtempSync(path.join(os.tmpdir(), 'mercy-manu
   const base = mkTempRoot();
 
   try {
-    const scanner1 = new GameScanner(userDataRoot, { knownGames: [], fallbackLibraryFoldersOverride: [] });
+    const scanner1 = new GameScanner(userDataRoot, { knownGames: [], fallbackLibraryFoldersOverride: [], contentManagerProtocolCommandOverride: null });
 
     // ── Invalid paths are honestly rejected, never accepted ────────────────
     const missing = scanner1.addManualGame(path.join(base, 'does-not-exist.exe'));
@@ -43,7 +43,7 @@ function mkTempRoot() { return fs.mkdtempSync(path.join(os.tmpdir(), 'mercy-manu
     ok('adding the exact same real path again (even with different slash style) is rejected as a duplicate', dup.success === false);
 
     // ── Persistence across a fresh GameScanner instance (simulated restart) ─
-    const scanner2 = new GameScanner(userDataRoot, { knownGames: [], fallbackLibraryFoldersOverride: [] });
+    const scanner2 = new GameScanner(userDataRoot, { knownGames: [], fallbackLibraryFoldersOverride: [], contentManagerProtocolCommandOverride: null });
     ok('manually added games persist across a fresh GameScanner instance (app/computer restart)', scanner2.getManualGames().some((m) => m.executablePath === path.resolve(realExePath)));
     const rescanned = await scanner2.scan();
     ok('a fresh scan() still includes the manually added game — it is never lost by an automatic rescan', rescanned.some((g) => g.name === 'My Weird Game' && g.platform === 'manual'));
@@ -76,7 +76,7 @@ function mkTempRoot() { return fs.mkdtempSync(path.join(os.tmpdir(), 'mercy-manu
     const removeAgain = scanner2.removeManualGame(missingEntry.id);
     ok('removing an already-removed/unknown id is a real, honest no-op (false), never throws', removeAgain === false);
 
-    const scanner3 = new GameScanner(userDataRoot, { knownGames: [], fallbackLibraryFoldersOverride: [] });
+    const scanner3 = new GameScanner(userDataRoot, { knownGames: [], fallbackLibraryFoldersOverride: [], contentManagerProtocolCommandOverride: null });
     ok('removal persists across a fresh GameScanner instance too', scanner3.getManualGames().length === 0);
 
     console.log(`\nMANUAL GAME PATH TESTS: ${pass} passed, ${fail} failed`);

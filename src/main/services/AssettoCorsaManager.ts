@@ -453,14 +453,21 @@ export class AssettoCorsaManager {
    *  (isProcessListeningOnUdpPort — the same technique that fixed the
    *  "UDP port never came up" readiness bug) confirming the real UDP game
    *  socket is genuinely bound right now. */
-  async getConnectionInfo(id: string): Promise<{ lanAddress: string | null; port: number; portListening: boolean | null } | null> {
+  async getConnectionInfo(id: string): Promise<{ lanAddress: string | null; port: number; httpPort: number; portListening: boolean | null } | null> {
     const server = this.getServer(id);
     if (!server) return null;
     const proc = this.processes.get(id);
     const portListening = server.status === 'running' && server.pid
       ? await this.isProcessListeningOnUdpPort(server.pid, server.udpPort)
       : (proc ? null : false); // 'starting' with no confirmed bind yet is honestly unknown, not false
-    return { lanAddress: this.getLanAddress(), port: server.udpPort, portListening };
+    // httpPort is real, separate acServer.exe listener (its own log line:
+    // "Starting HTTP server on port <httpPort>") — a real AC client
+    // (Content Manager especially) queries it for server/car/track info as
+    // part of a normal connection, not just server-browser listing. It
+    // starts in the same boot sequence as the UDP/TCP game port, so the one
+    // already-verified portListening check above is trusted for both
+    // rather than adding a second redundant PID-scoped probe.
+    return { lanAddress: this.getLanAddress(), port: server.udpPort, httpPort: server.httpPort, portListening };
   }
 
   /** Real per-server content staging — the root-cause fix for "file not

@@ -32,21 +32,27 @@ interface HostRegistration {
 }
 
 export class RelayConnectionManager {
-  /** Keyed by `${serverId}::${transport}`, NOT just serverId — Assetto
-   *  Corsa genuinely needs BOTH a TCP and a UDP registration for the SAME
-   *  server (TCP for the connection handshake/chat, UDP for real-time car
-   *  data — the same real, documented convention every AC dedicated-server
-   *  port-forwarding guide uses: forward BOTH protocols on the same port
-   *  number). Minecraft/FiveM only ever register one transport per server,
-   *  so for them this key is functionally identical to keying by serverId
-   *  alone — this change is additive, not a behavior change for them. */
+  /** Keyed by `${serverId}::${transport}::${localPort}`, NOT just serverId
+   *  — Assetto Corsa genuinely needs THREE registrations for the SAME
+   *  server: TCP + UDP on the real game port (TCP for the connection
+   *  handshake/chat, UDP for real-time car data — the same real, documented
+   *  convention every AC dedicated-server port-forwarding guide uses), PLUS
+   *  a SEPARATE TCP registration for the real, distinct HTTP query port a
+   *  real AC client (Content Manager especially) uses as part of a normal
+   *  connection, not just server-browser listing. That third registration
+   *  is also 'tcp' transport, just a different port — the localPort is
+   *  included in the key specifically so it never collides with the
+   *  game-port TCP registration. Minecraft/FiveM only ever register one
+   *  transport+port per server, so for them this key remains functionally
+   *  identical to keying by serverId alone — this change is additive, not
+   *  a behavior change for them. */
   private hostRegistrations = new Map<string, HostRegistration>();
 
   constructor(private relayUrl: string | null) {}
 
   isConfigured(): boolean { return !!this.relayUrl; }
 
-  private key(serverId: string, transport: RelayTransport): string { return `${serverId}::${transport}`; }
+  private key(serverId: string, transport: RelayTransport, localPort: number): string { return `${serverId}::${transport}::${localPort}`; }
 
   /** HOST side: connect to the relay (if not already connected for this
    *  server+transport), authenticate with the given session token, and
@@ -61,7 +67,7 @@ export class RelayConnectionManager {
     serverId: string, game: RelayProtocolGame, transport: RelayTransport, localPort: number, sessionToken: string,
   ): Promise<RelayHostResult> {
     if (!this.relayUrl) return { success: false, reason: 'No Mercy relay is configured.' };
-    const key = this.key(serverId, transport);
+    const key = this.key(serverId, transport, localPort);
     const existing = this.hostRegistrations.get(key);
     if (existing && existing.client.getState() === 'ready') return { success: true, relayId: existing.relayId };
     if (existing) this.teardownRegistration(key);

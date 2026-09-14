@@ -45,6 +45,7 @@ function withMockedExecFile(mockImpl, fn) {
       microsoftPackagesOverride: [
         { packageFamilyName: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe', installLocation: 'C:\\fake\\MinecraftUWP', appId: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe!App' },
       ],
+      contentManagerProtocolCommandOverride: null,
     });
     const results = await scanner.scan();
     const mc = results.find((g) => g.id === 'microsoft-minecraft-uwp');

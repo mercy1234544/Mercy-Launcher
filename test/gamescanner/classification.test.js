@@ -54,7 +54,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName }) {
     const scanner = new GameScanner(userDataRoot, {
       steamPathOverride: steamRoot, knownGames: KNOWN_GAMES, fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: epicDir, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const results = await scanner.scan();
 
@@ -79,7 +79,7 @@ function mkEpicManifest(dir, { displayName, installLocation, appName }) {
     const scannerCm = new GameScanner(userDataRoot, {
       steamPathOverride: null, knownGames: fixtureWithRealPath, fallbackLibraryFoldersOverride: [],
       epicManifestsDirOverride: null, gogRegistryRootOverride: {}, ubisoftRegistryRootOverride: {},
-      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [],
+      rockstarRegistryRootOverride: {}, originRegistryRootOverride: {}, microsoftPackagesOverride: [], contentManagerProtocolCommandOverride: null,
     });
     const cmResults = await scannerCm.scan();
     const cm = cmResults.find((g) => g.name === 'Content Manager');

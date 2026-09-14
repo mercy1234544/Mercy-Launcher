@@ -39,7 +39,14 @@ export type ConnectionState = 'unconfigured' | 'connecting' | 'connected' | 'unr
 export type GameConnectionState =
   | 'idle' | 'connecting-direct' | 'connected-direct'
   | 'connecting-relay' | 'connected-relay' | 'failed';
-export interface GameConnectionStatus { state: GameConnectionState; detail?: string; localAddress?: string; }
+export interface GameConnectionStatus {
+  state: GameConnectionState; detail?: string; localAddress?: string;
+  /** Assetto Corsa's relay path only — the separate local HTTP tunnel a
+   *  real AC client (Content Manager especially) queries for server/car/
+   *  track info as part of a normal connection. Absent for every other
+   *  game/strategy, which only ever needs the one localAddress. */
+  httpAddress?: string;
+}
 
 interface FriendsPresenceState {
   connection: ConnectionState;
@@ -245,7 +252,7 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
     // (see main.ts's negotiateAssettoCorsaEndpoint and
     // RelayConnectionManager's ::transport-scoped keying) — absent/undefined
     // for every other game, which only ever needs one relay channel.
-    const endpoint = best ? { strategy: best.strategy, address: best.address, relayId: best.relayId, relayIdUdp: best.relayIdUdp } : null;
+    const endpoint = best ? { strategy: best.strategy, address: best.address, relayId: best.relayId, relayIdUdp: best.relayIdUdp, relayIdHttp: best.relayIdHttp } : null;
     const token = await window.electronAPI?.presence?.createJoinToken?.(request.serverId, mercyGameId, JOIN_TOKEN_TTL_MS, endpoint).catch(() => null);
     const result = await respondToJoinRequest(request.id, true, token || undefined, endpoint);
     if (result.error) return { error: result.error };
@@ -287,20 +294,33 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
       // Assetto Corsa needs BOTH a TCP and a UDP relay channel to the same
       // local port (see main.ts's negotiateAssettoCorsaEndpoint) — connect
       // both, sharing the SAME listenPort (a TCP listener and a UDP socket
-      // can coexist on one port number; they're independent namespaces).
+      // can coexist on one port number; they're independent namespaces) —
+      // PLUS a separate TCP relay channel for the real, distinct HTTP query
+      // port a real AC client (Content Manager especially) uses as part of
+      // a normal connection. That third tunnel needs its OWN local port
+      // (it's also TCP, and two TCP listeners can't share one port number).
       // Every other game only ever has relayIdUdp unset and takes the
       // original single-channel path unchanged.
       if (request.endpoint.relayIdUdp) {
-        const [tcpResult, udpResult]: { success: boolean; localAddress?: string; reason?: string }[] = await Promise.all([
+        const httpListenPort = request.endpoint.relayIdHttp ? 45000 + Math.floor(Math.random() * 5000) : null;
+        const [tcpResult, udpResult, httpResult]: { success: boolean; localAddress?: string; reason?: string }[] = await Promise.all([
           window.electronAPI?.connection?.connectViaRelay?.({
             joinRequestId: request.id, relayId: request.endpoint.relayId, token: request.token!, transport: 'tcp', listenPort,
           }).catch((e) => ({ success: false, reason: e?.message })) as Promise<any>,
           window.electronAPI?.connection?.connectViaRelay?.({
             joinRequestId: request.id, relayId: request.endpoint.relayIdUdp, token: request.token!, transport: 'udp', listenPort,
           }).catch((e) => ({ success: false, reason: e?.message })) as Promise<any>,
+          httpListenPort && request.endpoint.relayIdHttp
+            ? window.electronAPI?.connection?.connectViaRelay?.({
+                joinRequestId: request.id, relayId: request.endpoint.relayIdHttp, token: request.token!, transport: 'tcp', listenPort: httpListenPort,
+              }).catch((e) => ({ success: false, reason: e?.message })) as Promise<any>
+            : Promise.resolve({ success: true }),
         ]);
-        if (tcpResult?.success && udpResult?.success) setStatus({ state: 'connected-relay', localAddress: tcpResult.localAddress });
-        else setStatus({ state: 'failed', detail: tcpResult?.reason || udpResult?.reason || 'Could not connect through the Mercy relay (TCP+UDP).' });
+        if (tcpResult?.success && udpResult?.success && httpResult?.success) {
+          setStatus({ state: 'connected-relay', localAddress: tcpResult.localAddress, httpAddress: httpResult.localAddress });
+        } else {
+          setStatus({ state: 'failed', detail: tcpResult?.reason || udpResult?.reason || httpResult?.reason || 'Could not connect through the Mercy relay (TCP+UDP+HTTP).' });
+        }
         return;
       }
 

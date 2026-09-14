@@ -327,6 +327,11 @@ export interface GameScannerOptions {
    *  scanMicrosoftStore()) — never used outside tests; production always
    *  queries the real machine. */
   startAppsOverride?: { name: string; appId: string }[] | null;
+  /** Test seam for the real `acmanager://` URL-protocol-handler lookup (see
+   *  resolveContentManagerViaProtocolHandler()) — never used outside tests;
+   *  production always queries the real registry. `null`/omitted means "no
+   *  registered command" (protocol not registered on this machine). */
+  contentManagerProtocolCommandOverride?: string | null;
   knownGames?: KnownGameDef[];
   fallbackLibraryFoldersOverride?: string[];
 }
@@ -737,6 +742,32 @@ if (Test-Path '${rootPath}') {
    *  %SystemDrive%\XboxGames\ without this scanner needing to know the
    *  exact current package family name. Never fabricates an id: returns
    *  null if nothing real was found. */
+  /** Content Manager (AcTools) registers `acmanager://` as a real Windows
+   *  URL protocol handler the first time it runs — verified on a real
+   *  machine via `Get-ChildItem HKCU:\Software\Classes` (it shows up
+   *  alongside `acmanager.acreplay`/`acmanager.cmpreset`/`acmanager.kn5`
+   *  file-type handlers, all pointing at the same real executable). The
+   *  registered command's `(default)` value is the literal
+   *  `"<real path>\Content Manager.exe" "%1"` invocation Windows uses to
+   *  launch it, giving the real, current path regardless of where the user
+   *  put it — no folder is ever guessed. */
+  private async resolveContentManagerViaProtocolHandler(): Promise<string | null> {
+    let command: string | null;
+    if ('contentManagerProtocolCommandOverride' in this.options) {
+      command = this.options.contentManagerProtocolCommandOverride ?? null;
+    } else {
+      if (process.platform !== 'win32') return null;
+      command = await runPowerShell(
+        `(Get-ItemProperty -Path 'HKCU:\\Software\\Classes\\acmanager\\shell\\open\\command' -ErrorAction SilentlyContinue).'(default)'`,
+      );
+    }
+    if (!command) return null;
+    // The registered value is always a double-quoted path optionally
+    // followed by an argument (e.g. "%1") — extract just the quoted path.
+    const match = command.match(/^"([^"]+)"/);
+    return match ? match[1] : null;
+  }
+
   private async resolveMicrosoftAppId(def: KnownGameDef): Promise<string | null> {
     if (this.options.startAppsOverride) {
       const byPfn = def.microsoftPackageFamilyName
@@ -881,6 +912,25 @@ if (Test-Path '${rootPath}') {
             platformLabel: 'Content Manager', detectedAt: new Date().toISOString(),
           });
         }
+      }
+    }
+    // Last-resort, still-real fallback: Content Manager registers a genuine
+    // Windows URL protocol handler (`acmanager://`, used for the AC
+    // community's real "join via link" feature) the first time it's run,
+    // no matter where the user put it — confirmed on a real machine where
+    // it lived in neither of the two locations checked above (a custom
+    // Desktop folder). The registered command line names its own real,
+    // current executable path directly, exactly like Get-AppxPackage does
+    // for Microsoft Store apps elsewhere in this file — genuine OS/
+    // launcher metadata, never a guessed folder.
+    if (!Array.from(byId.values()).some((g) => g.id === 'content-manager' || g.id.endsWith('-content-manager'))) {
+      const exePath = await this.resolveContentManagerViaProtocolHandler();
+      if (exePath && fs.existsSync(exePath)) {
+        byId.set('direct-content-manager', {
+          id: 'direct-content-manager', name: 'Content Manager', mercyGameId: null, mercyStatus: 'unsupported',
+          installPath: path.dirname(exePath), executablePath: exePath, platform: 'direct',
+          platformLabel: 'Content Manager', detectedAt: new Date().toISOString(),
+        });
       }
     }
     // Manual entries (Part 1) are never rediscovered by a rescan — they're

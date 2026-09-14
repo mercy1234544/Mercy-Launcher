@@ -25,8 +25,10 @@ function handlerBody(ipcName) {
   const start = mainSrc.indexOf(`ipcMain.handle('${ipcName}'`);
   if (start === -1) return null;
   // Grab a generous slice — enough to contain the whole handler body without
-  // needing a real brace parser for a text-based check.
-  return mainSrc.slice(start, start + 2000);
+  // needing a real brace parser for a text-based check. negotiateAssettoCorsaEndpoint
+  // is the largest handler here (~4KB with the real 3-way TCP+UDP+HTTP relay
+  // registration) so this must stay comfortably above that.
+  return mainSrc.slice(start, start + 5000);
 }
 
 const mcHandler = handlerBody('connection:negotiateMinecraftEndpoint');
@@ -55,6 +57,27 @@ ok('negotiateAssettoCorsaEndpoint fails honestly (no relay attempt) when the tok
 ok(
   'PresenceManager.createJoinToken() is still exposed for its real purpose (join_requests.token) — not removed',
   !!joinTokenHandler && /presenceManager\.createJoinToken\(serverId, mercyGameId, ttlMs, endpoint\)/.test(joinTokenHandler)
+);
+
+// ── Real fix: Assetto Corsa needs a THIRD relay registration for the real,
+// separate HTTP query port (a real AC client, Content Manager especially,
+// queries it as part of a normal connection — previously never tunneled at
+// all). ─────────────────────────────────────────────────────────────────
+ok(
+  'REPRODUCED THE FIX: negotiateAssettoCorsaEndpoint registers a THIRD relay channel for info.httpPort, not just the game-port TCP+UDP pair',
+  /ensureHostRegistered\(serverId, 'assettocorsa', 'tcp', info\.httpPort, sessionToken\)/.test(acHandler || '')
+);
+ok(
+  'the relay candidate is only offered once ALL THREE registrations (TCP, UDP, HTTP) succeed — never a half-working candidate',
+  /httpReg\.success && httpReg\.relayId/.test(acHandler || '')
+);
+ok(
+  'the returned candidate exposes relayIdHttp for the renderer to connect a third tunnel',
+  /relayIdHttp:\s*httpReg\.relayId/.test(acHandler || '')
+);
+ok(
+  'a failure on ANY of the three registrations tears down whichever succeeded, never leaking a partial relay registration',
+  /if \(tcpReg\.success \|\| udpReg\.success \|\| httpReg\.success\) relayConnectionManager\.teardownHost/.test(acHandler || '')
 );
 
 ok(

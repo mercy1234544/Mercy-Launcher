@@ -152,23 +152,36 @@ function startUdpEchoServer() {
   // registration key actually allows this, and that a single teardownHost
   // call tears down both. ─────────────────────────────────────────────────
   const { server: udpEchoServer, port: udpEchoPort } = await startUdpEchoServer();
+  // A SEPARATE real TCP echo server standing in for the real HTTP query
+  // port acServer.exe also listens on (see main.ts's negotiateAssettoCorsaEndpoint) —
+  // a genuinely different port, but the SAME 'tcp' transport as the
+  // game-port TCP registration above. Proves the real fix: the host
+  // registration key includes localPort, so this doesn't collide with/
+  // overwrite the first TCP registration the way keying by serverId+transport
+  // alone used to.
+  const { server: httpEchoServer, port: httpEchoPort } = await startEchoServer();
   const dualManager = new RelayConnectionManager(relayUrl);
-  const [tcpReg, udpReg] = await Promise.all([
+  const [tcpReg, udpReg, httpReg] = await Promise.all([
     dualManager.ensureHostRegistered('srv-dual', 'assettocorsa', 'tcp', echoPort, 'dual-host-token'),
     dualManager.ensureHostRegistered('srv-dual', 'assettocorsa', 'udp', udpEchoPort, 'dual-host-token'),
+    dualManager.ensureHostRegistered('srv-dual', 'assettocorsa', 'tcp', httpEchoPort, 'dual-host-token'),
   ]);
   ok('registering the SAME serverId for TCP succeeds', tcpReg.success === true);
   ok('registering the SAME serverId for UDP succeeds independently of the TCP registration', udpReg.success === true);
+  ok('REPRODUCED THE FIX: a SECOND TCP registration for the same serverId (a different port, e.g. the real HTTP query port) succeeds independently, never overwriting the first TCP registration', httpReg.success === true);
   ok('TCP and UDP registrations for the same server get genuinely DIFFERENT relayIds — two independent channels, not one shared/overwritten one', tcpReg.relayId !== udpReg.relayId);
+  ok('the two TCP registrations (game port vs. HTTP port) also get genuinely DIFFERENT relayIds — proves the key collision is fixed, not just coincidentally working', tcpReg.relayId !== httpReg.relayId);
 
   const dualRequester = new RelayConnectionManager(relayUrl);
   const dualTcpListenPort = clientListenPort + 10;
   const dualUdpListenPort = clientListenPort + 11;
-  const [tcpClientResult, udpClientResult] = await Promise.all([
+  const dualHttpListenPort = clientListenPort + 12;
+  const [tcpClientResult, udpClientResult, httpClientResult] = await Promise.all([
     dualRequester.connectViaRelay('join-req-dual', tcpReg.relayId, 'dual-client-token', 'tcp', dualTcpListenPort),
     dualRequester.connectViaRelay('join-req-dual', udpReg.relayId, 'dual-client-token', 'udp', dualUdpListenPort),
+    dualRequester.connectViaRelay('join-req-dual', httpReg.relayId, 'dual-client-token', 'tcp', dualHttpListenPort),
   ]);
-  ok('the client side can join BOTH the TCP and UDP channels for the same join request', tcpClientResult.success === true && udpClientResult.success === true);
+  ok('the client side can join the TCP, UDP, AND second TCP (HTTP) channels for the same join request', tcpClientResult.success === true && udpClientResult.success === true && httpClientResult.success === true);
 
   const tcpRoundTrip = await new Promise((resolve, reject) => {
     const c = net.createConnection({ host: '127.0.0.1', port: dualTcpListenPort }, () => c.write(Buffer.from('ac-tcp')));
@@ -176,7 +189,7 @@ function startUdpEchoServer() {
     c.on('error', reject);
     setTimeout(() => reject(new Error('tcp timed out')), 5000);
   });
-  ok('real TCP bytes genuinely round-trip over the dedicated TCP channel', tcpRoundTrip === 'ac-tcp');
+  ok('real TCP bytes genuinely round-trip over the dedicated TCP (game port) channel', tcpRoundTrip === 'ac-tcp');
 
   const udpRoundTrip = await new Promise((resolve, reject) => {
     const c = dgram.createSocket('udp4');
@@ -186,11 +199,21 @@ function startUdpEchoServer() {
   });
   ok('real UDP datagrams genuinely round-trip over the SEPARATE UDP channel, independent of the TCP one', udpRoundTrip === 'ac-udp');
 
+  const httpRoundTrip = await new Promise((resolve, reject) => {
+    const c = net.createConnection({ host: '127.0.0.1', port: dualHttpListenPort }, () => c.write(Buffer.from('ac-http')));
+    c.on('data', (d) => { c.end(); resolve(d.toString()); });
+    c.on('error', reject);
+    setTimeout(() => reject(new Error('http-tunnel timed out')), 5000);
+  });
+  ok('REPRODUCED THE FIX: real bytes genuinely round-trip over the SEPARATE second-TCP (HTTP-port) channel, independent of the game-port TCP channel', httpRoundTrip === 'ac-http');
+
   dualManager.teardownHost('srv-dual');
   const afterDualTeardownTcp = await dualRequester.connectViaRelay('join-req-dual-2', tcpReg.relayId, 'dual-client-token', 'tcp', dualTcpListenPort + 1);
   const afterDualTeardownUdp = await dualRequester.connectViaRelay('join-req-dual-3', udpReg.relayId, 'dual-client-token', 'udp', dualUdpListenPort + 1);
-  ok('a single teardownHost() call tears down BOTH the TCP and UDP registrations for that server, not just one', afterDualTeardownTcp.success === false && afterDualTeardownUdp.success === false);
+  const afterDualTeardownHttp = await dualRequester.connectViaRelay('join-req-dual-4', httpReg.relayId, 'dual-client-token', 'tcp', dualHttpListenPort + 1);
+  ok('a single teardownHost() call tears down ALL THREE registrations for that server (TCP game port, UDP, and TCP HTTP port), not just some', afterDualTeardownTcp.success === false && afterDualTeardownUdp.success === false && afterDualTeardownHttp.success === false);
   udpEchoServer.close();
+  httpEchoServer.close();
 
   wss.close();
   echoServer.close();

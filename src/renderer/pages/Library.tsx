@@ -420,6 +420,9 @@ function FriendsPresenceSection() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-success font-semibold">Connected through Mercy Relay</p>
                     <p className="text-xs font-mono text-primary-300 mt-0.5">{status.localAddress}</p>
+                    {status.httpAddress && (
+                      <p className="text-[11px] text-surface-500 mt-0.5">Content Manager query address: <span className="font-mono text-surface-300">{status.httpAddress}</span></p>
+                    )}
                   </div>
                 ) : (
                   <div className="flex-1 min-w-0">
