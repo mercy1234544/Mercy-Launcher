@@ -1606,13 +1606,54 @@ async function importVehiclePack(opts: { sourcePath: string; serverPath: string;
  *  must go through this, so a second/racing call is a plain no-op here in
  *  OUR code — never reaching electron-updater's quitAndInstall() a second
  *  time, which is what caused the real double-installer race (see
- *  updateInstallTriggered's own comment above). */
+ *  updateInstallTriggered's own comment above).
+ *
+ *  The real fix for a genuine, reproducible installer failure ("Failed to
+ *  uninstall old application files ...: 2"), confirmed by reading
+ *  electron-updater's own real source (node_modules/electron-updater/out/
+ *  BaseUpdater.js): quitAndInstall() spawns the NEW installer process
+ *  SYNCHRONOUSLY, immediately — this app's own `app.quit()` is only called
+ *  afterward, inside a `setImmediate` callback deep inside electron-updater
+ *  itself. That means the new installer can start trying to close/replace
+ *  this app's own files WHILE this process — including its tray icon and
+ *  the minimize-to-tray "close" interception on the main window (see
+ *  createWindow()'s own 'close' handler) — is still fully alive. NSIS can't
+ *  delete a DLL/EXE a live process still holds open, which is exactly a
+ *  "Failed to uninstall old application files" failure. Tearing every
+ *  window and the tray down HERE, synchronously, before electron-updater
+ *  ever spawns the installer, releases this app's own file handles as
+ *  early as possible — never left to the 'before-quit' handler, which only
+ *  fires later, after the installer has already started. isQuitting is set
+ *  directly (not via app.quit(), which would itself race the same way)
+ *  so nothing re-opens/re-shows a window during the brief window before
+ *  electron-updater's own app.quit() call actually arrives.
+ *
+ *  quitAndInstall() is called SYNCHRONOUSLY, in the same tick as the
+ *  window-destroy loop above — NOT after a setTimeout/delay. Proven by
+ *  direct testing: destroying the last window synchronously fires this
+ *  app's own 'window-all-closed' handler (which calls app.quit()), and
+ *  app.quit() runs 'before-quit'/'will-quit' INLINE and can let the process
+ *  exit as soon as the current call stack unwinds — a setTimeout callback
+ *  scheduled after that point may simply never run, since the process can
+ *  already be gone by the time it would fire. Electron's app.quit() does
+ *  NOT abort the currently-executing synchronous code, so calling
+ *  quitAndInstall() immediately, right here, reliably still runs before
+ *  process exit — confirmed by direct testing against a real Electron
+ *  process (real spawnLog call observed) — where a setTimeout-based delay
+ *  was confirmed to sometimes NEVER FIRE AT ALL, silently skipping the
+ *  install entirely. */
 function triggerQuitAndInstall() {
   if (updateInstallTriggered) {
     console.log('[AutoUpdater] Install already triggered for this update — ignoring duplicate request.');
     return;
   }
   updateInstallTriggered = true;
+  console.log('[AutoUpdater] Tearing down windows/tray before installing, to avoid racing the installer for file locks...');
+  isQuitting = true;
+  destroyTray();
+  for (const win of BrowserWindow.getAllWindows()) {
+    try { win.destroy(); } catch {}
+  }
   console.log('[AutoUpdater] Quitting and installing...');
   autoUpdater.quitAndInstall(false, true);
 }
