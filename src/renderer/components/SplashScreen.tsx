@@ -71,13 +71,31 @@ export default function SplashScreen({ onComplete }: SplashScreenProps) {
           break;
 
         case 'ready':
-          // Installing/restarting is triggered once, centrally, by the main
-          // process's own update-downloaded handler — calling install()
-          // again from here raced against it (both firing for the same
-          // downloaded update) and could leave the install partially
-          // applied. This just reflects that status in the UI.
+          // REAL, CONFIRMED BUG this fixes: this comment used to claim the
+          // main process's own update-downloaded handler installs
+          // "centrally" — that was true once, but main.ts's handler was
+          // later changed (to fix a DIFFERENT bug: force-quitting the app
+          // mid-session from an unconditional background timer) to
+          // deliberately NEVER auto-install, only ever installing when the
+          // user explicitly clicks Restart (Settings' "Restart & Install")
+          // or the app quits gracefully on its own. Nobody updated this
+          // comment or this code, so the splash kept confidently claiming
+          // "ready — restarting..." while nothing ever actually restarted —
+          // confirmed live: a real download completed and sat fully
+          // verified for hours, the splash said "restarting" on every
+          // subsequent launch, and the OLD version kept running the whole
+          // time (this exact bug is why a real, already-fixed bug — the
+          // AccountAuthModal password field — kept appearing "unfixed" to
+          // the user, who was always testing the stale build).
+          //
+          // The splash screen is actually the SAFEST possible moment to
+          // install: the main window hasn't even been shown yet this
+          // session, so there is no in-progress game/server session or
+          // unsaved work to interrupt — unlike a random mid-session
+          // UpdateBanner completion. So trigger the real install here.
           setUpdatePhase('installing');
           setStatusText(`Update v${data.version || newVersion} ready — restarting...`);
+          window.electronAPI?.appUpdater?.install?.();
           break;
 
         case 'current':
