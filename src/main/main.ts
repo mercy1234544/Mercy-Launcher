@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, safeStorage } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import extractZip from 'extract-zip';
@@ -20,6 +20,7 @@ import { MinecraftManager } from './services/MinecraftManager';
 import { AssettoCorsaManager } from './services/AssettoCorsaManager';
 import { GameScanner } from './services/GameScanner';
 import { PresenceManager } from './services/PresenceManager';
+import { MercyCredentialStore } from './services/MercyCredentialStore';
 import { ConnectionNegotiator } from './services/connection/ConnectionNegotiator';
 import { RelayConnectionManager } from './services/connection/RelayConnectionManager';
 import { loadMainProcessEnv } from './services/envConfig';
@@ -81,6 +82,7 @@ let minecraftManager: MinecraftManager;
 let assettoCorsaManager: AssettoCorsaManager;
 let gameScanner: GameScanner;
 let presenceManager: PresenceManager;
+let mercyCredentialStore: MercyCredentialStore;
 let minecraftMarketplace: MinecraftMarketplace;
 let bedrockMarketplace: BedrockMarketplace;
 let themeManager: ThemeManager;
@@ -177,6 +179,7 @@ function initializeServices() {
   assettoCorsaManager = new AssettoCorsaManager(userDataPath);
   gameScanner = new GameScanner(userDataPath);
   presenceManager = new PresenceManager(userDataPath, { fivem: serverManager, minecraft: minecraftManager, assettoCorsa: assettoCorsaManager, gameScanner });
+  mercyCredentialStore = new MercyCredentialStore(userDataPath, safeStorage);
   minecraftMarketplace = new MinecraftMarketplace();
   bedrockMarketplace = new BedrockMarketplace(userDataPath);
   themeManager = new ThemeManager(userDataPath);
@@ -470,6 +473,19 @@ function registerIpcHandlers() {
   ipcMain.handle('presence:getFriends', () => presenceManager.getFriends());
   ipcMain.handle('presence:getSettings', () => presenceManager.getPresenceSettings());
   ipcMain.handle('presence:setSettings', (_, s: { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean }) => presenceManager.setPresenceSettings(s));
+
+  // Securely-remembered Mercy account credentials (see
+  // MercyCredentialStore.ts's own header) — used only to silently
+  // re-authenticate the SAME existing Supabase username/password account
+  // when a real session/refresh-token has actually expired, never a second
+  // account system. The plaintext password only ever crosses this one IPC
+  // boundary at the moment a real sign-in attempt needs it; it is never
+  // persisted anywhere in the renderer.
+  ipcMain.handle('mercyCredentials:save', (_, username: string, password: string) => mercyCredentialStore.save(username, password));
+  ipcMain.handle('mercyCredentials:load', () => mercyCredentialStore.load());
+  ipcMain.handle('mercyCredentials:hasStored', () => mercyCredentialStore.hasStored());
+  ipcMain.handle('mercyCredentials:getStoredUsername', () => mercyCredentialStore.getStoredUsername());
+  ipcMain.handle('mercyCredentials:clear', () => mercyCredentialStore.clear());
 
   // Real cross-computer join infrastructure — Minecraft first (see
   // ConnectionNegotiator.ts / RelayConnectionManager.ts). Reuses

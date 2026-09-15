@@ -230,6 +230,19 @@ interface ElectronAPI {
     createJoinToken: (serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string; relayId?: string } | null) => Promise<string>;
   };
 
+  /** Securely-remembered Mercy account credentials (OS-backed encryption
+   *  via Electron's safeStorage — see MercyCredentialStore.ts). The
+   *  plaintext password only ever crosses this boundary transiently, at
+   *  the moment a real sign-in attempt needs it — never persisted in the
+   *  renderer. */
+  mercyCredentials: {
+    save: (username: string, password: string) => Promise<boolean>;
+    load: () => Promise<{ username: string; password: string } | null>;
+    hasStored: () => Promise<boolean>;
+    getStoredUsername: () => Promise<string | null>;
+    clear: () => Promise<void>;
+  };
+
   connection: {
     negotiateMinecraftEndpoint: (serverId: string, supabaseAccessToken?: string) => Promise<EndpointPlan | null>;
     negotiateAssettoCorsaEndpoint: (serverId: string, supabaseAccessToken?: string) => Promise<EndpointPlan | null>;

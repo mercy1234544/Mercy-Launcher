@@ -199,6 +199,14 @@ const electronAPI = {
       ipcRenderer.invoke('presence:createJoinToken', serverId, mercyGameId, ttlMs, endpoint),
   },
 
+  mercyCredentials: {
+    save: (username: string, password: string) => ipcRenderer.invoke('mercyCredentials:save', username, password),
+    load: () => ipcRenderer.invoke('mercyCredentials:load'),
+    hasStored: () => ipcRenderer.invoke('mercyCredentials:hasStored'),
+    getStoredUsername: () => ipcRenderer.invoke('mercyCredentials:getStoredUsername'),
+    clear: () => ipcRenderer.invoke('mercyCredentials:clear'),
+  },
+
   connection: {
     negotiateMinecraftEndpoint: (serverId: string, supabaseAccessToken?: string) =>
       ipcRenderer.invoke('connection:negotiateMinecraftEndpoint', serverId, supabaseAccessToken),

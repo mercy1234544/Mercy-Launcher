@@ -34,15 +34,18 @@ ok('FriendsPresenceSection exists', sectionStart !== -1);
 const nextFunctionStart = librarySrc.indexOf('\nfunction ', sectionStart + 1);
 const section = librarySrc.slice(sectionStart, nextFunctionStart === -1 ? undefined : nextFunctionStart);
 
-// ── 1. Detects the real Mercy account session (useAuth), never the
-//    separate Vehicle Studio/Discord access gate (useAppAuth). ────────────
+// ── 1. Detects the real Mercy account session (useAuth). useAppAuth (the
+//    separate Vehicle Studio/Discord access gate) may be READ for a
+//    display-only "these are two different things" status line, but must
+//    never be able to satisfy the Mercy-account gate itself. ─────────────
 ok('reads the Mercy account profile from the real useAuth store', /const profile = useAuth\(\(s\) => s\.profile\)/.test(section));
 ok('imports useAuth from the real Supabase-backed store, not a new one', /import \{ useAuth \} from '\.\.\/stores\/useAuth';/.test(librarySrc));
-// (Explanatory comments in the section legitimately mention "useAppAuth" by
-// name to document why it's NOT used here — so check for an actual
-// call/import site, not just the word appearing anywhere.)
-ok('REPRODUCED THE FIX: FriendsPresenceSection never calls useAppAuth() (the separate Vehicle Studio/Discord access gate) — that state must never be conflated with a Mercy account session', !/\buseAppAuth\(/.test(section));
-ok('Library.tsx never imports useAppAuth at all', !/from '\.\.\/stores\/useAppAuth'/.test(librarySrc));
+ok('imports the real useAppAuth store only for a read-only status display', /import \{ useAppAuth \} from '\.\.\/stores\/useAppAuth';/.test(librarySrc));
+// REPRODUCED THE FIX's invariant, still enforced: the actual Mercy-account
+// gate condition is `if (!profile)` alone — useAppAuth's status is never
+// combined into that condition (e.g. `if (!profile && !launcherAccessStatus)`),
+// which would let launcher access silently stand in for a Mercy session.
+ok('REPRODUCED THE FIX: the no-Mercy-account gate condition checks ONLY profile, never combined with the launcher access status', /if \(!profile\) \{/.test(section) && !/if \(!profile[^)]*(launcherAccessStatus|useAppAuth)/.test(section) && !/if \([^)]*(launcherAccessStatus|useAppAuth)[^)]*!profile/.test(section));
 
 // ── 2. Does NOT show the generic "Please sign in again" message when there
 //    is no profile at all — that message is now reserved for a REAL
@@ -56,12 +59,13 @@ const noProfileBlock = noProfileBranch ? noProfileBranch[1] : '';
 ok('shows the exact required title "Sign in to your Mercy account"', /title="Sign in to your Mercy account"/.test(noProfileBlock));
 ok('shows the exact required explanation of what the Mercy account is for', /Friends & Presence uses your Mercy account to manage friends, presence, servers, and join requests\./.test(noProfileBlock));
 ok('does NOT show the "Please sign in again" / session-refresh copy in the no-profile branch', !/Please sign in again/.test(noProfileBlock) && !/session needs to be refreshed/.test(noProfileBlock));
+ok('REPRODUCED THE FIX: does NOT show the generic "Unable to connect" message when the real problem is simply no Mercy account being signed in', !/Unable to connect/.test(noProfileBlock));
 
-// ── 4. A clearly labeled "Sign in to Mercy" action that opens the modal
-//    state, never a fetch/refresh() retry (that could never succeed with
-//    no session to refresh). ───────────────────────────────────────────────
-ok('provides a clearly labeled "Sign in to Mercy" button', /Sign in to Mercy/.test(noProfileBlock));
-ok('the sign-in button opens the auth modal (setAuthModalOpen(true)), never just retries the network call', /onClick=\{\(\) => setAuthModalOpen\(true\)\}/.test(noProfileBlock));
+// ── 4. A clearly labeled "Connect Mercy Account" action that opens the
+//    modal state, never a fetch/refresh() retry (that could never succeed
+//    with no session to refresh). ───────────────────────────────────────
+ok('provides a clearly labeled "Connect Mercy Account" button', /Connect Mercy Account/.test(noProfileBlock));
+ok('the connect button opens the auth modal (setAuthModalOpen(true)), never just retries the network call', /onClick=\{\(\) => setAuthModalOpen\(true\)\}/.test(noProfileBlock));
 
 // ── 5. Reuses the EXISTING AccountAuthModal / Mercy username+password flow
 //    — no second login system, no duplicate modal component. ─────────────

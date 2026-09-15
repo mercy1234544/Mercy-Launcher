@@ -35,7 +35,28 @@ export default function AccountAuthModal({
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Defaults to checked — the closest match to this app's prior
+  // always-remember behavior for anyone who never sees/touches this new
+  // control. Unchecking it is the only way to sign in WITHOUT the
+  // credential being securely saved (see useAuth.ts's signIn/signUp
+  // `remember` parameter — this is the one and only place that decides it).
+  const [remember, setRemember] = useState(true);
 
+  // REAL, CONFIRMED BUG this fixes: every field's onChange used to call a
+  // single `reset()` that ALSO cleared the password — so typing into the
+  // password field itself ran `setPassword(e.target.value)` immediately
+  // followed by `reset()`'s own `setPassword('')` in the very same
+  // synchronous handler, which always wins (React setState calls to the
+  // same setter within one handler take the last value). Net effect: the
+  // password state was wiped back to empty on literally every keystroke,
+  // so the field could never accumulate any typed text — reproduced live
+  // against the actual packaged app (DevTools confirmed the input was
+  // correctly focused, not disabled/readOnly, pointer-events:auto — the
+  // DOM/CSS were never the problem). Field-level edits should only ever
+  // clear a stale error message, never silently discard what was just
+  // typed; a FULL reset (including the password) is still appropriate
+  // when actually switching between login/signup, so that stays separate.
+  const clearError = () => setError(null);
   const reset = () => { setError(null); setPassword(''); };
 
   const submit = async () => {
@@ -45,8 +66,8 @@ export default function AccountAuthModal({
     if (password.length < 6) return setError('Password must be at least 6 characters.');
     setBusy(true);
     const res = mode === 'login'
-      ? await signIn(u, password)
-      : await signUp(u, password, email || undefined);
+      ? await signIn(u, password, remember)
+      : await signUp(u, password, email || undefined, remember);
     setBusy(false);
     if (res.error) { setError(res.error); return; }
     toast.success(mode === 'login' ? `Welcome back, ${u}!` : `Account created — welcome, ${u}!`);
@@ -82,7 +103,7 @@ export default function AccountAuthModal({
               <div className="relative">
                 <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
                 <input
-                  value={username} onChange={(e) => { setUsername(e.target.value); reset(); }} onKeyDown={onKey}
+                  value={username} onChange={(e) => { setUsername(e.target.value); clearError(); }} onKeyDown={onKey}
                   placeholder="Username" autoFocus spellCheck={false}
                   className="w-full bg-overlay-3 border border-overlay-6 rounded-xl pl-9 pr-3 py-2.5 text-sm text-surface-100 placeholder-surface-600 focus:outline-none focus:border-primary-500/40"
                 />
@@ -90,7 +111,7 @@ export default function AccountAuthModal({
               <div className="relative">
                 <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
                 <input
-                  type="password" value={password} onChange={(e) => { setPassword(e.target.value); reset(); }} onKeyDown={onKey}
+                  type="password" value={password} onChange={(e) => { setPassword(e.target.value); clearError(); }} onKeyDown={onKey}
                   placeholder="Password"
                   className="w-full bg-overlay-3 border border-overlay-6 rounded-xl pl-9 pr-3 py-2.5 text-sm text-surface-100 placeholder-surface-600 focus:outline-none focus:border-primary-500/40"
                 />
@@ -99,13 +120,23 @@ export default function AccountAuthModal({
                 <div className="relative">
                   <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
                   <input
-                    type="email" value={email} onChange={(e) => { setEmail(e.target.value); reset(); }} onKeyDown={onKey}
+                    type="email" value={email} onChange={(e) => { setEmail(e.target.value); clearError(); }} onKeyDown={onKey}
                     placeholder="Email (optional — for recovery)"
                     className="w-full bg-overlay-3 border border-overlay-6 rounded-xl pl-9 pr-3 py-2.5 text-sm text-surface-100 placeholder-surface-600 focus:outline-none focus:border-primary-500/40"
                   />
                 </div>
               )}
             </div>
+
+            <label className="flex items-center gap-2 mt-3 text-xs text-surface-400 cursor-pointer select-none">
+              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-primary-500" />
+              Remember my Mercy account on this computer
+            </label>
+            {!remember && (
+              <p className="text-[11px] text-surface-500 mt-1">
+                This sign-in won't be remembered — you'll need to enter your password again next time.
+              </p>
+            )}
 
             {error && <p className="text-xs text-red-400 mt-2.5">{error}</p>}
 
