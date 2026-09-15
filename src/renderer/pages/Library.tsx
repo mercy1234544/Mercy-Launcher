@@ -9,6 +9,8 @@ import { Panel, SectionHeading, EmptyState, Toggle } from '../components/ui';
 import { getGame } from '../config/games';
 import { useFriendsPresence } from '../stores/useFriendsPresence';
 import { useLibraryPrefs } from '../stores/useLibraryPrefs';
+import { useAuth } from '../stores/useAuth';
+import AccountAuthModal from '../components/AccountAuthModal';
 import toast from 'react-hot-toast';
 
 // The Library is ONE unified list of games detected on this PC, plus a
@@ -285,13 +287,31 @@ function FriendsPresenceSection() {
     connection, friends, everyone, incoming, outgoing, incomingJoinRequests, outgoingJoinRequests, connectionStatus, settings, loading, addFriendError,
     init, teardown, addFriend, addFriendFromEveryone, accept, decline, remove, updateSettings, join, approveJoin, declineJoin, connectToApprovedJoin,
   } = useFriendsPresence();
+  // Friends/Presence's identity is the Mercy Supabase account (useAuth), NOT
+  // the separate Vehicle Studio/Discord access gate (useAppAuth, shown
+  // elsewhere in the sidebar) — a real, confirmed point of confusion: a user
+  // can be fully "logged in" to that unrelated access gate while having no
+  // Mercy account session at all, which is exactly what produced a
+  // misleading generic "Please sign in again" here instead of pointing at
+  // the actual fixable action (see the auth-required branch below, which
+  // now only ever means "you had a session and it expired/was rejected",
+  // never "you were never signed in").
+  const profile = useAuth((s) => s.profile);
   const [addUsername, setAddUsername] = useState('');
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [view, setView] = useState<PresenceView>('friends');
   const [addingFromEveryone, setAddingFromEveryone] = useState<string | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
 
   useEffect(() => { init(); return () => teardown(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The moment a Mercy account sign-in succeeds (profile goes null -> set),
+  // refresh immediately rather than waiting for the existing 60s fallback
+  // timer or the next WebSocket reconnect — no launcher restart required.
+  useEffect(() => {
+    if (profile) useFriendsPresence.getState().refresh();
+  }, [profile]);
 
   // The moment a friend's join request is authorized, actually attempt the
   // connection (direct address, or a real relay tunnel) — never left as a
@@ -339,6 +359,7 @@ function FriendsPresenceSection() {
   };
 
   return (
+    <>
     <Panel>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -368,6 +389,20 @@ function FriendsPresenceSection() {
         const hasData = friends.length > 0 || everyone.length > 0 || incoming.length > 0 || outgoing.length > 0;
         if (connection === 'unconfigured') {
           return <EmptyState icon={Users} title="No friend presence yet" description="Friends & Presence requires a Mercy account presence service, which isn't deployed yet. When available, friends' real activity will appear here — never fabricated or hardcoded." />;
+        }
+        // The real, confirmed root cause of a reported "Please sign in
+        // again" that should never have appeared: no Mercy account session
+        // exists at all (useAuth().profile is null) — a genuinely different
+        // situation from a real session that expired. The separate Vehicle
+        // Studio/Discord access gate (useAppAuth, shown in the sidebar) is
+        // NEVER treated as a substitute here — only a real Mercy account
+        // profile counts.
+        if (!profile) {
+          return (
+            <EmptyState icon={LogIn} title="Sign in to your Mercy account"
+              description="Friends & Presence uses your Mercy account to manage friends, presence, servers, and join requests."
+              action={<button onClick={() => setAuthModalOpen(true)} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5"><LogIn size={13} /> Sign in to Mercy</button>} />
+          );
         }
         if (connection === 'auth-required') {
           return (
@@ -562,5 +597,7 @@ function FriendsPresenceSection() {
         );
       })()}
     </Panel>
+    <AccountAuthModal open={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+    </>
   );
 }
