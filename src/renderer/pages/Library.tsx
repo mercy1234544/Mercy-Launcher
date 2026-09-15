@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import * as Popover from '@radix-ui/react-popover';
 import {
   LayoutGrid, Gamepad2, Search, Loader2, Play, ExternalLink, Users, UserPlus, Check, X, WifiOff, RefreshCw,
-  FolderPlus, Settings, MapPin, Trash2, AlertTriangle, Globe2, RotateCcw,
+  FolderPlus, Settings, MapPin, Trash2, AlertTriangle, Globe2, RotateCcw, LogIn,
 } from 'lucide-react';
 import { Panel, SectionHeading, EmptyState, Toggle } from '../components/ui';
 import { getGame } from '../config/games';
@@ -345,7 +345,7 @@ function FriendsPresenceSection() {
           <Users size={16} className="text-primary-300" />
           <p className="text-sm font-bold text-surface-100 uppercase tracking-wide">Friends & Presence</p>
         </div>
-        {connection === 'connected' && (
+        {(connection === 'connected' || connection === 'reconnecting' || connection === 'unreachable') && (
           <div className="flex gap-3">
             {PRIVACY_TOGGLES.map((t) => (
               <label key={t.key} className="flex items-center gap-1.5 text-[11px] text-surface-400 cursor-pointer select-none">
@@ -357,15 +357,46 @@ function FriendsPresenceSection() {
         )}
       </div>
 
-      {connection === 'unconfigured' ? (
-        <EmptyState icon={Users} title="No friend presence yet" description="Friends & Presence requires a Mercy account presence service, which isn't deployed yet. When available, friends' real activity will appear here — never fabricated or hardcoded." />
-      ) : loading ? (
-        <div className="flex items-center justify-center py-8"><Loader2 size={18} className="animate-spin text-primary-400" /></div>
-      ) : connection === 'unreachable' ? (
-        <EmptyState icon={WifiOff} title="Unable to connect to Mercy services." description="Your local games and servers are unaffected — only friends/presence needs the connection."
-          action={<button onClick={() => useFriendsPresence.getState().refresh()} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"><RefreshCw size={13} /> Retry</button>} />
-      ) : (
+      {(() => {
+        // Whether we have real, last-known-good data worth keeping on
+        // screen through a transient connection problem — the actual fix
+        // for "Retry may restore the shell but Friends remains empty": the
+        // store already preserves this data through a failed refresh (see
+        // useFriendsPresence.ts's refresh()), so the UI must actually show
+        // it instead of replacing it with a full-screen error, which used
+        // to hide it just as effectively as wiping it would have.
+        const hasData = friends.length > 0 || everyone.length > 0 || incoming.length > 0 || outgoing.length > 0;
+        if (connection === 'unconfigured') {
+          return <EmptyState icon={Users} title="No friend presence yet" description="Friends & Presence requires a Mercy account presence service, which isn't deployed yet. When available, friends' real activity will appear here — never fabricated or hardcoded." />;
+        }
+        if (connection === 'auth-required') {
+          return (
+            <EmptyState icon={LogIn} title="Please sign in again" description="Your Mercy session needs to be refreshed before Friends/Presence can continue. This does not affect your local games or servers."
+              action={<button onClick={() => useFriendsPresence.getState().refresh()} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"><RefreshCw size={13} /> Retry</button>} />
+          );
+        }
+        if (loading && !hasData) {
+          return <div className="flex items-center justify-center py-8"><Loader2 size={18} className="animate-spin text-primary-400" /></div>;
+        }
+        if (connection === 'unreachable' && !hasData) {
+          return (
+            <EmptyState icon={WifiOff} title="Unable to connect to Mercy services." description="Your local games and servers are unaffected — only friends/presence needs the connection."
+              action={<button onClick={() => useFriendsPresence.getState().refresh()} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"><RefreshCw size={13} /> Retry</button>} />
+          );
+        }
+        return (
         <>
+          {connection === 'unreachable' && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[11px] text-danger">
+              <WifiOff size={12} /> Unable to reach Mercy services right now — showing the last known friends/presence data.
+              <button onClick={() => useFriendsPresence.getState().refresh()} className="ml-auto text-danger underline decoration-dotted">Retry</button>
+            </div>
+          )}
+          {connection === 'reconnecting' && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-warning">
+              <Loader2 size={12} className="animate-spin" /> Reconnecting to Mercy services — your friends list is still shown from the last update.
+            </div>
+          )}
           <form onSubmit={submitAddFriend} className="flex items-center gap-2 mb-3">
             <input value={addUsername} onChange={(e) => setAddUsername(e.target.value)} placeholder="Add a friend by username…" className="input-field text-xs py-2 flex-1" />
             <button type="submit" className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5"><UserPlus size={13} /> Add</button>
@@ -528,7 +559,8 @@ function FriendsPresenceSection() {
             )
           )}
         </>
-      )}
+        );
+      })()}
     </Panel>
   );
 }

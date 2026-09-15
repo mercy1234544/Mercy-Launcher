@@ -21,7 +21,7 @@ const approveJoinBody = approveStart !== -1 ? storeSrc.slice(approveStart, conne
 
 ok('approveJoin exists', approveStart !== -1);
 
-ok('approveJoin imports the real supabase client (not just isSupabaseConfigured)', /import \{ isSupabaseConfigured, supabase \} from '\.\.\/lib\/supabase'/.test(storeSrc));
+ok('approveJoin imports the real supabase client (not just isMercyApiConfigured)', /import \{ supabase \} from '\.\.\/lib\/supabase'/.test(storeSrc));
 
 ok('approveJoin calls supabase.auth.getSession() to get the real access token', /supabase\.auth\.getSession\(\)/.test(approveJoinBody));
 ok('approveJoin reads session?.access_token', /sessionData\?\.session\?\.access_token/.test(approveJoinBody));
