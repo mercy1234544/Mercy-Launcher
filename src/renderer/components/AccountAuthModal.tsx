@@ -6,7 +6,28 @@ import toast from 'react-hot-toast';
 import { Loader2, Lock, User, Mail, X } from 'lucide-react';
 import { useAuth } from '../stores/useAuth';
 
-export default function AccountAuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+interface AccountAuthModalProps {
+  open: boolean;
+  onClose: () => void;
+  /** Overrides the "Log in" heading shown in login mode only — every caller
+   *  shares the exact same underlying Mercy username/password account
+   *  system (signIn/signUp below); this is copy only, never a second auth
+   *  implementation. Signup's heading ("Create account") is unaffected —
+   *  every caller creates the same one Mercy account, so there's nothing
+   *  context-specific to say there. */
+  loginTitle?: string;
+  /** Overrides the login-mode description only, for the same reason as
+   *  loginTitle. Defaults to the original Marketplace/Exclusive Scripts
+   *  copy so every existing caller keeps its exact current wording unless
+   *  it opts in. */
+  loginDescription?: string;
+}
+
+export default function AccountAuthModal({
+  open, onClose,
+  loginTitle = 'Log in',
+  loginDescription = 'Log in to access your Exclusive scripts.',
+}: AccountAuthModalProps) {
   const { signIn, signUp } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [username, setUsername] = useState('');
@@ -50,11 +71,11 @@ export default function AccountAuthModal({ open, onClose }: { open: boolean; onC
             className="glass-panel p-6 max-w-sm w-full mx-4"
           >
             <div className="flex items-center justify-between mb-1">
-              <h3 className="text-lg font-bold text-surface-100">{mode === 'login' ? 'Log in' : 'Create account'}</h3>
+              <h3 className="text-lg font-bold text-surface-100">{mode === 'login' ? loginTitle : 'Create account'}</h3>
               <button onClick={onClose} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-all"><X size={16} /></button>
             </div>
             <p className="text-xs text-surface-400 mb-4">
-              {mode === 'login' ? 'Log in to access your Exclusive scripts.' : 'Pick a username and password. Email is optional (for recovery).'}
+              {mode === 'login' ? loginDescription : 'Pick a username and password. Email is optional (for recovery).'}
             </p>
 
             <div className="space-y-2.5">

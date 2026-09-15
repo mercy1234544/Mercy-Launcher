@@ -68,7 +68,9 @@ ok('the sign-in button opens the auth modal (setAuthModalOpen(true)), never just
 ok('imports the real, existing AccountAuthModal component (not a new/duplicate login UI)', /import AccountAuthModal from '\.\.\/components\/AccountAuthModal';/.test(librarySrc));
 const accountAuthModalUsages = (librarySrc.match(/<AccountAuthModal\b/g) || []).length;
 ok('AccountAuthModal is rendered exactly once in Library.tsx (the gate reuses it, it does not duplicate it)', accountAuthModalUsages === 1);
-ok('the rendered modal is wired to the real open/close state used by the sign-in button', /<AccountAuthModal open=\{authModalOpen\} onClose=\{\(\) => setAuthModalOpen\(false\)\}\s*\/>/.test(librarySrc));
+ok('the rendered modal is wired to the real open/close state used by the sign-in button', /<AccountAuthModal[\s\S]*?open=\{authModalOpen\} onClose=\{\(\) => setAuthModalOpen\(false\)\}/.test(librarySrc));
+ok('the modal is given Friends/Mercy-appropriate contextual copy, never the Exclusive Scripts wording', /loginTitle="Log in to your Mercy account"/.test(librarySrc) && /loginDescription="Sign in to manage your friends, presence, servers, and join requests\."/.test(librarySrc));
+ok('the Friends & Presence gate never passes the Exclusive Scripts copy itself', !/AccountAuthModal[\s\S]{0,300}Exclusive scripts/.test(librarySrc.slice(librarySrc.indexOf('<AccountAuthModal'))));
 ok('Marketplace.tsx (the only other place AccountAuthModal is used) is untouched by this change', marketplaceSrc.includes('<AccountAuthModal open={authOpen} onClose={() => setAuthOpen(false)} />'));
 // The real underlying auth flow (username/password against Supabase) lives
 // entirely inside AccountAuthModal.tsx itself and is untouched — the gate

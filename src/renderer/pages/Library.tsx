@@ -597,7 +597,11 @@ function FriendsPresenceSection() {
         );
       })()}
     </Panel>
-    <AccountAuthModal open={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+    <AccountAuthModal
+      open={authModalOpen} onClose={() => setAuthModalOpen(false)}
+      loginTitle="Log in to your Mercy account"
+      loginDescription="Sign in to manage your friends, presence, servers, and join requests."
+    />
     </>
   );
 }
