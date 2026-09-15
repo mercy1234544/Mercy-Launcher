@@ -141,11 +141,42 @@ function stubModule(resolvedPath, exportsObj) {
     ok('REPRODUCED THE FIX: a WebSocket drop reported via applyWsStatus flips connection to "reconnecting"', s.connection === 'reconnecting');
     ok('a WebSocket-reported reconnect never touches the preserved friends/everyone data', s.friends.length === 2 && s.everyone.length === 1);
 
-    useFriendsPresence.getState().applyWsStatus('auth-required');
-    ok('applyWsStatus("auth-required") (e.g. a hello-rejected AUTH_ERROR) is reflected in connection', useFriendsPresence.getState().connection === 'auth-required');
+    // ── REGRESSION TEST for the real v1.105.0 bug: the WebSocket layer no
+    //    longer has an 'auth-required' status at all (see WsConnectionStatus
+    //    in friendsPresence.ts). REST refresh() is now the SOLE authority
+    //    for that verdict. Prove: (a) REST can still correctly raise
+    //    auth-required, (b) a WS 'reconnecting'/'connecting' blip can never
+    //    downgrade that away, hiding a real "please sign in again" behind a
+    //    misleading "still trying", and (c) only a real WS 'connected' (a
+    //    successful, freshly-verified hello-ack) or a real REST success can
+    //    clear it. ──────────────────────────────────────────────────────
+    state.shouldFail = true;
+    state.failureErrorCode = 'AUTH_ERROR';
+    await useFriendsPresence.getState().refresh();
+    ok('REST AUTH_ERROR still correctly produces "auth-required"', useFriendsPresence.getState().connection === 'auth-required');
+
+    useFriendsPresence.getState().applyWsStatus('reconnecting');
+    ok('REPRODUCED THE FIX: a WebSocket "reconnecting" signal must NOT overwrite a valid REST-derived "auth-required" verdict', useFriendsPresence.getState().connection === 'auth-required');
+
+    useFriendsPresence.getState().applyWsStatus('connecting');
+    ok('a WebSocket "connecting" signal also must not clear a real "auth-required" verdict', useFriendsPresence.getState().connection === 'auth-required');
 
     useFriendsPresence.getState().applyWsStatus('connected');
-    ok('applyWsStatus("connected") (a real hello-ack) restores connection to "connected"', useFriendsPresence.getState().connection === 'connected');
+    ok('REPRODUCED THE FIX: only a real WebSocket "connected" (a successful hello-ack) can clear "auth-required"', useFriendsPresence.getState().connection === 'connected');
+
+    // ── REST success can restore "connected" after a WS failure — the
+    //    other required recovery path (no WebSocket success needed at all,
+    //    since REST already independently proves the session is valid). ──
+    state.shouldFail = true;
+    state.failureErrorCode = 'AUTH_ERROR';
+    await useFriendsPresence.getState().refresh();
+    ok('(setup) connection is "auth-required" again before the WS-failure-then-REST-recovery check', useFriendsPresence.getState().connection === 'auth-required');
+    useFriendsPresence.getState().applyWsStatus('reconnecting');
+    ok('(setup) a WebSocket failure signal arrives while auth-required, and does not change anything', useFriendsPresence.getState().connection === 'auth-required');
+    state.shouldFail = false;
+    state.failureErrorCode = 'SERVER_ERROR';
+    await useFriendsPresence.getState().refresh();
+    ok('REPRODUCED THE FIX: REST success alone restores "connected" after a WS failure, with no WebSocket success required', useFriendsPresence.getState().connection === 'connected');
 
     useFriendsPresence.getState().applyWsStatus('connecting');
     ok('REPRODUCED THE FIX: a stray "connecting" callback right after a proven "connected" state does not downgrade it back', useFriendsPresence.getState().connection === 'connected');

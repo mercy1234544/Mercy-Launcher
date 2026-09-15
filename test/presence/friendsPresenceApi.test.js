@@ -241,10 +241,17 @@ const NO_SESSION = () => ({ data: { session: null } });
       ok('after unsubscribe(), a close no longer triggers a further reconnect', FakeWebSocket.instances.length === countAfterUnsubscribe);
     }
 
-    // ── WebSocket auth rejection — hello-rejected AUTH_ERROR must be
-    //    reported distinctly as 'auth-required', never as a plain
-    //    connectivity 'reconnecting' problem, so the UI can correctly ask
-    //    the user to sign in again instead of implying a network issue. ─
+    // ── WebSocket auth rejection — REGRESSION TEST for the real v1.105.0
+    //    bug: a hello-rejected AUTH_ERROR must NOT permanently poison the WS
+    //    lifecycle. It must report the exact same 'reconnecting' status as
+    //    any other transient failure, and a later, UNRELATED plain close
+    //    (e.g. a routine ping-timeout recycle) must still report
+    //    'reconnecting' too — never a stale 'auth-required' left over from
+    //    the earlier rejection. The WS layer no longer has any auth-specific
+    //    status at all (see WsConnectionStatus in friendsPresence.ts);
+    //    deciding whether the user genuinely needs to sign in again is
+    //    REST refresh()'s job, tested separately in
+    //    friendsPresenceStore.test.js. ────────────────────────────────────
     {
       class FakeWebSocket {
         constructor(url) {
@@ -267,23 +274,34 @@ const NO_SESSION = () => ({ data: { session: null } });
       const unsubscribe = mod.subscribeToFriendsUpdates(() => {}, (s) => statuses.push(s));
       await new Promise((r) => setTimeout(r, 30));
 
+      // A real, explicit server-side AUTH_ERROR rejection.
       FakeWebSocket.instances[0].emitMessage({ type: 'hello-rejected', code: 'AUTH_ERROR', reason: 'Token expired.' });
       FakeWebSocket.instances[0].close();
-      ok('REPRODUCED THE FIX: a hello-rejected AUTH_ERROR is reported as "auth-required", not a generic reconnect', statuses[statuses.length - 1] === 'auth-required');
+      ok('REPRODUCED THE FIX (1): a hello-rejected AUTH_ERROR reports the plain "reconnecting" status, never "auth-required" — the WS layer has no such state any more', statuses[statuses.length - 1] === 'reconnecting');
+      ok('no status value ever emitted is "auth-required" — the type itself no longer allows it', !statuses.includes('auth-required'));
 
       await new Promise((r) => setTimeout(r, 1300));
-      ok('the client still automatically retries even after an auth rejection (a token that was rotated in the meantime can self-heal)', FakeWebSocket.instances.length === 2);
+      ok('the client still automatically retries after an auth rejection', FakeWebSocket.instances.length === 2);
 
-      // A later successful hello-ack proves recovery back to a healthy state.
+      // A later successful hello-ack proves reconnect recovers to healthy.
       FakeWebSocket.instances[1].emitMessage({ type: 'hello-ack', userId: 'u-1' });
-      ok('a subsequent successful hello-ack clears the auth-required state back to "connected"', statuses[statuses.length - 1] === 'connected');
+      ok('REPRODUCED THE FIX (2): a subsequent successful reconnect returns to "connected"', statuses[statuses.length - 1] === 'connected');
+
+      // Now a PLAIN close, unrelated to auth, happens well after the earlier
+      // auth rejection. Under the old sticky-flag bug, this would have kept
+      // reporting 'auth-required' forever, since the flag was never reset by
+      // anything but a successful hello-ack. Prove that a routine close
+      // (e.g. the server's own ping-timeout recycle) now correctly reports
+      // 'reconnecting', not a leftover 'auth-required'.
+      FakeWebSocket.instances[1].close();
+      ok('REPRODUCED THE FIX (3): a normal close AFTER a previous auth failure reports "reconnecting", never a stale "auth-required"', statuses[statuses.length - 1] === 'reconnecting');
 
       unsubscribe();
     }
 
     // ── WebSocket, no session at all (never signed in / signed out) — must
-    //    report auth-required, never hang silently retrying forever without
-    //    any observable status. ────────────────────────────────────────────
+    //    report "reconnecting" (not a WS-layer auth state — see above) and
+    //    never hang silently without any observable status. ───────────────
     {
       class FakeWebSocket {
         constructor(url) { this.url = url; this.sent = []; FakeWebSocket.instances.push(this); }
@@ -301,7 +319,7 @@ const NO_SESSION = () => ({ data: { session: null } });
       const unsubscribe = mod.subscribeToFriendsUpdates(() => {}, (s) => statuses.push(s));
       await new Promise((r) => setTimeout(r, 30));
       ok('with no real session at all, no WebSocket is ever even constructed', FakeWebSocket.instances.length === 0);
-      ok('and the status is honestly reported as "auth-required", never a silent hang', statuses.includes('auth-required'));
+      ok('and the status is honestly reported as "reconnecting", never a silent hang, never a WS-layer auth state', statuses.includes('reconnecting') && !statuses.includes('auth-required'));
       unsubscribe();
     }
 

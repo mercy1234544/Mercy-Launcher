@@ -272,15 +272,26 @@ const WS_HELLO_TIMEOUT_MS = 5000;
 const WS_RECONNECT_BASE_MS = 1000;
 const WS_RECONNECT_MAX_MS = 30000;
 
-/** Observable connection lifecycle for the UI (Step: distinguish Connected /
- *  Reconnecting / Disconnected / Authentication required) — never inferred
- *  from silence. 'connecting' is the very first attempt; every later retry
- *  after a drop is 'reconnecting' so the UI can keep showing last-known-good
- *  data instead of treating a mid-session drop like a fresh cold start.
- *  'auth-required' is reported only when the server itself rejected the
- *  token (hello-rejected AUTH_ERROR) or no token could be read at all —
- *  never for a generic network/server failure, which stays 'reconnecting'. */
-export type WsConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'auth-required' | 'disconnected';
+/** Observable connection lifecycle for the UI — never inferred from silence.
+ *  'connecting' is the very first attempt; every later retry after a drop is
+ *  'reconnecting' so the UI can keep showing last-known-good data instead of
+ *  treating a mid-session drop like a fresh cold start.
+ *
+ *  This type deliberately has NO auth-specific state. The WebSocket layer is
+ *  responsible ONLY for connection/reconnection lifecycle — a missing token,
+ *  a `hello-rejected` (of any code, AUTH_ERROR included), a socket error, a
+ *  hello timeout, or a plain close all mean the exact same thing here: retry
+ *  with backoff, report 'reconnecting'. Deciding whether the user genuinely
+ *  needs to sign in again is REST refresh()'s job (see useFriendsPresence.ts)
+ *  — it re-derives that verdict fresh on every call from the real, current
+ *  errorCode, so it can never get permanently stuck the way a WS-lifetime
+ *  flag could. (This fixes a real v1.105.0 bug: a single hello-rejected
+ *  AUTH_ERROR — or even just a missing token during one early connect
+ *  attempt — used to latch a `lastFailureWasAuth` flag for the rest of the
+ *  subscription's life, so every later close, even a routine ping-timeout
+ *  recycle unrelated to auth, kept reporting 'auth-required' and permanently
+ *  overrode an otherwise perfectly healthy, REST-verified session.) */
+export type WsConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 export function subscribeToFriendsUpdates(onChange: () => void, onStatusChange?: (status: WsConnectionStatus) => void): () => void {
   if (!isMercyApiConfigured()) { onStatusChange?.('disconnected'); return () => {}; }
@@ -293,11 +304,6 @@ export function subscribeToFriendsUpdates(onChange: () => void, onStatusChange?:
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let attempt = 0;
   let hasConnectedOnce = false;
-  // Set only by an explicit server-side AUTH_ERROR rejection or a genuinely
-  // missing token — a closed socket/network error on its own never implies
-  // an auth problem, so it must not flip the UI to "sign in again" for a
-  // plain connectivity blip.
-  let lastFailureWasAuth = false;
 
   const clearTimers = () => {
     if (helloTimer) { clearTimeout(helloTimer); helloTimer = null; }
@@ -306,7 +312,7 @@ export function subscribeToFriendsUpdates(onChange: () => void, onStatusChange?:
 
   const scheduleReconnect = () => {
     if (stopped) return;
-    onStatusChange?.(lastFailureWasAuth ? 'auth-required' : 'reconnecting');
+    onStatusChange?.('reconnecting');
     const delay = Math.min(WS_RECONNECT_BASE_MS * 2 ** attempt, WS_RECONNECT_MAX_MS);
     attempt++;
     reconnectTimer = setTimeout(connect, delay);
@@ -314,7 +320,7 @@ export function subscribeToFriendsUpdates(onChange: () => void, onStatusChange?:
 
   async function connect() {
     if (stopped) return;
-    if (!supabase) { lastFailureWasAuth = true; scheduleReconnect(); return; }
+    if (!supabase) { scheduleReconnect(); return; }
     let token: string | undefined;
     try {
       // Always a FRESH token — never a cached/stale one — so a session that
@@ -322,7 +328,7 @@ export function subscribeToFriendsUpdates(onChange: () => void, onStatusChange?:
       const { data } = await supabase.auth.getSession();
       token = data.session?.access_token;
     } catch { /* handled below as "no token" */ }
-    if (!token) { lastFailureWasAuth = true; scheduleReconnect(); return; }
+    if (!token) { scheduleReconnect(); return; }
 
     let ws: WebSocket;
     try { ws = new WebSocket(wsUrl!); } catch { scheduleReconnect(); return; }
@@ -341,7 +347,6 @@ export function subscribeToFriendsUpdates(onChange: () => void, onStatusChange?:
         if (helloTimer) { clearTimeout(helloTimer); helloTimer = null; }
         attempt = 0; // a real, successful connection resets the backoff
         hasConnectedOnce = true;
-        lastFailureWasAuth = false;
         onStatusChange?.('connected');
         // Any `changed` events missed while disconnected are lost (this
         // socket is a push HINT, not a queued/replayed log) — one full
@@ -350,11 +355,12 @@ export function subscribeToFriendsUpdates(onChange: () => void, onStatusChange?:
         return;
       }
       if (msg?.type === 'hello-rejected') {
-        // An honest, typed rejection. AUTH_ERROR specifically means the
-        // token itself was refused — surfaced distinctly so the UI can ask
-        // the user to sign in again instead of implying a network problem.
-        // Any other code (e.g. SERVER_ERROR) still just reconnects.
-        lastFailureWasAuth = msg?.code === 'AUTH_ERROR';
+        // An honest, typed rejection (AUTH_ERROR/SERVER_ERROR/RATE_LIMITED).
+        // The server itself closes the socket right after sending this (see
+        // wsServer.js), so `ws.onclose` below fires next and schedules a
+        // plain reconnect — no code-specific branching here. A genuinely
+        // invalid session is REST refresh()'s call to make, not this
+        // transport-level handshake's.
         return;
       }
       if (msg?.type === 'changed') {

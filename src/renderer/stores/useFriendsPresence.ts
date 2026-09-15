@@ -245,8 +245,21 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
 
   applyWsStatus: (status) => {
     set((s) => {
+      // REST refresh() (above) is the SOLE authority for 'auth-required' —
+      // it re-derives that verdict fresh from the real, current errorCode on
+      // every call, so it can never get permanently stuck the way the old
+      // WS-lifetime `lastFailureWasAuth` flag could (the actual v1.105.0
+      // regression: one stale WS auth rejection kept overriding an otherwise
+      // healthy, REST-verified session on every later reconnect attempt).
+      // The WebSocket layer no longer reports an auth state at all (see
+      // WsConnectionStatus in friendsPresence.ts) — it only ever signals its
+      // own connect/reconnect lifecycle here. A 'reconnecting'/'connecting'
+      // blip must never downgrade a genuine 'auth-required' verdict (that
+      // would hide a real "please sign in again" behind a misleading
+      // "still trying" state); only a real WS 'connected' (a successful,
+      // freshly-verified hello-ack) proves the session is good again.
+      if (s.connection === 'auth-required' && status !== 'connected') return {};
       if (status === 'connected') return { connection: 'connected' };
-      if (status === 'auth-required') return { connection: 'auth-required' };
       if (status === 'reconnecting') return { connection: 'reconnecting' };
       // A bare 'connecting' callback fires once synchronously right as the
       // socket starts — including immediately after a REST refresh has
