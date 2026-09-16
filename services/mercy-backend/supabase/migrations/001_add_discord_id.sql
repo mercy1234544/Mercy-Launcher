@@ -15,8 +15,9 @@
 -- friend_requests, friendships, presence, servers, or join_requests is
 -- retyped, renamed, or dropped, and no existing row anywhere is rewritten
 -- by this statement.
+-- `unique` already creates a backing unique index (btree) on discord_id;
+-- a separate `create index` here would just be a redundant duplicate index
+-- that Postgres, pg_stat, and every "unused/duplicate index" linter would
+-- flag on this table, for zero extra query benefit.
 alter table public.profiles
   add column if not exists discord_id text unique;
-
-create index if not exists profiles_discord_id_idx
-  on public.profiles (discord_id);

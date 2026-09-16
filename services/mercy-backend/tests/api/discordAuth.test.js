@@ -74,6 +74,17 @@ test('verifyDiscordSession: a 403 (invalid session, distinct from expired) is al
   );
 });
 
+test('verifyDiscordSession: the auth service rate-limiting us (429) is SERVER_ERROR, never confused with the caller\'s own credential being invalid', async () => {
+  await withFetch(
+    async () => ({ ok: false, status: 429, async json() { return { error: 'rate limited' }; } }),
+    async () => {
+      const result = await verifyDiscordSession('whatever');
+      assert.equal(result.valid, false);
+      assert.equal(result.code, 'SERVER_ERROR', 'a 429 from the auth service is an outage/backpressure signal, not proof this token is bad');
+    }
+  );
+});
+
 test('verifyDiscordSession: the auth service being down (5xx) is SERVER_ERROR, never confused with AUTH_ERROR', async () => {
   await withFetch(
     async () => ({ ok: false, status: 503, async json() { return {}; } }),

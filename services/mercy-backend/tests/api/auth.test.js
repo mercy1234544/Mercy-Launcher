@@ -112,15 +112,26 @@ test('requireAuth: BOTH auth backends unreachable throws 503 SERVER_ERROR, not 4
 });
 
 test('resolveAuthenticatedUser: a token invalid for Supabase falls through to Discord-session verification', async () => {
-  // Supabase rejects it outright (not a Supabase token at all); the Discord
-  // auth service accepts it.
-  _setServiceClientForTesting(makeFakeSupabase({ authErrors: { 'discord-session-token': 'Invalid token.' } }));
+  // resolveAuthenticatedUser's Supabase path and its Discord-identity path
+  // both go through the SAME service-role client in production, so the fake
+  // here must genuinely answer BOTH .auth.getUser() (cleanly rejecting the
+  // token, not just lacking the method) AND the profiles/createUser surface
+  // discordIdentity.js uses — otherwise this test would "pass" only because
+  // .auth.getUser doesn't exist on the fake and throws, not because Supabase
+  // actually rejected the token as invalid.
   db._setPoolForTesting(makeFakeDbPool());
-  const fakeProfiles = makeFakeSupabaseWithProfiles({ profiles: [{ id: 'mapped-uuid', username: 'DiscordUser', discord_id: '999' }] });
-  // resolveDiscordIdentity uses the SAME service client seam as
-  // verifyAccessToken above — the last _setServiceClientForTesting call
-  // wins, so point it at the profiles-aware fake for this test.
+  const fakeProfiles = makeFakeSupabaseWithProfiles({
+    profiles: [{ id: 'mapped-uuid', username: 'DiscordUser', discord_id: '999' }],
+    authErrors: { 'discord-session-token': 'Invalid token.' },
+  });
   _setServiceClientForTesting(fakeProfiles);
+
+  // Prove the Supabase leg genuinely, cleanly rejects this token first —
+  // not that it crashed on a missing method and got treated as "invalid"
+  // by accident.
+  const supabaseLegResult = await verifyAccessToken('discord-session-token');
+  assert.equal(supabaseLegResult.valid, false);
+  assert.equal(supabaseLegResult.code, 'AUTH_ERROR', 'a clean Supabase rejection, not a SERVER_ERROR crash');
 
   await withFetch(
     async () => ({ ok: true, status: 200, async json() { return { user: { id: '999', discordUsername: 'DiscordUser' } }; } }),
@@ -164,10 +175,16 @@ test('resolveAuthenticatedUser: missing bearer token is rejected with 401 AUTH_E
 });
 
 test('resolveAuthenticatedUser: a first-seen Discord user is provisioned and the mapping is used for this request', async () => {
-  _setServiceClientForTesting(makeFakeSupabase({ authErrors: { tok: 'Invalid token.' } }));
   db._setPoolForTesting(makeFakeDbPool());
-  const fakeProfiles = makeFakeSupabaseWithProfiles({ profiles: [] });
+  // Same single-client requirement as the test above: this fake must answer
+  // .auth.getUser() with a genuine rejection, not lack the method entirely.
+  const fakeProfiles = makeFakeSupabaseWithProfiles({ profiles: [], authErrors: { tok: 'Invalid token.' } });
   _setServiceClientForTesting(fakeProfiles);
+
+  const supabaseLegResult = await verifyAccessToken('tok');
+  assert.equal(supabaseLegResult.valid, false);
+  assert.equal(supabaseLegResult.code, 'AUTH_ERROR', 'a clean Supabase rejection, not a SERVER_ERROR crash');
+
   await withFetch(
     async () => ({ ok: true, status: 200, async json() { return { user: { id: '123456', discordUsername: 'BrandNew' } }; } }),
     async () => {

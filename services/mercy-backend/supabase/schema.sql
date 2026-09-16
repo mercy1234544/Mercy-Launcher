@@ -6,6 +6,24 @@
 --
 -- Intended to be pasted into the Supabase SQL Editor (this project uses no migration
 -- tooling, per the contract's own §18.6 note).
+--
+-- NOT AUTHORITATIVE — reference/documentation copy only, discovered during the
+-- Discord-identity hardening review (2026-09) to have already drifted from the
+-- real source: comment wording, RLS policy names ("profiles select" vs the
+-- live "profiles read"), and the is_admin()/is_owner() body (exists(...) here
+-- vs coalesce((select ...), false) live) all differ, even though both encode
+-- the same table shapes and access rules. This is NOT a live-schema
+-- discrepancy — this file has never been run against Supabase, only the root
+-- /supabase/schema.sql (the Windows client's own copy, actually pasted into
+-- the Supabase SQL Editor) is authoritative for the live `profiles`/
+-- `entitlements` tables. Treat this copy as stale prose describing that
+-- schema, not as a script safe to execute; the migration adding
+-- profiles.discord_id (001_add_discord_id.sql) targets the REAL schema and
+-- was verified read-only against the live project, not against this file.
+-- This drift was left unresolved by the hardening review — reconciling it
+-- (either by regenerating this file from the live schema, or by deleting it
+-- in favor of always reading the root file directly) is a follow-up, out of
+-- scope for auth hardening.
 
 create extension if not exists pgcrypto;
 
