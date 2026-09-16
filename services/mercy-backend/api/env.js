@@ -47,4 +47,14 @@ module.exports = {
   WS_MAX_MESSAGE_BYTES: optionalInt('MERCY_API_WS_MAX_MESSAGE_BYTES', 8192),
 
   MAX_CONCURRENT_CONNECTIONS: optionalInt('MERCY_API_MAX_CONNECTIONS', 1000),
+
+  // The EXISTING Discord/Vehicle Studio launcher auth service (already
+  // deployed, already used by every Windows client for launcher access) —
+  // see api/discordAuth.js. This is the ONLY new environment variable this
+  // Discord-identity migration introduces; everything else the Discord
+  // verification path needs (Supabase service-role client) is already
+  // configured above/in shared/supabase.js. No shared secret is configured
+  // here — verification is a plain HTTPS call to this service's own public
+  // /session endpoint, the same one the desktop client already calls.
+  VEHICLE_STUDIO_AUTH_URL: (process.env.VEHICLE_STUDIO_AUTH_URL || 'https://auth.tryautoscout.com').replace(/\/$/, ''),
 };

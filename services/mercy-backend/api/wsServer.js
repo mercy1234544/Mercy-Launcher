@@ -21,7 +21,7 @@
 // another.
 
 const { WebSocketServer } = require('ws');
-const { verifyAccessToken } = require('./auth');
+const { resolveAuthenticatedUser } = require('./auth');
 const pubsub = require('./pubsub');
 const logger = require('../shared/logger');
 const env = require('./env');
@@ -103,7 +103,11 @@ function attachWsServer(httpServer, path) {
           ws.close(1008, 'Rate limited');
           return;
         }
-        const result = await verifyAccessToken(msg.token);
+        // Identity comes ONLY from this verified token — the hello message
+        // has no other field this server ever reads for identity purposes,
+        // so a client cannot present a discordId/userId directly even if
+        // it sent one (see api/auth.js's resolveAuthenticatedUser).
+        const result = await resolveAuthenticatedUser(msg.token);
         if (!result.valid) {
           send(ws, { type: 'hello-rejected', code: result.code, reason: result.reason });
           ws.close(1008, 'Auth failed');
