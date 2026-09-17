@@ -7,11 +7,6 @@ const WebSocket = require('ws');
 
 process.env.SUPABASE_URL = 'http://localhost:0';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
-// An invalid-Supabase-token test now falls through to Discord-session
-// verification (see api/auth.js's resolveAuthenticatedUser) — point it at
-// a non-routable address so this suite never makes a real network call to
-// the live production auth service.
-process.env.VEHICLE_STUDIO_AUTH_URL = 'http://127.0.0.1:0';
 // Fast ping cycle so the timeout test doesn't take 45s+ real time.
 process.env.MERCY_API_WS_PING_INTERVAL_MS = '150';
 process.env.MERCY_API_WS_PING_TIMEOUT_MS = '250';

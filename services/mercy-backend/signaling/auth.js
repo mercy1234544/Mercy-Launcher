@@ -1,6 +1,7 @@
 'use strict';
 
 const { getServiceClient } = require('../shared/supabase');
+const localDb = require('../shared/localDb');
 const logger = require('../shared/logger');
 
 /**
@@ -36,21 +37,22 @@ async function verifyHostToken(token) {
 
 /**
  * Confirms the authenticated host user actually owns serverId, using the
- * existing `servers` table (audit §18.2) — no schema change.
+ * `servers` table `mercy-api` owns (api/repo/servers.js) in the local
+ * `mercy_backend` Postgres database — NOT Supabase. `servers` was migrated
+ * off Supabase when mercy-api's local-Postgres Friends/Presence/servers
+ * schema was introduced (see shared/env.js's DB_* header comment); Supabase
+ * has no `servers` table for this app anymore, so a lookup against it here
+ * would silently find nothing and reject every real host registration.
  */
 async function verifyServerOwnership(userId, serverId) {
-  const supabase = getServiceClient();
-  const { data, error } = await supabase
-    .from('servers')
-    .select('id, owner_id')
-    .eq('id', serverId)
-    .maybeSingle();
-  if (error) {
-    logger.error('server ownership lookup failed', { error: error.message });
+  try {
+    const { rows } = await localDb.query('select owner_id from servers where id = $1', [serverId]);
+    if (rows.length === 0) return false;
+    return rows[0].owner_id === userId;
+  } catch (e) {
+    logger.error('server ownership lookup failed', { error: e.message });
     return false;
   }
-  if (!data) return false;
-  return data.owner_id === userId;
 }
 
 /**
@@ -58,8 +60,11 @@ async function verifyServerOwnership(userId, serverId) {
  * PresenceManager.createJoinToken() and stored verbatim on join_requests.token
  * at approval time. The relay has no way to verify the HMAC signature (it never
  * receives the host's per-install secret), so it authorizes by exact-string
- * lookup against the row Supabase itself recorded. See
- * docs/backend-architecture.md §4.
+ * lookup against the row the backend itself recorded. See
+ * docs/backend-architecture.md §4. `join_requests` lives in the same local
+ * `mercy_backend` Postgres database as `servers` above — mercy-api's
+ * api/repo/joins.js writes it there via `db.query`/`withTransaction`, never
+ * through Supabase, so this must read from the same place, not Supabase.
  */
 function decodeJoinTokenPayload(token) {
   if (typeof token !== 'string' || !token.includes('.')) return null;
@@ -90,17 +95,17 @@ async function verifyClientToken(token) {
     return { valid: false, reason: 'Token expired.' };
   }
 
-  const supabase = getServiceClient();
-  const { data, error } = await supabase
-    .from('join_requests')
-    .select('id, host_id, requester_id, server_id, status, expires_at, token')
-    .eq('token', token)
-    .maybeSingle();
-
-  if (error) {
-    logger.error('join_requests lookup failed', { error: error.message });
+  let rows;
+  try {
+    ({ rows } = await localDb.query(
+      'select id, host_id, requester_id, server_id, status, expires_at, token from join_requests where token = $1',
+      [token]
+    ));
+  } catch (e) {
+    logger.error('join_requests lookup failed', { error: e.message });
     return { valid: false, reason: 'Server error.' };
   }
+  const data = rows[0] || null;
   if (!data || data.token !== token) {
     return { valid: false, reason: 'Invalid token.' };
   }

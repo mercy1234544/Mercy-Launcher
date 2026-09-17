@@ -6,6 +6,30 @@ const profiles = require('../profiles');
 const { ApiError } = require('../errors');
 const env = require('../env');
 
+// A host's Mercy Launcher plans candidate endpoints itself (lan-direct,
+// upnp-direct, relay — see docs/mercy-api-contract.md's `endpoint` shape)
+// and this API stores whatever it sends verbatim. lan-direct legitimately
+// carries a private LAN address (only reachable by a friend on the same
+// network, with its own caveat surfaced client-side) — that's fine. What's
+// never fine, for ANY strategy, is a loopback/unspecified address: it can
+// only ever mean "the host's own machine", which is unreachable by
+// definition for a remote friend's client. A client bug (or a manual/buggy
+// endpoint) that produces one must not silently succeed and hand a
+// friend an address that can never work.
+const UNREACHABLE_HOST_RE = /^(127(?:\.\d{1,3}){3}|0\.0\.0\.0|::1|localhost)$/i;
+
+function assertEndpointReachable(endpoint) {
+  if (!endpoint || typeof endpoint !== 'object' || typeof endpoint.address !== 'string') return;
+  const host = endpoint.address.split(':')[0].replace(/^\[|\]$/g, '');
+  if (UNREACHABLE_HOST_RE.test(host)) {
+    throw new ApiError(
+      'BAD_REQUEST',
+      'endpoint.address is a loopback/unspecified address, which can never be reachable by a remote friend.',
+      400
+    );
+  }
+}
+
 async function requestJoin(userId, serverId) {
   return db.withTransaction(async (client) => {
     const { rows } = await client.query('select * from servers where id = $1', [serverId]);
@@ -40,6 +64,7 @@ async function respondToJoinRequest(userId, requestId, approve, token, endpoint)
     if (!row) throw new ApiError('REQUEST_NOT_FOUND', 'Join request not found.', 404);
     if (row.host_id !== userId) throw new ApiError('FORBIDDEN', 'Only the host can respond to this join request.', 403);
     if (row.status !== 'pending') throw new ApiError('REQUEST_NOT_PENDING', 'Join request is not pending.', 409);
+    if (approve) assertEndpointReachable(endpoint);
 
     await client.query(
       `update join_requests

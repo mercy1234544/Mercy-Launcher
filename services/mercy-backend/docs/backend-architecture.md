@@ -46,9 +46,25 @@ been approved to join (join-tokens are minted per-approval, not per-hosting-sess
 Supabase Auth access token (JWT) — the one real, live credential a hosting user already
 holds (audit §4A). The relay verifies it locally against `SUPABASE_JWT_SECRET` (standard
 JWT signature check, no network call) and extracts `sub` as the authenticated user id.
-On `register-host`, the relay additionally queries Supabase (service role) to confirm
-`servers.id = serverId AND servers.owner_id = sub` before issuing a `relayId` — using the
-existing `servers` table and its existing ownership semantics (§18.2), not a new table.
+On `register-host`, the relay additionally queries `servers.id = serverId AND
+servers.owner_id = sub` before issuing a `relayId`.
+
+**Correction (production-safety task, 2026-09-17):** that ownership query originally
+targeted Supabase, on the assumption of §18.2's `servers` table living there. It does
+not, and never has since `mercy-api` was built — `servers` (and `join_requests`, §4
+below) live ONLY in a dedicated local Postgres database (`mercy_backend`); see
+`api/env.js`'s own header comment: "unrelated to Supabase (which remains the identity
+provider only, never Friends/Presence data storage after this migration)." Supabase
+has no `servers`/`join_requests` table for this app at all, so the original
+Supabase-backed query here silently found zero rows for every real server and
+rejected every real `register-host` — **the relay's host-registration and
+join-authorization paths (§4 below) were completely non-functional against
+production data; no friend could ever actually join a hosted server through the
+relay.** `verifyServerOwnership`/`verifyClientToken` in `signaling/auth.js` now query
+the local `mercy_backend` database directly, through a second, independent
+`pg.Pool` (`shared/localDb.js`) — sharing the database `api/db.js` uses but not its
+process or pool, consistent with the two-separate-PM2-apps failure-domain split this
+doc's own intro describes. `verifyHostToken`'s Supabase identity check is unaffected.
 
 This is unchanged wire format (`token` stays an opaque string) and does not touch
 `protocol.ts`. It **does** require future work on the Windows client (main.ts would need
@@ -65,12 +81,12 @@ row (`join_requests.token`, audit §18.2). The relay cannot verify its HMAC sign
 
 1. Base64url-decode the body (no signature check possible/needed here) to read
    `serverId`, `mercyGameId`, `expiresAt`, `nonce` — matches `JoinTokenPayload` (§5).
-2. Query Supabase (service role) for a `join_requests` row where `token` equals the
-   **exact** presented string and `status = 'authorized'`. An exact-string match against
-   the value Supabase itself stored at approval time is the equivalent security
-   property an HMAC check would give (a forged/tampered token cannot match any stored
-   row), sourced from data the backend is already required to consult per audit §7 step 7
-   ("the relay is expected to re-verify this against Supabase itself").
+2. Query the local `mercy_backend` Postgres database (NOT Supabase — see the
+   correction under §3 above) for a `join_requests` row where `token` equals the
+   **exact** presented string and `status = 'authorized'`. An exact-string match
+   against the value the backend itself stored at approval time (via `mercy-api`'s
+   `api/repo/joins.js`) is the equivalent security property an HMAC check would give
+   (a forged/tampered token cannot match any stored row).
 3. Reject if `expires_at` (SQL column) has passed, or if the decoded payload's
    `expiresAt` has passed (defense in depth — the two should agree).
 4. Enforce **single-use** the same way the client's own (unused) code does it (§5):

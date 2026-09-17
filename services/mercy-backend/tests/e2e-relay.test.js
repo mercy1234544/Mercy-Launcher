@@ -11,6 +11,8 @@ process.env.MERCY_RELAY_PORT = '0'; // ask the OS for a free ephemeral port
 
 const { _setServiceClientForTesting } = require('../shared/supabase');
 const { makeFakeSupabase } = require('./helpers/fakeSupabase');
+const { makeFakeLocalDb } = require('./helpers/fakeLocalDb');
+const { _setPoolForTesting } = require('../shared/localDb');
 const { buildJoinToken } = require('./helpers/joinToken');
 
 const HOST_USER_ID = 'user-host-1';
@@ -25,8 +27,15 @@ const joinToken = buildJoinToken({
   nonce: 'e2e-nonce-1',
 });
 
+// Identity (host token) stays on the Supabase fake; servers/join_requests
+// are mercy-api's local-Postgres data (see signaling/auth.js).
 _setServiceClientForTesting(
   makeFakeSupabase({
+    authUsers: { [HOST_ACCESS_TOKEN]: { id: HOST_USER_ID } },
+  })
+);
+_setPoolForTesting(
+  makeFakeLocalDb({
     servers: [{ id: SERVER_ID, owner_id: HOST_USER_ID }],
     joinRequests: [
       {
@@ -39,7 +48,6 @@ _setServiceClientForTesting(
         token: joinToken,
       },
     ],
-    authUsers: { [HOST_ACCESS_TOKEN]: { id: HOST_USER_ID } },
   })
 );
 

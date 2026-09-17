@@ -12,6 +12,7 @@ const serversRepo = require('./repo/servers');
 const joinsRepo = require('./repo/joins');
 const logger = require('../shared/logger');
 const rateLimit = require('./rateLimit');
+const db = require('./db');
 
 // General per-IP ceiling across every route (protects the process itself).
 const GENERAL_LIMIT = { maxHits: 300, windowMs: 5 * 60_000 };
@@ -78,6 +79,16 @@ function send(res, status, body) {
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
+
+route('GET', '/v1/health', async () => {
+  try {
+    await db.query('select 1');
+    return { status: 200, body: { status: 'ok', db: 'ok' } };
+  } catch (e) {
+    logger.error('health check db failure', { error: e.message });
+    return { status: 503, body: { status: 'degraded', db: 'error' } };
+  }
+});
 
 route('GET', '/v1/friends', async (req) => {
   const userId = await requireAuth(req);

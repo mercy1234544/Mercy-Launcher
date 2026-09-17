@@ -6,11 +6,6 @@ const http = require('http');
 
 process.env.SUPABASE_URL = 'http://localhost:0';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
-// An invalid-Supabase-token request now falls through to Discord-session
-// verification (see api/auth.js's resolveAuthenticatedUser) — point it at
-// a non-routable address so this suite never makes a real network call to
-// the live production auth service.
-process.env.VEHICLE_STUDIO_AUTH_URL = 'http://127.0.0.1:0';
 
 const { hasTestDb, setupTestDb, truncateAll, teardownTestDb } = require('./helpers/testDb');
 const { _setServiceClientForTesting } = require('../../shared/supabase');
@@ -19,8 +14,8 @@ const db = require('../../api/db');
 const { handleRequest } = require('../../api/http');
 
 const PROFILES = [
-  { id: 'u1', username: 'hunter' },
-  { id: 'u2', username: 'friendo' },
+  { id: '00000000-0000-4000-8000-000000000001', username: 'hunter' },
+  { id: '00000000-0000-4000-8000-000000000002', username: 'friendo' },
 ];
 
 function startServer() {
@@ -39,7 +34,7 @@ test(
   async (t) => {
     const pool = await setupTestDb();
     db._setPoolForTesting(pool);
-    _setServiceClientForTesting(makeFakeSupabase({ profiles: PROFILES, authUsers: { 'tok-u1': { id: 'u1' }, 'tok-u2': { id: 'u2' } } }));
+    _setServiceClientForTesting(makeFakeSupabase({ profiles: PROFILES, authUsers: { 'tok-u1': { id: '00000000-0000-4000-8000-000000000001' }, 'tok-u2': { id: '00000000-0000-4000-8000-000000000002' } } }));
 
     const server = await startServer();
     const base = `http://127.0.0.1:${server.address().port}`;

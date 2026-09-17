@@ -8,6 +8,8 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
 
 const { _setServiceClientForTesting } = require('../shared/supabase');
 const { makeFakeSupabase } = require('./helpers/fakeSupabase');
+const { makeFakeLocalDb } = require('./helpers/fakeLocalDb');
+const { _setPoolForTesting } = require('../shared/localDb');
 const { buildJoinToken } = require('./helpers/joinToken');
 const auth = require('../signaling/auth');
 
@@ -51,24 +53,25 @@ test('host token: malformed (non-string) token is rejected without calling Supab
   assert.equal(result.reason, 'Malformed token.');
 });
 
+// server ownership and client-token lookups read the LOCAL `mercy_backend`
+// Postgres database (shared/localDb.js) — mercy-api owns `servers` and
+// `join_requests` there, not in Supabase. See signaling/auth.js's own
+// header comments on verifyServerOwnership/verifyClientToken.
+
 test('server ownership: true when owner matches', async () => {
-  _setServiceClientForTesting(
-    makeFakeSupabase({ servers: [{ id: 'srv-1', owner_id: 'user-123' }] })
-  );
+  _setPoolForTesting(makeFakeLocalDb({ servers: [{ id: 'srv-1', owner_id: 'user-123' }] }));
   const owns = await auth.verifyServerOwnership('user-123', 'srv-1');
   assert.equal(owns, true);
 });
 
 test('server ownership: false for a different user', async () => {
-  _setServiceClientForTesting(
-    makeFakeSupabase({ servers: [{ id: 'srv-1', owner_id: 'user-123' }] })
-  );
+  _setPoolForTesting(makeFakeLocalDb({ servers: [{ id: 'srv-1', owner_id: 'user-123' }] }));
   const owns = await auth.verifyServerOwnership('user-999', 'srv-1');
   assert.equal(owns, false);
 });
 
 test('server ownership: false when server does not exist', async () => {
-  _setServiceClientForTesting(makeFakeSupabase({ servers: [] }));
+  _setPoolForTesting(makeFakeLocalDb({ servers: [] }));
   const owns = await auth.verifyServerOwnership('user-123', 'nope');
   assert.equal(owns, false);
 });
@@ -81,8 +84,8 @@ test('client token: valid, authorized join_requests row is accepted', async () =
     expiresAt: Date.now() + 60_000,
     nonce: 'nonce-abc',
   });
-  _setServiceClientForTesting(
-    makeFakeSupabase({
+  _setPoolForTesting(
+    makeFakeLocalDb({
       joinRequests: [
         {
           id: 'jr-1',
@@ -129,7 +132,7 @@ test('client token: no matching join_requests row is rejected', async () => {
     expiresAt: Date.now() + 60_000,
     nonce: 'nonce-missing',
   });
-  _setServiceClientForTesting(makeFakeSupabase({ joinRequests: [] }));
+  _setPoolForTesting(makeFakeLocalDb({ joinRequests: [] }));
   const result = await auth.verifyClientToken(token);
   assert.equal(result.valid, false);
   assert.equal(result.reason, 'Invalid token.');
@@ -143,8 +146,8 @@ test('client token: join_requests row not yet authorized (pending) is rejected',
     expiresAt: Date.now() + 60_000,
     nonce: 'nonce-pending',
   });
-  _setServiceClientForTesting(
-    makeFakeSupabase({
+  _setPoolForTesting(
+    makeFakeLocalDb({
       joinRequests: [
         {
           id: 'jr-2',
@@ -171,8 +174,8 @@ test('client token: server_id mismatch between token payload and row is rejected
     expiresAt: Date.now() + 60_000,
     nonce: 'nonce-mismatch',
   });
-  _setServiceClientForTesting(
-    makeFakeSupabase({
+  _setPoolForTesting(
+    makeFakeLocalDb({
       joinRequests: [
         {
           id: 'jr-3',

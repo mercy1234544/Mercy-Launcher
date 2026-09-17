@@ -1,31 +1,14 @@
 'use strict';
 
 /**
- * Minimal fake of the subset of the supabase-js query builder that
- * signaling/auth.js actually uses: .from(table).select(cols).eq(col, val).maybeSingle()
+ * Minimal fake of the subset of the supabase-js client signaling/auth.js
+ * actually uses today: `auth.getUser(token)` for `verifyHostToken`.
+ * `servers`/`join_requests` are NOT queried through Supabase (they live in
+ * the local `mercy_backend` Postgres database — see tests/helpers/fakeLocalDb.js
+ * and shared/localDb.js), so this fake no longer fronts a `.from()` builder.
  */
-function makeFakeSupabase({ servers = [], joinRequests = [], authUsers = {}, authErrors = {} } = {}) {
-  const tables = { servers, join_requests: joinRequests };
-
+function makeFakeSupabase({ authUsers = {}, authErrors = {} } = {}) {
   return {
-    from(table) {
-      const rows = tables[table] || [];
-      let filtered = rows;
-      const builder = {
-        select() {
-          return builder;
-        },
-        eq(col, val) {
-          filtered = filtered.filter((r) => r[col] === val);
-          return builder;
-        },
-        async maybeSingle() {
-          if (filtered.length === 0) return { data: null, error: null };
-          return { data: filtered[0], error: null };
-        },
-      };
-      return builder;
-    },
     auth: {
       /** Fakes supabase.auth.getUser(token) — the real call validates the token
        * against Supabase Auth itself; here it's keyed by the token string. */

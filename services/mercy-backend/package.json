@@ -10,7 +10,7 @@
     "start:api": "node api/server.js",
     "migrate:api": "node api/migrate.js",
     "test": "node --test tests/*.test.js",
-    "test:api": "node --test tests/api/*.test.js"
+    "test:api": "node --test --test-concurrency=1 tests/api/*.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

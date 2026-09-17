@@ -95,6 +95,14 @@ already-camelCased ones the repo layer returns).
 `activity` shape (heartbeat body and presence rows), unchanged from today:
 `{ mercyGameId, kind: 'playing'|'hosting', serverId?, serverName?, edition? }`.
 
+**`endpoint` safety (join approval):** `POST /joins/:id/respond`'s `endpoint.address`
+is rejected with `BAD_REQUEST` if its host component is `127.0.0.1`/any other
+`127.0.0.0/8` address, `0.0.0.0`, `::1`, or `localhost` — those can only ever mean
+"the host's own machine" and are never reachable by a remote friend's client. A
+private LAN address (`192.168.x.x`, etc., the `lan-direct` strategy) is still
+accepted — it's a legitimate candidate for a friend on the same network, with its
+own client-surfaced caveat; only the loopback/unspecified case is rejected here.
+
 ## WebSocket — replaces the dead Supabase Realtime subscription
 
 This is the actual fix for the ~20-minute failure. Explicit, observable
