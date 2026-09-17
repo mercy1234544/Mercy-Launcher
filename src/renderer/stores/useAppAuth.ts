@@ -12,6 +12,13 @@ export interface AppAuthStatus {
   stale?: boolean;
   expiresAt?: number;
   entitlements?: string[]; // future: per-feature access; absent => authorized means full access
+  /** Verified Discord snowflake ID (see VSAuthStatus in VehicleStudioAuth.ts
+   *  for why this is trustworthy). Friends & Presence uses this as the
+   *  user's identity instead of a separate Mercy account. */
+  discordId?: string;
+  /** Discord avatar hash — combine with discordId to build a CDN URL
+   *  (https://cdn.discordapp.com/avatars/{discordId}/{discordAvatar}.png). */
+  discordAvatar?: string;
 }
 
 interface AppAuthState {

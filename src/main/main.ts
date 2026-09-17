@@ -15,6 +15,7 @@ import { AccessManager } from './services/AccessManager';
 import { VehicleResourceScanner } from './services/VehicleResourceScanner';
 import { VehicleStudio } from './services/VehicleStudio';
 import { VehicleStudioAuth } from './services/VehicleStudioAuth';
+import { MercyFriendsClient } from './services/MercyFriendsClient';
 import { SettingsManager } from './services/SettingsManager';
 import { MinecraftManager } from './services/MinecraftManager';
 import { AssettoCorsaManager } from './services/AssettoCorsaManager';
@@ -77,6 +78,7 @@ let databaseManager: DatabaseManager;
 let accessManager: AccessManager;
 let vehicleStudio: VehicleStudio;
 let vehicleStudioAuth: VehicleStudioAuth;
+let mercyFriendsClient: MercyFriendsClient;
 let settingsManager: SettingsManager;
 let minecraftManager: MinecraftManager;
 let assettoCorsaManager: AssettoCorsaManager;
@@ -174,6 +176,13 @@ function initializeServices() {
   accessManager = new AccessManager(userDataPath);
   vehicleStudio = new VehicleStudio(userDataPath);
   vehicleStudioAuth = new VehicleStudioAuth(userDataPath);
+  mercyFriendsClient = new MercyFriendsClient(vehicleStudioAuth);
+  // Relay the client's own connection lifecycle/data-changed events to the
+  // renderer — this is the ONLY thing that ever crosses the process
+  // boundary for Friends & Presence now; the Discord session token itself
+  // never does (see MercyFriendsClient.ts's own header).
+  mercyFriendsClient.on('changed', () => { mainWindow?.webContents.send('mercyFriends:changed'); });
+  mercyFriendsClient.on('status', (status: string) => { mainWindow?.webContents.send('mercyFriends:status', status); });
   settingsManager = new SettingsManager();
   minecraftManager = new MinecraftManager(userDataPath);
   assettoCorsaManager = new AssettoCorsaManager(userDataPath);
@@ -486,6 +495,28 @@ function registerIpcHandlers() {
   ipcMain.handle('mercyCredentials:hasStored', () => mercyCredentialStore.hasStored());
   ipcMain.handle('mercyCredentials:getStoredUsername', () => mercyCredentialStore.getStoredUsername());
   ipcMain.handle('mercyCredentials:clear', () => mercyCredentialStore.clear());
+
+  // Friends & Presence — identity is the existing Discord/Vehicle Studio
+  // session (see MercyFriendsClient.ts's own header for why this whole
+  // client lives here instead of the renderer). The renderer never sees
+  // the Discord session token; it only ever gets these narrow, specific
+  // request/response calls plus the 'mercyFriends:changed'/'mercyFriends:status'
+  // events wired above.
+  ipcMain.handle('mercyFriends:isConfigured', () => mercyFriendsClient.isConfigured());
+  ipcMain.handle('mercyFriends:getFriends', () => mercyFriendsClient.getFriendsPresence());
+  ipcMain.handle('mercyFriends:getEveryone', () => mercyFriendsClient.getEveryonePlaying());
+  ipcMain.handle('mercyFriends:sendFriendRequest', (_, username: string) => mercyFriendsClient.sendFriendRequest(username));
+  ipcMain.handle('mercyFriends:respondToFriendRequest', (_, requestId: string, approve: boolean) => mercyFriendsClient.respondToFriendRequest(requestId, approve));
+  ipcMain.handle('mercyFriends:removeFriend', (_, friendId: string) => mercyFriendsClient.removeFriend(friendId));
+  ipcMain.handle('mercyFriends:listIncomingRequests', () => mercyFriendsClient.listIncomingRequests());
+  ipcMain.handle('mercyFriends:listOutgoingRequests', () => mercyFriendsClient.listOutgoingRequests());
+  ipcMain.handle('mercyFriends:sendHeartbeat', (_, settings, activity) => mercyFriendsClient.sendHeartbeat(settings, activity));
+  ipcMain.handle('mercyFriends:upsertServer', (_, server) => mercyFriendsClient.upsertServer(server));
+  ipcMain.handle('mercyFriends:requestJoin', (_, serverId: string) => mercyFriendsClient.requestJoin(serverId));
+  ipcMain.handle('mercyFriends:respondToJoinRequest', (_, requestId: string, approve: boolean, token?: string, endpoint?: any) => mercyFriendsClient.respondToJoinRequest(requestId, approve, token, endpoint));
+  ipcMain.handle('mercyFriends:listJoinRequests', () => mercyFriendsClient.listJoinRequests());
+  ipcMain.handle('mercyFriends:subscribe', () => mercyFriendsClient.start());
+  ipcMain.handle('mercyFriends:unsubscribe', () => mercyFriendsClient.stop());
 
   // Real cross-computer join infrastructure — Minecraft first (see
   // ConnectionNegotiator.ts / RelayConnectionManager.ts). Reuses

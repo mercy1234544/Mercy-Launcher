@@ -51,13 +51,16 @@ ok('signup mode keeps its own single, un-contextualized heading/copy for every c
 ok('Marketplace opens AccountAuthModal with no contextual props at all (relies entirely on the original defaults)', /<AccountAuthModal open=\{authOpen\} onClose=\{\(\) => setAuthOpen\(false\)\} \/>/.test(marketplaceSrc));
 ok('Marketplace never overrides loginTitle/loginDescription — its copy is exactly the original, unmodified default', !/loginTitle=|loginDescription=/.test(marketplaceSrc));
 
-// ── Friends & Presence opens the SAME modal with Mercy/Friends-appropriate
-//    copy — never the Exclusive Scripts wording. ──────────────────────────
-const libraryModalUsage = librarySrc.slice(librarySrc.indexOf('<AccountAuthModal'), librarySrc.indexOf('<AccountAuthModal') + 300);
-ok('Friends & Presence opens the real AccountAuthModal (the same one Marketplace uses, not a copy)', libraryModalUsage.startsWith('<AccountAuthModal'));
-ok('REPRODUCED THE FIX: Friends & Presence overrides the login title to Mercy-account-appropriate copy', /loginTitle="Log in to your Mercy account"/.test(libraryModalUsage));
-ok('REPRODUCED THE FIX: Friends & Presence overrides the login description to Friends/Presence-appropriate copy', /loginDescription="Sign in to manage your friends, presence, servers, and join requests\."/.test(libraryModalUsage));
-ok('REPRODUCED THE FIX: the Exclusive Scripts wording never appears anywhere near Library.tsx\'s modal usage', !libraryModalUsage.includes('Exclusive scripts'));
+// ── Friends & Presence (Library.tsx) no longer opens AccountAuthModal at
+//    all — the Discord-identity migration removed the separate Mercy
+//    username/password sign-in step from this feature entirely (see
+//    friendsPresenceAuthGate.test.js for the full replacement gate). The
+//    contextual loginTitle/loginDescription props this file tests remain
+//    fully in place on the component itself for any other caller that opts
+//    in, and Marketplace's usage above is proof the untouched default path
+//    still works. ─────────────────────────────────────────────────────────
+ok('REPRODUCED THE DISCORD-IDENTITY MIGRATION: Library.tsx no longer imports AccountAuthModal', !/import AccountAuthModal from/.test(librarySrc));
+ok('REPRODUCED THE DISCORD-IDENTITY MIGRATION: Library.tsx no longer renders AccountAuthModal anywhere', !/<AccountAuthModal\b/.test(librarySrc));
 
 console.log(`\nACCOUNT AUTH MODAL CONTEXT TESTS: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

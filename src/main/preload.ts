@@ -207,6 +207,38 @@ const electronAPI = {
     clear: () => ipcRenderer.invoke('mercyCredentials:clear'),
   },
 
+  // Friends & Presence — identity is the existing Discord/Vehicle Studio
+  // session, owned entirely by the main process (see MercyFriendsClient.ts).
+  // The renderer never receives the session token itself, only these
+  // narrow request/response calls and the two subscribe-based events below.
+  mercyFriends: {
+    isConfigured: () => ipcRenderer.invoke('mercyFriends:isConfigured'),
+    getFriends: () => ipcRenderer.invoke('mercyFriends:getFriends'),
+    getEveryone: () => ipcRenderer.invoke('mercyFriends:getEveryone'),
+    sendFriendRequest: (username: string) => ipcRenderer.invoke('mercyFriends:sendFriendRequest', username),
+    respondToFriendRequest: (requestId: string, approve: boolean) => ipcRenderer.invoke('mercyFriends:respondToFriendRequest', requestId, approve),
+    removeFriend: (friendId: string) => ipcRenderer.invoke('mercyFriends:removeFriend', friendId),
+    listIncomingRequests: () => ipcRenderer.invoke('mercyFriends:listIncomingRequests'),
+    listOutgoingRequests: () => ipcRenderer.invoke('mercyFriends:listOutgoingRequests'),
+    sendHeartbeat: (settings: any, activity: any) => ipcRenderer.invoke('mercyFriends:sendHeartbeat', settings, activity),
+    upsertServer: (server: any) => ipcRenderer.invoke('mercyFriends:upsertServer', server),
+    requestJoin: (serverId: string) => ipcRenderer.invoke('mercyFriends:requestJoin', serverId),
+    respondToJoinRequest: (requestId: string, approve: boolean, token?: string, endpoint?: any) => ipcRenderer.invoke('mercyFriends:respondToJoinRequest', requestId, approve, token, endpoint),
+    listJoinRequests: () => ipcRenderer.invoke('mercyFriends:listJoinRequests'),
+    subscribe: () => ipcRenderer.invoke('mercyFriends:subscribe'),
+    unsubscribe: () => ipcRenderer.invoke('mercyFriends:unsubscribe'),
+    onChanged: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('mercyFriends:changed', handler);
+      return () => { ipcRenderer.removeListener('mercyFriends:changed', handler); };
+    },
+    onStatus: (callback: (status: string) => void) => {
+      const handler = (_: any, status: string) => callback(status);
+      ipcRenderer.on('mercyFriends:status', handler);
+      return () => { ipcRenderer.removeListener('mercyFriends:status', handler); };
+    },
+  },
+
   connection: {
     negotiateMinecraftEndpoint: (serverId: string, supabaseAccessToken?: string) =>
       ipcRenderer.invoke('connection:negotiateMinecraftEndpoint', serverId, supabaseAccessToken),

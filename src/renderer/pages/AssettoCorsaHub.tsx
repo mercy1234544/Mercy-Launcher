@@ -33,7 +33,7 @@ export default function AssettoCorsaHub() {
         icon={FlagTriangleRight}
         iconClass="bg-rose-500/15 border-rose-500/25 text-rose-300"
         title="Assetto Corsa"
-        subtitle="Create and manage your Assetto Corsa dedicated servers"
+        subtitle="Create and manage your Assetto Corsa dedicated servers — launched through Content Manager"
       />
 
       <div className="grid grid-cols-2 gap-4">

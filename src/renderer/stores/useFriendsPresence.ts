@@ -1,30 +1,67 @@
-// Real Friends/Presence store — wires the Supabase-backed client
-// (lib/friendsPresence.ts) to the LOCAL activity truth that already lives
-// in the main process (PresenceManager, via the existing presence:getLocal
-// IPC — never re-derived or guessed here). See Library.tsx's
-// FriendsPresenceSection for how this is actually rendered.
+// Real Friends/Presence store — identity is the existing launcher Discord
+// session (see useAppAuth.ts / VehicleStudioAuth.ts), never a separate Mercy
+// username/password account. All Mercy Friends networking (REST + WebSocket)
+// now lives in the main process (MercyFriendsClient.ts) — this store only
+// ever talks to it through the narrow `window.electronAPI.mercyFriends.*`
+// IPC surface, and reads local activity truth from the main process
+// (PresenceManager, via the existing presence:getLocal IPC — never
+// re-derived or guessed here). See Library.tsx's FriendsPresenceSection for
+// how this is actually rendered.
+//
+// WHY THE NETWORKING MOVED: the OLD implementation (src/renderer/lib/
+// friendsPresence.ts) authenticated with a Supabase access token held in the
+// renderer, requiring users to create/remember a separate Mercy account just
+// to use Friends & Presence. The Discord/Vehicle Studio session token this
+// store's identity now derives from has always been main-process-only, by
+// design (see VehicleStudioAuth.ts) — so the REST/WebSocket client moved
+// there too, rather than exposing that token to the renderer.
 //
 // Local activity is polled cheaply and often (every few seconds, in-process
 // IPC, no network) purely so a server start/stop is picked up quickly; the
-// actual network heartbeat to Supabase is throttled to ~30s unless the
-// activity genuinely changed, matching Phase 2's real heartbeat cadence
-// without hammering the backend on every poll tick. The same change also
-// registers/updates the real `servers` row (Phase 7) — a Mercy-managed
-// server only ever appears there while it's genuinely running, and is
-// marked offline the moment local activity stops reflecting it.
+// actual network heartbeat is throttled to ~30s unless the activity
+// genuinely changed. The same change also registers/updates the real
+// `servers` row (Phase 7) — a Mercy-managed server only ever appears there
+// while it's genuinely running, and is marked offline the moment local
+// activity stops reflecting it.
 //
 // Join approval (Minecraft only, this milestone — see ConnectionNegotiator.ts)
 // is real: accepting a join request negotiates a real endpoint on THIS
 // host's own machine (LAN address / UPnP-mapped address / honestly
 // "unavailable, no relay configured"), mints a real single-use HMAC join
 // token bound to that endpoint, and only then marks the request authorized.
+//
+// KNOWN GAP (flagged, not fixed by this migration): approveJoin() below
+// still registers the host with the separate Mercy Relay signaling server
+// using a Supabase access token (see supabase.auth.getSession() below) —
+// that system is explicitly out of scope for the Discord-identity migration
+// (Mercy Relay must not be broken/altered here) and is unaudited for a
+// Discord-only identity. A user with no Mercy password account will still
+// see "Not signed in to Mercy" specifically when APPROVING a join request as
+// host, even though Friends & Presence itself no longer requires that
+// account. See the migration report for details.
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import {
-  sendFriendRequest, respondToFriendRequest, removeFriend, listIncomingRequests, listOutgoingRequests,
-  getFriendsPresence, getEveryonePlaying, sendHeartbeat, requestJoin, respondToJoinRequest, listJoinRequests, upsertServer, subscribeToFriendsUpdates,
-  isMercyApiConfigured, FriendPresenceRow, EveryonePlayingRow, IncomingFriendRequest, OutgoingFriendRequest, JoinRequestRow, WsConnectionStatus,
-} from '../lib/friendsPresence';
+
+type FriendPresenceRow = MercyFriendPresenceRow;
+type EveryonePlayingRow = MercyEveryonePlayingRow;
+type IncomingFriendRequest = MercyIncomingFriendRequest;
+type OutgoingFriendRequest = MercyOutgoingFriendRequest;
+type JoinRequestRow = MercyJoinRequestRow;
+type WsConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
+
+const isMercyApiConfigured = () => !!window.electronAPI?.mercyFriends;
+const sendFriendRequest = (username: string) => window.electronAPI.mercyFriends.sendFriendRequest(username);
+const respondToFriendRequest = (requestId: string, approve: boolean) => window.electronAPI.mercyFriends.respondToFriendRequest(requestId, approve);
+const removeFriend = (friendId: string) => window.electronAPI.mercyFriends.removeFriend(friendId);
+const listIncomingRequests = () => window.electronAPI.mercyFriends.listIncomingRequests();
+const listOutgoingRequests = () => window.electronAPI.mercyFriends.listOutgoingRequests();
+const getFriendsPresence = () => window.electronAPI.mercyFriends.getFriends();
+const getEveryonePlaying = () => window.electronAPI.mercyFriends.getEveryone();
+const sendHeartbeat = (settings: PresenceSettings, activity: any) => window.electronAPI.mercyFriends.sendHeartbeat(settings, activity);
+const requestJoin = (serverId: string) => window.electronAPI.mercyFriends.requestJoin(serverId);
+const respondToJoinRequest = (requestId: string, approve: boolean, token?: string, endpoint?: any) => window.electronAPI.mercyFriends.respondToJoinRequest(requestId, approve, token, endpoint);
+const listJoinRequests = () => window.electronAPI.mercyFriends.listJoinRequests();
+const upsertServer = (server: { id: string; mercyGameId: string; edition?: string | null; displayName: string; isOnline: boolean }) => window.electronAPI.mercyFriends.upsertServer(server);
 
 type PresenceSettings = { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean };
 const DEFAULT_SETTINGS: PresenceSettings = { appearOnline: false, showCurrentGame: false, showCurrentServer: false };
@@ -134,16 +171,22 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
 
   init: async () => {
     if (!isMercyApiConfigured()) { set({ connection: 'unconfigured', loading: false }); return; }
+    const configured = await window.electronAPI.mercyFriends.isConfigured().catch(() => false);
+    if (!configured) { set({ connection: 'unconfigured', loading: false }); return; }
     const settings = (await window.electronAPI?.presence?.getSettings?.().catch(() => DEFAULT_SETTINGS)) || DEFAULT_SETTINGS;
     set({ settings });
     await get().refresh();
     lastRefreshAt = Date.now();
 
     if (!unsubscribeRealtime) {
-      unsubscribeRealtime = subscribeToFriendsUpdates(
-        () => { get().refresh(); lastRefreshAt = Date.now(); },
-        (status) => get().applyWsStatus(status),
-      );
+      const offChanged = window.electronAPI.mercyFriends.onChanged(() => { get().refresh(); lastRefreshAt = Date.now(); });
+      const offStatus = window.electronAPI.mercyFriends.onStatus((status) => get().applyWsStatus(status as WsConnectionStatus));
+      window.electronAPI.mercyFriends.subscribe();
+      unsubscribeRealtime = () => {
+        offChanged();
+        offStatus();
+        window.electronAPI.mercyFriends.unsubscribe();
+      };
     }
 
     if (!localPollTimer) {

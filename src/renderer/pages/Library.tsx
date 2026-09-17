@@ -9,9 +9,7 @@ import { Panel, SectionHeading, EmptyState, Toggle } from '../components/ui';
 import { getGame } from '../config/games';
 import { useFriendsPresence } from '../stores/useFriendsPresence';
 import { useLibraryPrefs } from '../stores/useLibraryPrefs';
-import { useAuth } from '../stores/useAuth';
 import { useAppAuth } from '../stores/useAppAuth';
-import AccountAuthModal from '../components/AccountAuthModal';
 import toast from 'react-hot-toast';
 
 // The Library is ONE unified list of games detected on this PC, plus a
@@ -194,7 +192,7 @@ function DetectedGamesSection() {
                 )}
                 <div className="flex items-center gap-1.5 shrink-0">
                   {mercyGame && (
-                    <button onClick={() => navigate(mercyGame.path)} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Open Mercy Server Tools"><ExternalLink size={12} /> Server Tools</button>
+                    <button onClick={() => navigate(mercyGame.path)} className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5" title={mercyGame.id === 'assettocorsa' ? 'Open Mercy Server Tools — Assetto Corsa servers are built and launched through Content Manager' : 'Open Mercy Server Tools'}><ExternalLink size={12} /> Server Tools</button>
                   )}
                   {g.pathMissing ? (
                     <button onClick={() => changePath(g.id)} className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1.5"><MapPin size={12} /> Locate</button>
@@ -284,26 +282,22 @@ const PRESENCE_VIEWS: { key: PresenceView; label: string }[] = [
 ];
 
 // A small, dedicated settings surface for Friends & Presence — reachable
-// directly from the section itself (never buried in Marketplace) without
-// becoming a second global settings page. Its whole purpose is to keep two
-// genuinely different things visibly separate: Launcher Access (the
-// existing Discord/Vehicle Studio access gate — see useAppAuth.ts) and the
-// Mercy Account (the Supabase account this section actually needs — see
-// useAuth.ts). Being connected to one has never implied the other; this is
-// the one place that says so plainly instead of leaving the user to guess.
+// directly from the section itself (never buried elsewhere). Friends &
+// Presence's identity IS the existing launcher Discord/Vehicle Studio
+// session (see useAppAuth.ts) — there is no separate Mercy account to
+// connect/disconnect here any more. This popover exists purely to show that
+// identity plainly: which Discord account you're connected as, and how to
+// reconnect if that session has expired.
 function FriendsPresenceSettingsPopover({
-  profile, launcherAccessStatus, hasSavedCredential, savedCredentialUsername,
-  onConnect, onDisconnect, onForgetCredential,
+  launcherAccessStatus, onReconnect,
 }: {
-  profile: { username: string } | null;
-  launcherAccessStatus: { enabled?: boolean; authorized?: boolean } | null;
-  hasSavedCredential: boolean;
-  savedCredentialUsername: string | null;
-  onConnect: () => void;
-  onDisconnect: () => void;
-  onForgetCredential: () => void;
+  launcherAccessStatus: { enabled?: boolean; authorized?: boolean; username?: string; discordId?: string; discordAvatar?: string } | null;
+  onReconnect: () => void;
 }) {
-  const launcherConnected = !!(launcherAccessStatus?.enabled && launcherAccessStatus?.authorized);
+  const connected = !!(launcherAccessStatus?.enabled && launcherAccessStatus?.authorized);
+  const avatarUrl = launcherAccessStatus?.discordId && launcherAccessStatus?.discordAvatar
+    ? `https://cdn.discordapp.com/avatars/${launcherAccessStatus.discordId}/${launcherAccessStatus.discordAvatar}.png`
+    : null;
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
@@ -317,17 +311,11 @@ function FriendsPresenceSettingsPopover({
 
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-surface-400">Launcher Access</span>
-              <span className={`flex items-center gap-1.5 font-semibold ${launcherConnected ? 'text-success' : 'text-surface-500'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${launcherConnected ? 'bg-success' : 'bg-surface-600'}`} />
-                {launcherConnected ? 'Connected with Discord' : 'Not connected'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-surface-400">Mercy Account</span>
-              {profile ? (
+              <span className="text-surface-400">Identity</span>
+              {connected ? (
                 <span className="flex items-center gap-1.5 font-semibold text-success">
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-success" /> Connected as {profile.username}
+                  {avatarUrl && <img src={avatarUrl} alt="" className="w-4 h-4 rounded-full" />}
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-success" /> Connected with Discord{launcherAccessStatus?.username ? ` as ${launcherAccessStatus.username}` : ''}
                 </span>
               ) : (
                 <span className="flex items-center gap-1.5 font-semibold text-surface-500">
@@ -335,27 +323,11 @@ function FriendsPresenceSettingsPopover({
                 </span>
               )}
             </div>
-            {profile ? (
-              <>
-                <button onClick={onDisconnect} className="w-full btn-secondary text-xs py-1.5">Disconnect Mercy Account</button>
-                <p className="text-[11px] text-surface-500">Disconnecting ends this session only — your saved sign-in (if any) is kept for next time.</p>
-              </>
-            ) : (
-              <button onClick={onConnect} className="w-full btn-primary text-xs py-1.5">Connect Mercy Account</button>
-            )}
-          </div>
-
-          <div className="border-t border-overlay-6 pt-3 space-y-2">
-            <p className="text-xs font-semibold text-surface-300">Remembered Sign-In</p>
-            {hasSavedCredential ? (
-              <>
-                <p className="text-[11px] text-surface-500">
-                  A saved sign-in exists for <span className="text-surface-300 font-semibold">{savedCredentialUsername}</span>. Your password is stored using this computer's encrypted credential storage — never in plain text.
-                </p>
-                <button onClick={onForgetCredential} className="w-full text-xs py-1.5 text-danger hover:underline">Forget saved sign-in</button>
-              </>
-            ) : (
-              <p className="text-[11px] text-surface-500">No saved sign-in. Check "Remember my Mercy account" when you sign in to skip re-entering your password next time.</p>
+            <p className="text-[11px] text-surface-500">
+              Friends & Presence uses your existing launcher Discord sign-in — there's no separate Mercy account or password to manage here.
+            </p>
+            {!connected && (
+              <button onClick={onReconnect} className="w-full btn-primary text-xs py-1.5">Reconnect with Discord</button>
             )}
           </div>
         </Popover.Content>
@@ -369,42 +341,28 @@ function FriendsPresenceSection() {
     connection, friends, everyone, incoming, outgoing, incomingJoinRequests, outgoingJoinRequests, connectionStatus, settings, loading, addFriendError,
     init, teardown, addFriend, addFriendFromEveryone, accept, decline, remove, updateSettings, join, approveJoin, declineJoin, connectToApprovedJoin,
   } = useFriendsPresence();
-  // Friends/Presence's identity is the Mercy Supabase account (useAuth), NOT
-  // the separate Vehicle Studio/Discord access gate (useAppAuth, shown
-  // elsewhere in the sidebar) — a real, confirmed point of confusion: a user
-  // can be fully "logged in" to that unrelated access gate while having no
-  // Mercy account session at all, which is exactly what produced a
-  // misleading generic "Please sign in again" here instead of pointing at
-  // the actual fixable action (see the auth-required branch below, which
-  // now only ever means "you had a session and it expired/was rejected",
-  // never "you were never signed in").
-  const profile = useAuth((s) => s.profile);
-  const reauthFailed = useAuth((s) => s.reauthFailed);
-  const disconnectMercySession = useAuth((s) => s.disconnectSession);
-  const forgetMercyCredential = useAuth((s) => s.forgetCredential);
-  const hasSavedCredential = useAuth((s) => s.hasSavedCredential);
-  const savedCredentialUsername = useAuth((s) => s.savedCredentialUsername);
-  // The separate Discord/Vehicle Studio access gate (see useAppAuth.ts) —
-  // read ONLY to render an honest "these are two different things" status
-  // line where the confusion actually happens (the no-Mercy-account state
-  // below, and the Friends & Presence Settings popover). Never used to
-  // decide Mercy account state itself.
+  // Friends/Presence's identity IS the existing launcher Discord/Vehicle
+  // Studio session (see useAppAuth.ts) — there is no separate Mercy account
+  // to sign into here any more. startLogin() re-runs the SAME launcher
+  // Discord authentication the app-wide access gate uses (AppAccessGate.tsx)
+  // — never a second, parallel login flow.
   const launcherAccessStatus = useAppAuth((s) => s.status);
+  const startDiscordLogin = useAppAuth((s) => s.startLogin);
+  const discordConnected = !!(launcherAccessStatus?.enabled && launcherAccessStatus?.authorized);
   const [addUsername, setAddUsername] = useState('');
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [view, setView] = useState<PresenceView>('friends');
   const [addingFromEveryone, setAddingFromEveryone] = useState<string | null>(null);
-  const [authModalOpen, setAuthModalOpen] = useState(false);
 
   useEffect(() => { init(); return () => teardown(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The moment a Mercy account sign-in succeeds (profile goes null -> set),
-  // refresh immediately rather than waiting for the existing 60s fallback
-  // timer or the next WebSocket reconnect — no launcher restart required.
+  // The moment the Discord/launcher session becomes authorized, refresh
+  // immediately rather than waiting for the existing 60s fallback timer or
+  // the next WebSocket reconnect — no launcher restart required.
   useEffect(() => {
-    if (profile) useFriendsPresence.getState().refresh();
-  }, [profile]);
+    if (discordConnected) useFriendsPresence.getState().refresh();
+  }, [discordConnected]);
 
   // The moment a friend's join request is authorized, actually attempt the
   // connection (direct address, or a real relay tunnel) — never left as a
@@ -452,7 +410,6 @@ function FriendsPresenceSection() {
   };
 
   return (
-    <>
     <Panel>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -470,21 +427,19 @@ function FriendsPresenceSection() {
               ))}
             </div>
           )}
-          {/* A compact, always-distinct "which account" indicator — never a
-              full settings page. Only shown once a real Mercy account
-              session exists, right next to the privacy toggles it controls. */}
-          {profile && (
+          {/* A compact, always-distinct identity indicator — never a full
+              settings page. Only shown once the launcher's Discord session
+              is actually authorized, right next to the privacy toggles it
+              controls. */}
+          {discordConnected && (
             <div className="flex items-center gap-2 text-[11px] text-surface-400 border-l border-overlay-6 pl-4">
               <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
-              <span>Mercy Account: <span className="font-semibold text-surface-200">{profile.username}</span></span>
+              <span>Connected with Discord{launcherAccessStatus?.username ? <> as <span className="font-semibold text-surface-200">{launcherAccessStatus.username}</span></> : null}</span>
             </div>
           )}
           <FriendsPresenceSettingsPopover
-            profile={profile} launcherAccessStatus={launcherAccessStatus}
-            hasSavedCredential={hasSavedCredential} savedCredentialUsername={savedCredentialUsername}
-            onConnect={() => setAuthModalOpen(true)}
-            onDisconnect={() => disconnectMercySession()}
-            onForgetCredential={() => forgetMercyCredential()}
+            launcherAccessStatus={launcherAccessStatus}
+            onReconnect={() => startDiscordLogin()}
           />
         </div>
       </div>
@@ -499,47 +454,24 @@ function FriendsPresenceSection() {
         // to hide it just as effectively as wiping it would have.
         const hasData = friends.length > 0 || everyone.length > 0 || incoming.length > 0 || outgoing.length > 0;
         if (connection === 'unconfigured') {
-          return <EmptyState icon={Users} title="No friend presence yet" description="Friends & Presence requires a Mercy account presence service, which isn't deployed yet. When available, friends' real activity will appear here — never fabricated or hardcoded." />;
+          return <EmptyState icon={Users} title="No friend presence yet" description="Friends & Presence requires the Mercy presence service, which isn't deployed yet. When available, friends' real activity will appear here — never fabricated or hardcoded." />;
         }
-        // The real, confirmed root cause of a reported "Please sign in
-        // again" that should never have appeared: no Mercy account session
-        // exists at all (useAuth().profile is null) — a genuinely different
-        // situation from a real session that expired. The separate Vehicle
-        // Studio/Discord access gate (useAppAuth, shown in the sidebar) is
-        // NEVER treated as a substitute here — only a real Mercy account
-        // profile counts. A compact status line spells out the distinction
-        // right where the confusion actually happens, instead of making the
-        // user guess why "being logged in" doesn't seem to be working.
-        if (!profile) {
+        // Friends & Presence's identity IS the launcher's Discord session —
+        // if that session isn't authorized, there is nothing else to sign
+        // into here. Reconnecting reuses the exact same Discord
+        // authentication the app-wide access gate already uses.
+        if (!discordConnected) {
           return (
-            <div className="space-y-3">
-              {launcherAccessStatus?.enabled && launcherAccessStatus?.authorized && (
-                <div className="flex items-center gap-4 text-[11px] text-surface-500 px-1">
-                  <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-success" /> Launcher Access: Connected</span>
-                  <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-surface-600" /> Mercy Account: Not connected</span>
-                </div>
-              )}
-              <EmptyState icon={LogIn} title="Sign in to your Mercy account"
-                description="Friends & Presence uses your Mercy account to manage friends, presence, servers, and join requests. This is separate from your launcher access."
-                action={<button onClick={() => setAuthModalOpen(true)} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5"><LogIn size={13} /> Connect Mercy Account</button>} />
-            </div>
+            <EmptyState icon={LogIn} title="Connect with Discord" description="Friends & Presence uses your existing launcher Discord sign-in to manage friends, presence, servers, and join requests — no separate account needed."
+              action={<button onClick={() => startDiscordLogin()} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5"><LogIn size={13} /> Connect with Discord</button>} />
           );
         }
         if (connection === 'auth-required') {
-          // A saved credential was actually tried and Supabase rejected it
-          // (see useAuth.ts's one-shot reauth in init()) — a genuinely
-          // different, more specific situation than "your session just
-          // needs a refresh", and Retry alone would only fail identically
-          // again since there's no new credential to try.
-          if (reauthFailed) {
-            return (
-              <EmptyState icon={LogIn} title="Your saved Mercy sign-in no longer works" description="Your remembered Mercy account credentials were rejected — your password may have changed. Sign in again to keep using Friends/Presence."
-                action={<button onClick={() => setAuthModalOpen(true)} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5"><LogIn size={13} /> Connect Mercy Account</button>} />
-            );
-          }
+          // The launcher's Discord session expired or was rejected — the
+          // fix is always the same one action: reconnect through Discord.
           return (
-            <EmptyState icon={LogIn} title="Please sign in again" description="Your Mercy session needs to be refreshed before Friends/Presence can continue. This does not affect your local games or servers."
-              action={<button onClick={() => useFriendsPresence.getState().refresh()} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"><RefreshCw size={13} /> Retry</button>} />
+            <EmptyState icon={LogIn} title="Reconnect with Discord" description="Your launcher Discord session has expired. Reconnect to keep using Friends & Presence — this does not affect your local games or servers."
+              action={<button onClick={() => startDiscordLogin()} className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5"><LogIn size={13} /> Reconnect with Discord</button>} />
           );
         }
         if (loading && !hasData) {
@@ -729,11 +661,5 @@ function FriendsPresenceSection() {
         );
       })()}
     </Panel>
-    <AccountAuthModal
-      open={authModalOpen} onClose={() => setAuthModalOpen(false)}
-      loginTitle="Log in to your Mercy account"
-      loginDescription="Sign in to manage your friends, presence, servers, and join requests."
-    />
-    </>
   );
 }

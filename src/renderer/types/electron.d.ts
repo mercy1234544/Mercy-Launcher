@@ -243,6 +243,30 @@ interface ElectronAPI {
     clear: () => Promise<void>;
   };
 
+  /** Friends & Presence — identity is the existing Discord/Vehicle Studio
+   *  session, owned entirely by the main process (MercyFriendsClient.ts).
+   *  The renderer never sees the Discord session token, only this narrow
+   *  request/response surface plus the two subscribe-based events. */
+  mercyFriends: {
+    isConfigured: () => Promise<boolean>;
+    getFriends: () => Promise<{ data: MercyFriendPresenceRow[]; error?: string; errorCode?: string; notConfigured?: boolean }>;
+    getEveryone: () => Promise<{ data: MercyEveryonePlayingRow[]; error?: string; errorCode?: string; notConfigured?: boolean }>;
+    sendFriendRequest: (username: string) => Promise<{ error?: string; errorCode?: string; notConfigured?: boolean }>;
+    respondToFriendRequest: (requestId: string, approve: boolean) => Promise<{ error?: string; errorCode?: string; notConfigured?: boolean }>;
+    removeFriend: (friendId: string) => Promise<{ error?: string; errorCode?: string; notConfigured?: boolean }>;
+    listIncomingRequests: () => Promise<{ data: MercyIncomingFriendRequest[]; error?: string; errorCode?: string; notConfigured?: boolean }>;
+    listOutgoingRequests: () => Promise<{ data: MercyOutgoingFriendRequest[]; error?: string; errorCode?: string; notConfigured?: boolean }>;
+    sendHeartbeat: (settings: PresenceSettings, activity: any) => Promise<{ error?: string; errorCode?: string; notConfigured?: boolean }>;
+    upsertServer: (server: { id: string; mercyGameId: string; edition?: string | null; displayName: string; isOnline: boolean }) => Promise<{ error?: string; errorCode?: string; notConfigured?: boolean }>;
+    requestJoin: (serverId: string) => Promise<{ data?: { id: string }; error?: string; errorCode?: string; notConfigured?: boolean }>;
+    respondToJoinRequest: (requestId: string, approve: boolean, token?: string, endpoint?: { strategy: string; address: string; relayId?: string; relayIdUdp?: string; relayIdHttp?: string } | null) => Promise<{ error?: string; errorCode?: string; notConfigured?: boolean }>;
+    listJoinRequests: () => Promise<{ data: { incoming: MercyJoinRequestRow[]; outgoing: MercyJoinRequestRow[] }; error?: string; errorCode?: string; notConfigured?: boolean }>;
+    subscribe: () => Promise<void>;
+    unsubscribe: () => Promise<void>;
+    onChanged: (callback: () => void) => () => void;
+    onStatus: (callback: (status: 'connecting' | 'connected' | 'reconnecting' | 'disconnected') => void) => () => void;
+  };
+
   connection: {
     negotiateMinecraftEndpoint: (serverId: string, supabaseAccessToken?: string) => Promise<EndpointPlan | null>;
     negotiateAssettoCorsaEndpoint: (serverId: string, supabaseAccessToken?: string) => Promise<EndpointPlan | null>;
@@ -427,7 +451,7 @@ interface ElectronAPI {
   };
 
   vsAuth: {
-    status: () => Promise<{ enabled: boolean; authorized: boolean; username?: string; reason?: string; stale?: boolean; expiresAt?: number; entitlements?: string[] }>;
+    status: () => Promise<{ enabled: boolean; authorized: boolean; username?: string; reason?: string; stale?: boolean; expiresAt?: number; entitlements?: string[]; discordId?: string; discordAvatar?: string }>;
     startLogin: () => Promise<{ ok: boolean; error?: string }>;
     redeem: (code: string) => Promise<{ ok: boolean; username?: string; error?: string; message?: string }>;
     logout: () => Promise<void>;
@@ -661,6 +685,26 @@ declare global {
   interface LocalPresence { status: PresenceStatus; visibility: PresenceVisibility; activity: LocalActivity | null; }
   interface FriendPresence { displayName: string; status: PresenceStatus; activity: LocalActivity | null; joinable: boolean; }
   interface PresenceSettings { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean; }
+
+  // ── Mercy Friends types (mirror src/main/services/MercyFriendsClient.ts —
+  // Discord-identity Friends & Presence, resolved server-side from the
+  // existing launcher Discord session; see mercyFriends IPC above) ──────────
+  interface MercyFriendPresenceRow {
+    friendId: string; username: string; status: 'online' | 'offline';
+    activityLabel: string | null; mercyGameId: string | null; serverId: string | null; serverName: string | null;
+  }
+  interface MercyIncomingFriendRequest { id: string; fromUserId: string; fromUsername: string; createdAt: string; }
+  interface MercyOutgoingFriendRequest { id: string; toUserId: string; toUsername: string; createdAt: string; }
+  interface MercyEveryonePlayingRow {
+    userId: string; username: string; activityLabel: string | null; mercyGameId: string | null;
+    isFriend: boolean; requestPending: boolean;
+  }
+  interface MercyJoinRequestRow {
+    id: string; requesterId: string; requesterUsername: string; hostId: string; serverId: string;
+    status: 'pending' | 'authorized' | 'denied' | 'expired';
+    endpoint: { strategy: string; address: string; relayId?: string; relayIdUdp?: string; relayIdHttp?: string } | null;
+    token: string | null; mercyGameId: string | null; edition: 'java' | 'bedrock' | null; createdAt: string;
+  }
 
   // ── Connection negotiation types (mirror
   // src/main/services/connection/ConnectionNegotiator.ts) ────────────────────

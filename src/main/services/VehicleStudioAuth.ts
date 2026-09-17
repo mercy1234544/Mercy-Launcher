@@ -27,8 +27,23 @@ const GUARD_CACHE_MS = 60 * 1000;
 // status()'s own 401 handling below).
 export const SESSION_INACTIVITY_LIMIT_MS = 6 * 60 * 60 * 1000;
 
-interface Saved { token?: string; refreshToken?: string; username?: string; lastAuthorizedAt?: number; }
-export interface VSAuthStatus { enabled: boolean; authorized: boolean; username?: string; reason?: string; stale?: boolean; expiresAt?: number; entitlements?: string[]; }
+interface Saved { token?: string; refreshToken?: string; username?: string; discordId?: string; discordAvatar?: string; lastAuthorizedAt?: number; }
+export interface VSAuthStatus {
+  enabled: boolean; authorized: boolean; username?: string; reason?: string; stale?: boolean; expiresAt?: number; entitlements?: string[];
+  /** The verified Discord snowflake ID — confirmed present in the LIVE
+   *  deployed backend's real /session response as `user.id` (verified by a
+   *  live, authenticated call during the Discord-identity migration audit;
+   *  the "local reference" backend checked into services/vehicle-studio-auth
+   *  does not yet expose this field, so it stays unmodified — it is NOT
+   *  what's actually deployed). This is the stable identity Friends &
+   *  Presence resolves to a Mercy UUID via profiles.discord_id — never the
+   *  username/display name, which can change. */
+  discordId?: string;
+  /** Discord's avatar hash (from `user.discordAvatar`) — combine with
+   *  discordId to build a CDN URL (https://cdn.discordapp.com/avatars/
+   *  {discordId}/{discordAvatar}.png) for display only. */
+  discordAvatar?: string;
+}
 
 export class VehicleStudioAuth {
   private file: string;
@@ -55,6 +70,17 @@ export class VehicleStudioAuth {
 
   isEnabled() { return !!this.authBackendUrl; }
 
+  /** For OTHER main-process-only consumers (MercyFriendsClient) that need
+   *  to attach this SAME session token as the Authorization header when
+   *  calling a DIFFERENT backend (the Mercy API), which independently
+   *  verifies it server-to-server via this exact class's own /session
+   *  endpoint (see MercyFriendsClient.ts's own header). Deliberately has no
+   *  IPC handler anywhere — this must never reach the renderer, exactly
+   *  like the token itself never does today. */
+  getSessionToken(): string | null {
+    return this.load().token || null;
+  }
+
   private async api(pathname: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), init?.timeoutMs ?? 8000);
@@ -64,7 +90,7 @@ export class VehicleStudioAuth {
 
   private grace(s: Saved): VSAuthStatus {
     if (s.token && s.lastAuthorizedAt && Date.now() - s.lastAuthorizedAt < OFFLINE_GRACE_MS)
-      return { enabled: true, authorized: true, username: s.username, stale: true };
+      return { enabled: true, authorized: true, username: s.username, discordId: s.discordId, discordAvatar: s.discordAvatar, stale: true };
     return { enabled: true, authorized: false, reason: 'offline' };
   }
 
@@ -98,6 +124,8 @@ export class VehicleStudioAuth {
       const updated: Saved = {
         token, refreshToken: j.refreshToken ?? s.refreshToken,
         username: j.user?.discordUsername ?? j.username ?? s.username,
+        discordId: j.user?.id ?? j.discordId ?? s.discordId,
+        discordAvatar: j.user?.discordAvatar ?? j.discordAvatar ?? s.discordAvatar,
         lastAuthorizedAt: Date.now(),
       };
       this.save(updated);
@@ -140,14 +168,21 @@ export class VehicleStudioAuth {
       const res = await this.api('/session', { headers: { Authorization: `Bearer ${s.token}` } });
       if (res.status === 200) {
         const j: any = await res.json();
-        // Deployed backend shape: { user: { discordUsername, ... }, session: { expiresAt } }.
-        // 200 always means a valid session (the backend returns 401 otherwise).
-        // Fallbacks (?? j.username / j.expiresAt) keep the local reference backend working too.
+        // Deployed backend shape (confirmed via a real, live, authenticated
+        // call during the Discord-identity migration audit):
+        // { user: { id, discordUsername, discordAvatar, roleVerified }, session: { expiresAt } }.
+        // `user.id` is the real, server-verified Discord snowflake — the
+        // stable identity Friends & Presence needs (see VSAuthStatus's own
+        // comment on discordId). 200 always means a valid session (the
+        // backend returns 401 otherwise). Fallbacks (?? j.username /
+        // j.expiresAt) keep the local reference backend working too.
         const username = j.user?.discordUsername ?? j.username;
+        const discordId = j.user?.id ?? j.discordId;
+        const discordAvatar = j.user?.discordAvatar ?? j.discordAvatar;
         const expiresAt = j.session?.expiresAt ?? j.expiresAt;
-        this.save({ ...s, username, lastAuthorizedAt: Date.now() });
+        this.save({ ...s, username, discordId, discordAvatar, lastAuthorizedAt: Date.now() });
         // entitlements is optional/future — passed through if the backend sends it.
-        const st: VSAuthStatus = { enabled: true, authorized: true, username, expiresAt, entitlements: Array.isArray(j.entitlements) ? j.entitlements : undefined };
+        const st: VSAuthStatus = { enabled: true, authorized: true, username, discordId, discordAvatar, expiresAt, entitlements: Array.isArray(j.entitlements) ? j.entitlements : undefined };
         this.setGuard(true);
         return st;
       }
@@ -200,7 +235,9 @@ export class VehicleStudioAuth {
       const token = j.sessionToken ?? j.session;
       if (res.status === 200 && token) {
         const username = j.user?.discordUsername ?? j.username;
-        this.save({ token, refreshToken: j.refreshToken, username, lastAuthorizedAt: Date.now() });
+        const discordId = j.user?.id ?? j.discordId;
+        const discordAvatar = j.user?.discordAvatar ?? j.discordAvatar;
+        this.save({ token, refreshToken: j.refreshToken, username, discordId, discordAvatar, lastAuthorizedAt: Date.now() });
         this.setGuard(true);
         return { ok: true, username };
       }

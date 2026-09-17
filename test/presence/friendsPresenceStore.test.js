@@ -1,22 +1,22 @@
 // Real behavioral test for the store-level fix in
-// src/renderer/stores/useFriendsPresence.ts required by
-// docs/mercy-api-contract.md's own "Client-side implication": a
-// transient/auth failure from the Mercy API must NEVER overwrite the
-// visible friends list with an empty result — only flip the connection
-// indicator and keep whatever was last successfully known.
+// src/renderer/stores/useFriendsPresence.ts: a transient/auth failure from
+// the Mercy API must NEVER overwrite the visible friends list with an empty
+// result — only flip the connection indicator and keep whatever was last
+// successfully known.
 //
-// The real bug this fixes: every getX() in friendsPresence.ts resolves
-// `{ data: [], error }` on failure, and the OLD refresh() blindly wrote
-// that empty array into state on ANY error — wiping Friends/Everyone
-// Playing/requests to nothing on a one-off network blip (exactly the
-// reported "Retry may restore the shell but Friends remains empty"
-// symptom).
-//
-// This mocks src/renderer/lib/friendsPresence.ts at the module boundary
-// (a scripted fake, not this project's own real network code) so the
-// REAL useFriendsPresence.ts store logic runs unmodified against
-// controllable success/failure responses — real zustand, real store
-// methods, only the network layer beneath it is faked.
+// As of the Discord-identity migration, the store no longer talks to
+// src/renderer/lib/friendsPresence.ts (removed — its REST/WebSocket logic
+// moved into the main process, see MercyFriendsClient.ts) or to a Supabase
+// access token for its own identity. It now calls
+// `window.electronAPI.mercyFriends.*` IPC methods instead, so this test
+// mocks THAT surface at the window boundary (a scripted fake, not this
+// project's own real network code) so the REAL useFriendsPresence.ts store
+// logic runs unmodified against controllable success/failure responses —
+// real zustand, real store methods, only the IPC layer beneath it is faked.
+// approveJoin()'s still-Supabase-authenticated Mercy Relay host
+// registration (a known, flagged gap — see the store's own header) is
+// untouched by this test; supabase.ts is stubbed out exactly as before so
+// requiring it doesn't need a real Vite/env context.
 const fs = require('fs');
 const path = require('path');
 const ts = require('typescript');
@@ -26,7 +26,6 @@ let pass = 0, fail = 0;
 const ok = (name, cond) => { if (cond) { pass++; } else { fail++; console.log('  ✗', name); } };
 
 const STORE_PATH = path.resolve(__dirname, '../../src/renderer/stores/useFriendsPresence.ts');
-const FRIENDS_PRESENCE_PATH = path.resolve(__dirname, '../../src/renderer/lib/friendsPresence.ts');
 const SUPABASE_PATH = path.resolve(__dirname, '../../src/renderer/lib/supabase.ts');
 
 function installTsRequireHook() {
@@ -51,10 +50,10 @@ function stubModule(resolvedPath, exportsObj) {
   try {
     delete require.cache[STORE_PATH];
 
-    // A scripted fake of the ENTIRE friendsPresence.ts surface — every
-    // call configurable per-test via `state`, matching the real module's
-    // exact exported shape so the real store code calling it is none the
-    // wiser.
+    // A scripted fake of the ENTIRE window.electronAPI.mercyFriends surface
+    // — every call configurable per-test via `state`, matching the real
+    // preload's exact exported shape so the real store code calling it is
+    // none the wiser.
     const state = {
       friends: [{ friendId: 'f1', username: 'Alice', status: 'online', activityLabel: null, mercyGameId: null, serverId: null, serverName: null }],
       everyone: [{ userId: 'u1', username: 'Bob', activityLabel: null, mercyGameId: null, isFriend: false, requestPending: false }],
@@ -65,10 +64,10 @@ function stubModule(resolvedPath, exportsObj) {
     };
     const maybeFail = (data) => state.shouldFail ? { data, error: 'Unable to connect to Mercy services.', errorCode: state.failureErrorCode } : { data };
 
-    const restoreFriendsPresenceMock = stubModule(FRIENDS_PRESENCE_PATH, {
-      isMercyApiConfigured: () => true,
-      getFriendsPresence: async () => maybeFail(state.friends),
-      getEveryonePlaying: async () => maybeFail(state.everyone),
+    const mercyFriends = {
+      isConfigured: async () => true,
+      getFriends: async () => maybeFail(state.friends),
+      getEveryone: async () => maybeFail(state.everyone),
       listIncomingRequests: async () => maybeFail(state.incoming),
       listOutgoingRequests: async () => maybeFail(state.outgoing),
       listJoinRequests: async () => maybeFail(state.joins),
@@ -79,13 +78,16 @@ function stubModule(resolvedPath, exportsObj) {
       upsertServer: async () => ({}),
       requestJoin: async () => ({ data: { id: 'j1' } }),
       respondToJoinRequest: async () => ({}),
-      subscribeToFriendsUpdates: () => () => {},
-    });
+      subscribe: async () => {},
+      unsubscribe: async () => {},
+      onChanged: () => () => {},
+      onStatus: () => () => {},
+    };
     const restoreSupabaseMock = stubModule(SUPABASE_PATH, {
       supabase: null,
       isSupabaseConfigured: () => false,
     });
-    global.window = { electronAPI: undefined };
+    global.window = { electronAPI: { mercyFriends } };
 
     const restoreHook = installTsRequireHook();
     let useFriendsPresence;
@@ -117,9 +119,9 @@ function stubModule(resolvedPath, exportsObj) {
     s = useFriendsPresence.getState();
     ok('once the connection recovers, a real successful refresh updates state again (not permanently stuck on stale data)', s.friends.length === 2 && s.connection === 'connected');
 
-    // ── An AUTH_ERROR failure must be reported as 'auth-required', a
-    //    genuinely distinct state from a plain network/server outage — the
-    //    fix needs a different user action (sign in again) than a retry. ──
+    // ── An AUTH_ERROR failure must be reported as 'auth-required' — now
+    //    meaning "the launcher's Discord session was rejected", never a
+    //    Mercy password concept. ─────────────────────────────────────────
     state.shouldFail = true;
     state.failureErrorCode = 'AUTH_ERROR';
     await useFriendsPresence.getState().refresh();
@@ -142,14 +144,13 @@ function stubModule(resolvedPath, exportsObj) {
     ok('a WebSocket-reported reconnect never touches the preserved friends/everyone data', s.friends.length === 2 && s.everyone.length === 1);
 
     // ── REGRESSION TEST for the real v1.105.0 bug: the WebSocket layer no
-    //    longer has an 'auth-required' status at all (see WsConnectionStatus
-    //    in friendsPresence.ts). REST refresh() is now the SOLE authority
-    //    for that verdict. Prove: (a) REST can still correctly raise
-    //    auth-required, (b) a WS 'reconnecting'/'connecting' blip can never
-    //    downgrade that away, hiding a real "please sign in again" behind a
-    //    misleading "still trying", and (c) only a real WS 'connected' (a
-    //    successful, freshly-verified hello-ack) or a real REST success can
-    //    clear it. ──────────────────────────────────────────────────────
+    //    longer has an 'auth-required' status at all. REST refresh() is now
+    //    the SOLE authority for that verdict. Prove: (a) REST can still
+    //    correctly raise auth-required, (b) a WS 'reconnecting'/'connecting'
+    //    blip can never downgrade that away, hiding a real "please reconnect
+    //    with Discord" behind a misleading "still trying", and (c) only a
+    //    real WS 'connected' (a successful, freshly-verified hello-ack) or a
+    //    real REST success can clear it. ─────────────────────────────────
     state.shouldFail = true;
     state.failureErrorCode = 'AUTH_ERROR';
     await useFriendsPresence.getState().refresh();
@@ -181,7 +182,6 @@ function stubModule(resolvedPath, exportsObj) {
     useFriendsPresence.getState().applyWsStatus('connecting');
     ok('REPRODUCED THE FIX: a stray "connecting" callback right after a proven "connected" state does not downgrade it back', useFriendsPresence.getState().connection === 'connected');
 
-    restoreFriendsPresenceMock();
     restoreSupabaseMock();
 
     console.log(`\nFRIENDS PRESENCE STORE TESTS: ${pass} passed, ${fail} failed`);

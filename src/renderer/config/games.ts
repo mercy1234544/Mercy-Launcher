@@ -44,7 +44,7 @@ export const GAMES: GameDef[] = [
   {
     id: 'assettocorsa', label: 'Assetto Corsa', path: '/assetto-corsa', hasRealHub: true,
     icon: FlagTriangleRight, tint: 'text-rose-300', tintBadge: 'bg-rose-500/15 border-rose-500/25 text-rose-300',
-    Art: AssettoCorsaArt, tagline: 'Manage your Assetto Corsa servers.',
+    Art: AssettoCorsaArt, tagline: 'Manage your Assetto Corsa servers, launched through Content Manager.',
   },
   {
     id: 'beamng', label: 'BeamNG.drive', path: '/beamng', hasRealHub: false,
