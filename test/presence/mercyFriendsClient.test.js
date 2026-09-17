@@ -133,6 +133,53 @@ function freshClient(opts, apiBaseOverride) {
       ok('POST /joins with the real serverId', calls[0].url.endsWith('/joins') && JSON.parse(calls[0].init.body).serverId === 'srv-1');
     }
 
+    // ── sendHeartbeat() payload construction — REGRESSION COVERAGE for a
+    //    real production report (two live v1.106.1 users saw
+    //    appearOnline/showCurrentGame persisted as false on every
+    //    heartbeat). A full reproduction of the toggle -> IPC ->
+    //    MercyFriendsClient -> fetch pipeline found this exact class
+    //    constructs the request body correctly for every combination —
+    //    these tests pin that down permanently so a future change can't
+    //    silently regress it. ─────────────────────────────────────────────
+    {
+      const client = freshClient({ enabled: true, token: 'tok' });
+      const calls = [];
+      global.fetch = async (url, init) => { calls.push({ url, init }); return { ok: true, status: 200, json: async () => ({ ok: true }) }; };
+
+      await client.sendHeartbeat({ appearOnline: true, showCurrentGame: true, showCurrentServer: false }, null);
+      let body = JSON.parse(calls[0].init.body);
+      ok('REPRODUCED THE INVESTIGATION: appearOnline true in settings -> appearOnline: true in the real request body', body.appearOnline === true);
+      ok('showCurrentGame true in settings -> showCurrentGame: true in the real request body', body.showCurrentGame === true);
+      ok('showCurrentServer false in settings -> showCurrentServer: false in the real request body', body.showCurrentServer === false);
+
+      calls.length = 0;
+      await client.sendHeartbeat({ appearOnline: false, showCurrentGame: false, showCurrentServer: false }, null);
+      body = JSON.parse(calls[0].init.body);
+      ok('appearOnline false in settings -> appearOnline: false in the real request body (never coerced to true)', body.appearOnline === false);
+      ok('showCurrentGame false in settings -> showCurrentGame: false in the real request body', body.showCurrentGame === false);
+
+      calls.length = 0;
+      await client.sendHeartbeat({ appearOnline: true, showCurrentGame: false, showCurrentServer: true }, null);
+      body = JSON.parse(calls[0].init.body);
+      ok('each of the three settings is forwarded independently, never linked to one another', body.appearOnline === true && body.showCurrentGame === false && body.showCurrentServer === true);
+
+      calls.length = 0;
+      const activity = { mercyGameId: 'fivem', kind: 'hosting', serverId: 's1', serverName: 'My Server' };
+      await client.sendHeartbeat({ appearOnline: true, showCurrentGame: true, showCurrentServer: true }, activity);
+      body = JSON.parse(calls[0].init.body);
+      ok('the real activity object is forwarded unmodified alongside the settings', JSON.stringify(body.activity) === JSON.stringify(activity));
+
+      // Two consecutive heartbeats with the SAME settings must send the SAME
+      // values both times — never drift, never reset between calls.
+      calls.length = 0;
+      const settings = { appearOnline: true, showCurrentGame: true, showCurrentServer: false };
+      await client.sendHeartbeat(settings, null);
+      await client.sendHeartbeat(settings, null);
+      const body1 = JSON.parse(calls[0].init.body);
+      const body2 = JSON.parse(calls[1].init.body);
+      ok('a second consecutive heartbeat with the same settings sends the identical values as the first (no drift across calls)', body1.appearOnline === body2.appearOnline && body1.showCurrentGame === body2.showCurrentGame && body1.showCurrentServer === body2.showCurrentServer && body1.appearOnline === true);
+    }
+
     // ── Error-code mapping — the exact distinct codes, through the REAL
     //    response-parsing code path. ─────────────────────────────────────
     {

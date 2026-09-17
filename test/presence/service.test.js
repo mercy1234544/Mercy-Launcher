@@ -67,6 +67,22 @@ function fixtureManager(servers) { return { getAllServers: () => servers }; }
     ok('presence settings default to fully private (appearOnline/showCurrentGame/showCurrentServer all false)', defaultSettings.appearOnline === false && defaultSettings.showCurrentGame === false && defaultSettings.showCurrentServer === false);
     settingsPresence.setPresenceSettings({ appearOnline: true, showCurrentGame: true, showCurrentServer: false });
     ok('setPresenceSettings() takes effect immediately', settingsPresence.getPresenceSettings().showCurrentServer === false && settingsPresence.getPresenceSettings().appearOnline === true);
+    // REGRESSION COVERAGE (real production report investigated: two live
+    // v1.106.1 users saw appearOnline/showCurrentGame persisted as false on
+    // every heartbeat). A full, reproducible trace of the toggle -> IPC ->
+    // PresenceManager -> heartbeat pipeline found no defect anywhere in it —
+    // see the store-level tests in presenceSettingsHeartbeat.test.js for the
+    // renderer side. This is the one persistence property that had NO
+    // existing test at all (unlike `visibility` below, which already proves
+    // this exact property): presenceSettings surviving a fresh
+    // PresenceManager instance pointed at the same userDataPath, i.e. a real
+    // app restart. Closing that gap here in case a future change silently
+    // breaks it, even though it currently works correctly.
+    const settingsRoot = mkTempRoot();
+    const settingsPresenceA = new PresenceManager(settingsRoot, idleManagers);
+    settingsPresenceA.setPresenceSettings({ appearOnline: true, showCurrentGame: true, showCurrentServer: false });
+    const settingsPresenceB = new PresenceManager(settingsRoot, idleManagers);
+    ok('presenceSettings persists across a fresh PresenceManager instance (a real app restart)', settingsPresenceB.getPresenceSettings().appearOnline === true && settingsPresenceB.getPresenceSettings().showCurrentGame === true && settingsPresenceB.getPresenceSettings().showCurrentServer === false);
 
     // ── Privacy (Part 9): private by default, real persistence ───────────
     ok('visibility defaults to "private" (opt-in, not opt-out)', idlePresence.getVisibility() === 'private');
