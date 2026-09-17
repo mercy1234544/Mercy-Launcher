@@ -37,6 +37,7 @@ interface ElectronAPI {
     delete: (id: string) => Promise<boolean>;
     start: (id: string) => Promise<{ success: boolean; error?: string }>;
     stop: (id: string) => Promise<boolean>;
+    getConnectionInfo: (id: string) => Promise<FiveMConnectionInfo | null>;
     sendCommand: (id: string, command: string) => Promise<boolean>;
     maintenance: (id: string) => Promise<string[]>;
     import: (serverPath: string, name?: string) => Promise<{
@@ -270,6 +271,7 @@ interface ElectronAPI {
   connection: {
     negotiateMinecraftEndpoint: (serverId: string, supabaseAccessToken?: string) => Promise<EndpointPlan | null>;
     negotiateAssettoCorsaEndpoint: (serverId: string, supabaseAccessToken?: string) => Promise<EndpointPlan | null>;
+    negotiateFiveMEndpoint: (serverId: string, supabaseAccessToken?: string) => Promise<EndpointPlan | null>;
     connectViaRelay: (args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) => Promise<RelayConnectResult>;
     teardownRelayHost: (serverId: string) => Promise<void>;
   };
@@ -542,6 +544,15 @@ declare global {
     portListening: boolean | null;
     bedrock: { possible: boolean; detectedPlugin: string | null; note: string };
     raknet: { checked: boolean; reachable: boolean | null; note: string } | null;
+  }
+  interface FiveMConnectionInfo {
+    serverId: string;
+    serverName: string;
+    status: 'stopped' | 'starting' | 'running' | 'error';
+    port: number;
+    lanAddress: string | null;
+    portListening: boolean | null;
+    database: { needed: boolean; healthy: boolean | null; error: string | null };
   }
   interface GitHubRepoDetails {
     owner: string;

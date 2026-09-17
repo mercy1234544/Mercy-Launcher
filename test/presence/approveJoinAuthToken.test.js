@@ -39,9 +39,25 @@ ok(
 );
 
 ok(
-  'approveJoin passes the real Supabase access token into both negotiate*Endpoint IPC calls',
+  'approveJoin passes the real Supabase access token into all three negotiate*Endpoint IPC calls',
   /negotiateAssettoCorsaEndpoint\?\.\(request\.serverId, supabaseAccessToken\)/.test(approveJoinBody) &&
-  /negotiateMinecraftEndpoint\?\.\(request\.serverId, supabaseAccessToken\)/.test(approveJoinBody)
+  /negotiateMinecraftEndpoint\?\.\(request\.serverId, supabaseAccessToken\)/.test(approveJoinBody) &&
+  /negotiateFiveMEndpoint\?\.\(request\.serverId, supabaseAccessToken\)/.test(approveJoinBody)
+);
+
+// REPRODUCED THE FIX: a FiveM join request used to have no branch of its own
+// at all here — request.mercyGameId === 'fivem' silently fell through the
+// `: 'minecraft'` fallback and was (wrongly) negotiated via
+// negotiateMinecraftEndpoint, which knows nothing about FiveM's actual
+// port/protocol. This is the exact real bug an Explore-agent investigation
+// found while auditing the FiveM hosting/join architecture.
+ok(
+  "REPRODUCED THE FIX: a 'fivem' join request resolves mercyGameId to 'fivem', not the Minecraft fallback",
+  /request\.mercyGameId === 'fivem' \? 'fivem' as const/.test(approveJoinBody)
+);
+ok(
+  "REPRODUCED THE FIX: a 'fivem' mercyGameId is negotiated through negotiateFiveMEndpoint, never negotiateMinecraftEndpoint",
+  /mercyGameId === 'fivem'\s*\n\s*\? await window\.electronAPI\?\.connection\?\.negotiateFiveMEndpoint/.test(approveJoinBody)
 );
 
 ok(

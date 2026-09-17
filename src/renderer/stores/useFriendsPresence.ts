@@ -399,9 +399,18 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
       return { error: 'Not signed in to Mercy — cannot register this server with the relay. Please sign in and try again.' };
     }
 
-    const mercyGameId = request.mercyGameId === 'assettocorsa' ? 'assettocorsa' as const : 'minecraft' as const;
+    // REPRODUCED THE FIX: a FiveM join request used to have no branch of its
+    // own here at all — it silently fell into the `: 'minecraft'` fallback
+    // below and was negotiated (wrongly) through negotiateMinecraftEndpoint,
+    // which knows nothing about FiveM's actual port/protocol. FiveM now gets
+    // its own real negotiation, exactly like Minecraft and Assetto Corsa.
+    const mercyGameId = request.mercyGameId === 'assettocorsa' ? 'assettocorsa' as const
+      : request.mercyGameId === 'fivem' ? 'fivem' as const
+      : 'minecraft' as const;
     const plan = mercyGameId === 'assettocorsa'
       ? await window.electronAPI?.connection?.negotiateAssettoCorsaEndpoint?.(request.serverId, supabaseAccessToken).catch(() => null)
+      : mercyGameId === 'fivem'
+      ? await window.electronAPI?.connection?.negotiateFiveMEndpoint?.(request.serverId, supabaseAccessToken).catch(() => null)
       : await window.electronAPI?.connection?.negotiateMinecraftEndpoint?.(request.serverId, supabaseAccessToken).catch(() => null);
     const best = plan?.candidates?.[0] ?? null;
     // relayIdUdp is set only for Assetto Corsa's dual TCP+UDP relay case

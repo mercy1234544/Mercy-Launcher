@@ -269,11 +269,15 @@ export default function ServerWizard() {
             {step === 1 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold">Database Engine</h2>
-                <p className="text-sm text-surface-400">Choose your database server</p>
+                <p className="text-sm text-surface-400">
+                  Either option is fully automatic — Mercy installs, starts, and configures a real database for you,
+                  with its own dedicated credentials. Both are provisioned using the same bundled, MySQL-protocol-compatible
+                  MariaDB engine, so oxmysql and every framework work identically either way.
+                </p>
                 <div className="grid grid-cols-2 gap-4 mt-4">
                   {[
-                    { id: 'mariadb', name: 'MariaDB', desc: 'Recommended â€” fast and compatible', tag: 'Recommended' },
-                    { id: 'mysql', name: 'MySQL', desc: 'Traditional and widely supported', tag: null },
+                    { id: 'mariadb', name: 'MariaDB', desc: 'Auto-installed and managed by Mercy', tag: 'Recommended' },
+                    { id: 'mysql', name: 'MySQL', desc: 'Also provisioned via the bundled MariaDB engine (MySQL-protocol-compatible)', tag: null },
                   ].map((db) => (
                     <motion.button
                       key={db.id}

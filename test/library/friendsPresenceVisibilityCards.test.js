@@ -48,5 +48,24 @@ ok('"Show Current Mercy Server" drives showCurrentGame and showCurrentServer tog
 const cardUsages = section.match(/<VisibilityCard\b/g) || [];
 ok('exactly two separate VisibilityCard instances are rendered (not merged into a single combined control)', cardUsages.length === 2);
 
+// ── The three presence views (Friends / Friends Playing / Everyone
+//    Playing) each render the exact spec'd rules. ──────────────────────
+const friendsBlock = section.match(/\{view === 'friends' &&[\s\S]*?\)\}\n\n\s*\{view === 'friendsPlaying'/);
+ok('the Friends view exists', !!friendsBlock);
+const friendsSrc = friendsBlock ? friendsBlock[0] : '';
+ok('REPRODUCED THE FIX: the Friends view renders friends.map with no filter — offline friends are never removed from the list', /friends\.map\(/.test(friendsSrc) && !/friends\.filter\(/.test(friendsSrc));
+ok('a friend row shows "Online" when online with no activity, "Offline" when offline, and the real activity label when playing', /\{f\.activityLabel \|\| \(f\.status === 'online' \? 'Online' : 'Offline'\)\}/.test(friendsSrc));
+
+const friendsPlayingBlock = section.match(/\{view === 'friendsPlaying' &&[\s\S]*?\}\)\(\)\}\n\n\s*\{view === 'everyone'/);
+ok('the Friends Playing view exists', !!friendsPlayingBlock);
+const friendsPlayingSrc = friendsPlayingBlock ? friendsPlayingBlock[0] : '';
+ok('REPRODUCED THE FIX: Friends Playing only includes friends who are online AND have an activity label', /friends\.filter\(\(f\) => f\.status === 'online' && f\.activityLabel\)/.test(friendsPlayingSrc));
+
+const everyoneBlock = section.match(/\{view === 'everyone' &&[\s\S]*$/);
+ok('the Everyone Playing view exists', !!everyoneBlock);
+const everyoneSrc = everyoneBlock ? everyoneBlock[0] : '';
+ok('REPRODUCED THE FIX: an Everyone Playing row shows "Online" (never a blank line) when the user has no activity label to show', /\{p\.activityLabel \|\| 'Online'\}/.test(everyoneSrc));
+ok('Everyone Playing never filters by friendship — every entry the API returns is rendered', /everyone\.map\(/.test(everyoneSrc) && !/everyone\.filter\(/.test(everyoneSrc));
+
 console.log(`\nFRIENDS PRESENCE VISIBILITY CARDS TESTS: ${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;

@@ -80,6 +80,17 @@ const selfView = buildPresenceForViewer({
 });
 ok('viewing your OWN presence always shows full detail regardless of your own privacy settings/heartbeat staleness', selfView.status === 'online' && selfView.serverName === 'My Survival Server');
 
+// ── "Online without a game" — a friend who has the launcher open and a
+//    fresh heartbeat, but genuinely isn't playing/hosting anything (real
+//    activity is null, not merely hidden by showCurrentGame). Distinct from
+//    onlineNoGame above, which hides a REAL activity via privacy settings —
+//    this proves the "nothing is happening" case is reported honestly as
+//    online-with-no-activity, never a stale/leftover label. ────────────────
+const onlineFriendNotPlaying = buildPresenceForViewer({
+  settings: fullSettings, lastHeartbeatMs: now, nowMs: now, activity: null, isFriend: true, isSelf: false,
+});
+ok('an online friend with no real activity shows "online" with a null activity label/game/server', onlineFriendNotPlaying.status === 'online' && onlineFriendNotPlaying.activityLabel === null && onlineFriendNotPlaying.mercyGameId === null && onlineFriendNotPlaying.serverId === null);
+
 // ── Everyone Playing — real, non-friend-gated discovery, but never leaking
 //    server id/name regardless of the owner's own showCurrentServer setting ─
 const playingActivity = { mercyGameId: 'fivem', kind: 'playing' };
@@ -99,6 +110,12 @@ const visibleNoActivity = buildEveryonePlayingEntry({
   settings: { appearOnline: true, showCurrentGame: false, showCurrentServer: true }, lastHeartbeatMs: now, nowMs: now, activity: playingActivity, isSelf: false,
 });
 ok('REPRODUCED THE FIX: showCurrentGame=false still shows the user in Everyone Playing, just without activity details', visibleNoActivity.visible === true && visibleNoActivity.activityLabel === null && visibleNoActivity.mercyGameId === null);
+// "Online without a game" for Everyone Playing: real activity is null (not
+// merely hidden) — must still be visible, just with nothing to show.
+const everyoneOnlineNoGame = buildEveryonePlayingEntry({
+  settings: fullSettings, lastHeartbeatMs: now, nowMs: now, activity: null, isSelf: false,
+});
+ok('a user online with no real activity is still visible in Everyone Playing, with a null activity label', everyoneOnlineNoGame.visible === true && everyoneOnlineNoGame.activityLabel === null && everyoneOnlineNoGame.mercyGameId === null);
 ok('a stale heartbeat hides a user from Everyone Playing', buildEveryonePlayingEntry({
   settings: fullSettings, lastHeartbeatMs: now - 200_000, nowMs: now, activity: playingActivity, isSelf: false,
 }).visible === false);

@@ -44,6 +44,7 @@ const electronAPI = {
     delete: (id: string) => ipcRenderer.invoke('server:delete', id),
     start: (id: string) => ipcRenderer.invoke('server:start', id),
     stop: (id: string) => ipcRenderer.invoke('server:stop', id),
+    getConnectionInfo: (id: string) => ipcRenderer.invoke('server:getConnectionInfo', id),
     sendCommand: (id: string, command: string): Promise<boolean> => ipcRenderer.invoke('server:command', id, command),
     maintenance: (id: string): Promise<string[]> => ipcRenderer.invoke('server:maintenance', id),
     import: (serverPath: string, name?: string) => ipcRenderer.invoke('server:import', serverPath, name),
@@ -244,6 +245,8 @@ const electronAPI = {
       ipcRenderer.invoke('connection:negotiateMinecraftEndpoint', serverId, supabaseAccessToken),
     negotiateAssettoCorsaEndpoint: (serverId: string, supabaseAccessToken?: string) =>
       ipcRenderer.invoke('connection:negotiateAssettoCorsaEndpoint', serverId, supabaseAccessToken),
+    negotiateFiveMEndpoint: (serverId: string, supabaseAccessToken?: string) =>
+      ipcRenderer.invoke('connection:negotiateFiveMEndpoint', serverId, supabaseAccessToken),
     connectViaRelay: (args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) =>
       ipcRenderer.invoke('connection:connectViaRelay', args),
     teardownRelayHost: (serverId: string) => ipcRenderer.invoke('connection:teardownRelayHost', serverId),

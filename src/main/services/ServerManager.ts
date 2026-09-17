@@ -1,13 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import net from 'net';
 import { spawn, ChildProcess } from 'child_process';
 import crypto from 'crypto';
 import { BrowserWindow } from 'electron';
 import axios from 'axios';
 import extractZip from 'extract-zip';
 import { ArtifactDownloader } from './ArtifactDownloader';
-import { DatabaseManager } from './DatabaseManager';
+import { DatabaseManager, DbCredentials } from './DatabaseManager';
 
 export interface ServerConfig {
   name: string;
@@ -39,6 +40,30 @@ export interface Server {
    *  to [] wherever read, so existing servers saved before this field
    *  existed load exactly as before (no migration, no forced re-save). */
   installedMarketplaceContent?: FiveMInstalledContent[];
+}
+
+export interface FiveMConnectionInfo {
+  serverId: string;
+  serverName: string;
+  status: Server['status'];
+  port: number;
+  /** This machine's own real, non-internal LAN IPv4 address — never a
+   *  fabricated address, and never 127.0.0.1/localhost, which is only ever
+   *  reachable from this same PC and must never be advertised as a remote
+   *  join address (see ConnectionNegotiator, used the same way for
+   *  Minecraft/Assetto Corsa). null when no such interface was found. */
+  lanAddress: string | null;
+  /** Whether the FiveM game port is actually accepting TCP connections right
+   *  now — null when the process isn't running, so "not checked" is never
+   *  confused with "checked and failed". */
+  portListening: boolean | null;
+  database: {
+    /** Whether this server's resources actually reference a database at all. */
+    needed: boolean;
+    /** null when `needed` is false (there is nothing to check). */
+    healthy: boolean | null;
+    error: string | null;
+  };
 }
 
 export interface FiveMInstalledContent {
@@ -192,6 +217,14 @@ export class ServerManager {
     return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32);
   }
 
+  /** Deterministic from the server's own name — computed the SAME way at
+   *  both create time and every later start, so a restart (even after
+   *  Mercy or the PC restarts) always resolves to the exact same database
+   *  name without needing to persist it separately. */
+  private computeDbName(serverName: string): string {
+    return (serverName.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, '') || 'fivem').slice(0, 60);
+  }
+
   getAllServers(): Server[] {
     return Array.from(this.servers.values()).map(s => {
       let resourceCount = 0;
@@ -224,6 +257,69 @@ export class ServerManager {
 
   getServer(id: string): Server | null {
     return this.servers.get(id) || null;
+  }
+
+  private getLanAddress(): string | null {
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const iface of ifaces[name] || []) {
+        if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+      }
+    }
+    return null;
+  }
+
+  private checkPortListening(port: number, timeoutMs = 1500): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = new net.Socket();
+      let done = false;
+      const finish = (result: boolean) => {
+        if (done) return;
+        done = true;
+        try { socket.destroy(); } catch {}
+        resolve(result);
+      };
+      socket.setTimeout(timeoutMs);
+      socket.once('connect', () => finish(true));
+      socket.once('timeout', () => finish(false));
+      socket.once('error', () => finish(false));
+      try { socket.connect(port, '127.0.0.1'); } catch { finish(false); }
+    });
+  }
+
+  /** Real connection info for a FiveM Connect tab / friend-join negotiation
+   *  — always recomputed live, never cached, and NEVER returns 127.0.0.1/
+   *  localhost as the address to advertise to a remote friend (that only
+   *  ever works from this same PC). Mirrors MinecraftManager/AssettoCorsaManager's
+   *  own getConnectionInfo() so the join system treats all three games the
+   *  same way. */
+  async getConnectionInfo(id: string): Promise<FiveMConnectionInfo | null> {
+    const server = this.getServer(id);
+    if (!server) return null;
+
+    const cfgPath = path.join(server.installPath, 'server.cfg');
+    const cfgContent = fs.existsSync(cfgPath) ? fs.readFileSync(cfgPath, 'utf-8') : '';
+    const portMatch = cfgContent.match(/endpoint_add_tcp\s+"[^:]*:(\d+)"/);
+    const port = portMatch ? parseInt(portMatch[1], 10) : 30120;
+
+    const processIsAlive = server.status === 'running' || server.status === 'starting';
+    const portListening = processIsAlive ? await this.checkPortListening(port) : null;
+
+    const needed = this.databaseManager ? this.databaseManager.needsDatabase(cfgContent) : false;
+    let dbHealthy: boolean | null = null;
+    let dbError: string | null = null;
+    if (needed && this.databaseManager) {
+      const check = await this.databaseManager.verifyServerDatabase(cfgContent, false);
+      dbHealthy = check.ok;
+      dbError = check.ok ? null : (check.error || 'Unknown database error');
+    }
+
+    return {
+      serverId: id, serverName: server.name, status: server.status, port,
+      lanAddress: this.getLanAddress(),
+      portListening,
+      database: { needed, healthy: dbHealthy, error: dbError },
+    };
   }
 
   /** Resolves a path relative to a server's install directory, refusing any
@@ -367,23 +463,28 @@ export class ServerManager {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // STEP 2.5: Set up the database (MariaDB/MySQL)
-    // Starts an existing service, or downloads portable MariaDB if none
-    // is installed. Creates the server's database so SQL imports work.
+    // STEP 2.5: Set up the database (MariaDB — the same MySQL-protocol-
+    // compatible engine is provisioned regardless of the MariaDB/MySQL
+    // choice; see ServerWizard's database step for why). Starts an
+    // existing service or downloads/starts our portable MariaDB, secures
+    // the root account (a fresh install never keeps root@localhost with no
+    // password), creates the server's own database, and creates a
+    // DEDICATED least-privilege user for it — never root — that is what
+    // actually goes into server.cfg's mysql_connection_string.
     // ═══════════════════════════════════════════════════════════════════
-    const dbName = (config.name.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, '') || 'fivem').slice(0, 60);
+    const dbName = this.computeDbName(config.name);
     let dbReady = false;
+    let dbAdminCreds: DbCredentials | undefined;
+    let dbServerCreds: DbCredentials | undefined;
     if (this.databaseManager && config.framework !== 'blank') {
       sendProgress('Setting up database (MySQL/MariaDB)...', 0, 100);
       try {
-        const dbResult = await this.databaseManager.ensureRunning(true, (msg, pct) => sendProgress(msg, pct, 100));
+        const dbResult = await this.databaseManager.setupDatabaseForServer(dbName, (msg, pct) => sendProgress(msg, pct, 100));
         if (dbResult.success) {
-          dbReady = await this.databaseManager.createDatabase(dbName);
-          if (dbReady) {
-            sendProgress(`✓ Database "${dbName}" ready (${dbResult.method})`, 100, 100);
-          } else {
-            sendProgress('Warning: MySQL is running but database creation failed — check credentials', 100, 100);
-          }
+          dbReady = true;
+          dbAdminCreds = dbResult.adminCreds;
+          dbServerCreds = dbResult.serverCreds;
+          sendProgress(`✓ Database "${dbName}" ready with a dedicated user (${dbResult.method})`, 100, 100);
         } else {
           sendProgress(`Warning: Could not set up database — ${dbResult.error}. Run Health Scanner to fix later.`, 100, 100);
         }
@@ -524,10 +625,10 @@ export class ServerManager {
               if (sqlFileRef) {
                 const sqlPath = path.join(config.installPath, sqlFileRef);
                 sendProgress(`Importing SQL schema: ${path.basename(sqlFileRef)}...`, completed, totalDownloads);
-                const ok = await this.databaseManager.importSqlFile(dbName, sqlPath);
+                const ok = await this.databaseManager.importSqlFile(dbName, sqlPath, dbAdminCreds);
                 if (ok) sendProgress(`✓ Imported ${path.basename(sqlFileRef)} into "${dbName}"`, completed, totalDownloads);
               } else if (task.query) {
-                await this.databaseManager.importSql(dbName, task.query);
+                await this.databaseManager.importSql(dbName, task.query, dbAdminCreds);
               }
               break;
             }
@@ -628,7 +729,7 @@ export class ServerManager {
     // broken {{template}} variables gets replaced.
     // ═══════════════════════════════════════════════════════════════════
     const cfgPath = path.join(config.installPath, 'server.cfg');
-    const cleanCfg = this.generateServerCfg(config, dbName);
+    const cleanCfg = this.generateServerCfg(config, dbName, dbServerCreds);
     fs.writeFileSync(cfgPath, cleanCfg, 'utf-8');
     console.log('[Build] Generated server.cfg for framework:', config.framework);
 
@@ -919,7 +1020,7 @@ export class ServerManager {
     return false;
   }
 
-  private generateServerCfg(config: { name: string; framework: string; licenseKey?: string; installPath?: string }, dbName?: string): string {
+  private generateServerCfg(config: { name: string; framework: string; licenseKey?: string; installPath?: string }, dbName?: string, dbCreds?: DbCredentials): string {
     const lines: string[] = [];
 
     // Disk-aware ensures — only reference folders/resources that exist.
@@ -956,11 +1057,19 @@ export class ServerManager {
       ``,
     );
 
-    // Database connection — set up automatically by the builder
+    // Database connection — set up automatically by the builder. Uses the
+    // DEDICATED least-privilege user created for this exact database, never
+    // root and never a blank password (see DatabaseManager.setupDatabaseForServer).
+    // Falls back to the old root@localhost form only if credential setup
+    // itself failed, so the cfg still documents what's missing rather than
+    // silently omitting the line.
     if (dbName && config.framework !== 'blank') {
+      const connString = dbCreds && this.databaseManager
+        ? this.databaseManager.buildConnectionString(dbName, dbCreds)
+        : `mysql://root@localhost:3306/${dbName}?charset=utf8mb4`;
       lines.push(
         `# Database (managed by Mercy Launcher)`,
-        `set mysql_connection_string "mysql://root@localhost:3306/${dbName}?charset=utf8mb4"`,
+        `set mysql_connection_string "${connString}"`,
         ``,
       );
     }
@@ -1435,7 +1544,7 @@ export class ServerManager {
     }
   }
 
-  async startServer(id: string): Promise<{ success: boolean; error?: string }> {
+  async startServer(id: string, onProgress?: (msg: string, pct: number) => void): Promise<{ success: boolean; error?: string }> {
     const server = this.servers.get(id);
     if (!server) {
       console.error(`[StartServer] No server found with id: ${id}`);
@@ -1443,6 +1552,25 @@ export class ServerManager {
     }
 
     console.log(`[StartServer] Starting "${server.name}" at ${server.installPath}`);
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Database gate: if this server's resources need a database, prove the
+    // connection actually works — auto-starting/provisioning it if needed —
+    // BEFORE spawning FXServer.exe. A server that is guaranteed to fail its
+    // own database connection must never be launched; the user gets a
+    // specific, actionable error instead of a silent later failure.
+    // ═══════════════════════════════════════════════════════════════════
+    if (this.databaseManager) {
+      const cfgPath = path.join(server.installPath, 'server.cfg');
+      const cfgContent = fs.existsSync(cfgPath) ? fs.readFileSync(cfgPath, 'utf-8') : '';
+      const dbCheck = await this.databaseManager.verifyServerDatabase(cfgContent, true, onProgress);
+      if (!dbCheck.ok) {
+        console.error(`[StartServer] Database check failed for "${server.name}": ${dbCheck.error}`);
+        server.status = 'error';
+        this.saveServers();
+        return { success: false, error: `Database not ready — server was not started.\n${dbCheck.error}` };
+      }
+    }
 
     // Kill existing process if any
     if (this.processes.has(id)) {

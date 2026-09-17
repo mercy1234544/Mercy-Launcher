@@ -665,7 +665,7 @@ function FriendsPresenceSection() {
 
           {view === 'everyone' && (
             everyone.length === 0 ? (
-              <EmptyState icon={Globe2} title="Nobody's visible right now" description="Other Mercy Launcher users who choose to appear online and share their current game will show up here — this never includes people who've kept their presence private." />
+              <EmptyState icon={Globe2} title="Nobody's visible right now" description="Other Mercy Launcher users with Appear Online turned on will show up here — this never includes people who've kept their presence private, and they don't need to share their current game to appear." />
             ) : (
               <div className="space-y-2">
                 {everyone.map((p) => (
@@ -673,7 +673,7 @@ function FriendsPresenceSection() {
                     <span className="w-2 h-2 rounded-full shrink-0 bg-success" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-surface-100 truncate">{p.username}</p>
-                      <p className="text-[11px] text-surface-500">{p.activityLabel}</p>
+                      <p className="text-[11px] text-surface-500">{p.activityLabel || 'Online'}</p>
                     </div>
                     {p.isFriend ? (
                       <span className="text-[11px] text-surface-500 px-1">Friends</span>

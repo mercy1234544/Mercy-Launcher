@@ -1282,23 +1282,25 @@ export class HealthScanner {
 
   /**
    * Get the database running (start service / portable MariaDB, installing
-   * it if needed), create the server's database, and optionally rewrite
-   * the connection string in server.cfg to known-good local credentials.
+   * it if needed), secure root, create the server's database, create a
+   * DEDICATED least-privilege user for it, and rewrite server.cfg's
+   * connection string to those real credentials.
+   *
+   * REAL PRODUCTION BUG THIS FIXES: this used to call createDatabase(dbName)
+   * and buildConnectionString(dbName) with no credentials at all, which
+   * default to root with a BLANK password — writing exactly the
+   * "root@localhost with no password" connection string the task's own
+   * bug report names, from the Health Scanner's own "auto-fix" action (the
+   * very thing every other message in this file tells the user to run).
+   * Now routed through the same setupDatabaseForServer() orchestration
+   * ServerManager.createServer() uses, so there is exactly one place that
+   * knows how to provision a database safely.
    */
   private async fixDatabase(serverPath: string, rewriteConnString: boolean): Promise<boolean> {
     if (!this.dbManager) {
       this.fixError = 'Database manager is not available';
       return false;
     }
-
-    this.sendFixProgress('Checking for MySQL/MariaDB...');
-    const result = await this.dbManager.ensureRunning(true, (msg) => this.sendFixProgress(msg));
-    if (!result.success) {
-      this.fixError = `Database setup failed: ${result.error}`;
-      console.error('[HealthFix] Database setup failed:', result.error);
-      return false;
-    }
-    this.sendFixProgress(`Database is running (${result.method})`);
 
     // Work out the database name — from the existing connection string,
     // falling back to the server folder name
@@ -1313,18 +1315,20 @@ export class HealthScanner {
       dbName = path.basename(serverPath).toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 60) || 'fivem';
     }
 
-    this.sendFixProgress(`Creating database "${dbName}"...`);
-    const created = await this.dbManager.createDatabase(dbName);
-    if (!created) {
-      this.fixError = `MySQL is running but creating database "${dbName}" failed — check the user/password in mysql_connection_string`;
+    this.sendFixProgress('Checking for MySQL/MariaDB...');
+    const setup = await this.dbManager.setupDatabaseForServer(dbName, (msg) => this.sendFixProgress(msg));
+    if (!setup.success || !setup.serverCreds) {
+      this.fixError = `Database setup failed: ${setup.error}`;
+      console.error('[HealthFix] Database setup failed:', setup.error);
       return false;
     }
+    this.sendFixProgress(`Database "${dbName}" ready with a dedicated user (${setup.method})`);
 
     if (rewriteConnString || !connMatch) {
       const cfgPath = path.join(serverPath, 'server.cfg');
       if (!fs.existsSync(cfgPath)) return false;
       let content = fs.readFileSync(cfgPath, 'utf-8');
-      const newLine = `set mysql_connection_string "${this.dbManager.buildConnectionString(dbName)}"`;
+      const newLine = `set mysql_connection_string "${this.dbManager.buildConnectionString(dbName, setup.serverCreds)}"`;
       if (/^\s*set\s+mysql_connection_string\s+.*$/m.test(content)) {
         content = content.replace(/^\s*set\s+mysql_connection_string\s+.*$/m, newLine);
       } else {

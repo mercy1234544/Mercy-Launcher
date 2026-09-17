@@ -301,17 +301,18 @@ function registerIpcHandlers() {
   ipcMain.handle('server:create', (_, config) => serverManager.createServer(config));
   ipcMain.handle('server:update', (_, id, data) => serverManager.updateServer(id, data));
   ipcMain.handle('server:delete', (_, id) => serverManager.deleteServer(id));
-  ipcMain.handle('server:start', async (_, id) => {
-    // Best-effort: make sure the local database is up before the server
-    // boots (starts an existing service or our portable MariaDB — no
-    // downloads here, the Health Scanner / wizard handle installs)
-    try {
-      await databaseManager.ensureRunning(false);
-    } catch {}
-    const result = await serverManager.startServer(id);
-    return result;
+  ipcMain.handle('server:start', async (event, id) => {
+    // Database readiness (start an existing service, our portable MariaDB,
+    // or install it if genuinely missing) is now verified INSIDE
+    // startServer() itself, which refuses to spawn FXServer.exe at all if
+    // the connection can't be made to work — see ServerManager.startServer
+    // and DatabaseManager.verifyServerDatabase.
+    return serverManager.startServer(id, (message, pct) => {
+      event.sender.send('server:buildProgress', { current: pct, total: 100, resource: '', message });
+    });
   });
   ipcMain.handle('server:stop', (_, id) => serverManager.stopServer(id));
+  ipcMain.handle('server:getConnectionInfo', (_, id: string) => serverManager.getConnectionInfo(id));
   // Write a command to the running FXServer console (restart <res>, stop <res>, …)
   ipcMain.handle('server:command', (_, id: string, command: string) => serverManager.sendCommand(id, command));
   // Apply known config fixes shipped with app updates to an existing server
@@ -624,6 +625,58 @@ function registerIpcHandlers() {
     // doesn't leak an unused relay registration.
     if (tcpReg.success || udpReg.success || httpReg.success) relayConnectionManager.teardownHost(serverId);
     return { candidates: [], relayAvailable: false, unavailableExplanation: tcpReg.reason || udpReg.reason || httpReg.reason || 'Could not reach the Mercy relay.' };
+  });
+  // FiveM's real join endpoint: a single port, but genuinely needs BOTH TCP
+  // (the initial handshake/resource list fetch) and UDP (the actual game
+  // protocol) on that SAME port — unlike Minecraft Java (TCP-only) or
+  // Assetto Corsa (separate game/HTTP ports). Uses ServerManager's real,
+  // live-checked connection info (never a fabricated/placeholder address),
+  // and — the actual production bug this fixes — NEVER falls through to
+  // Minecraft's negotiation logic the way useFriendsPresence.ts used to
+  // (there was no 'fivem' branch there at all, only a fallback that
+  // silently treated every non-Assetto-Corsa join as Minecraft).
+  ipcMain.handle('connection:negotiateFiveMEndpoint', async (_, serverId: string, supabaseAccessToken?: string) => {
+    const info = await serverManager.getConnectionInfo(serverId);
+    if (!info) return null;
+
+    if (info.lanAddress) {
+      return {
+        candidates: [{
+          strategy: 'lan-direct' as const, address: `${info.lanAddress}:${info.port}`,
+          note: 'Works only if the joining friend is on this same local network.',
+        }],
+        relayAvailable: false, unavailableExplanation: null,
+      };
+    }
+
+    if (!relayConnectionManager.isConfigured()) {
+      return { candidates: [], relayAvailable: false, unavailableExplanation: 'No Mercy relay is configured, and no local network address was found for this server.' };
+    }
+    if (!info.portListening) {
+      return { candidates: [], relayAvailable: false, unavailableExplanation: 'The FiveM server\'s port is not currently confirmed listening.' };
+    }
+    // See negotiateMinecraftEndpoint's comment above: this must be the
+    // caller's real Supabase access token, not the HMAC join token.
+    if (!supabaseAccessToken) {
+      return { candidates: [], relayAvailable: false, unavailableExplanation: 'Not signed in to Mercy — cannot use the relay for this connection. Sign in and try again.' };
+    }
+
+    const [tcpReg, udpReg] = await Promise.all([
+      relayConnectionManager.ensureHostRegistered(serverId, 'fivem', 'tcp', info.port, supabaseAccessToken),
+      relayConnectionManager.ensureHostRegistered(serverId, 'fivem', 'udp', info.port, supabaseAccessToken),
+    ]);
+    if (tcpReg.success && tcpReg.relayId && udpReg.success && udpReg.relayId) {
+      return {
+        candidates: [{
+          strategy: 'relay' as const, address: `relay:${tcpReg.relayId}+${udpReg.relayId}`,
+          relayId: tcpReg.relayId, relayIdUdp: udpReg.relayId,
+          note: 'Connects through the Mercy relay service (TCP + UDP) — no port forwarding required.',
+        }],
+        relayAvailable: true, unavailableExplanation: null,
+      };
+    }
+    if (tcpReg.success || udpReg.success) relayConnectionManager.teardownHost(serverId);
+    return { candidates: [], relayAvailable: false, unavailableExplanation: tcpReg.reason || udpReg.reason || 'Could not reach the Mercy relay.' };
   });
   // CLIENT side: once a friend's join request comes back authorized with a
   // strategy:'relay' endpoint, this actually connects to the relay and
