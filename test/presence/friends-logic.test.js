@@ -90,9 +90,15 @@ ok('a stranger (not a friend) IS shown in Everyone Playing when the owner opted 
 ok('appearOnline=false (the real default) hides a user from Everyone Playing too', buildEveryonePlayingEntry({
   settings: DEFAULT_PRESENCE_SETTINGS, lastHeartbeatMs: now, nowMs: now, activity: playingActivity, isSelf: false,
 }).visible === false);
-ok('showCurrentGame=false hides a user from Everyone Playing (there is no "online but unlabeled" entry in this list)', buildEveryonePlayingEntry({
+// REPRODUCED THE FIX (v1.106.3): appearOnline and showCurrentGame are two
+// SEPARATE privacy controls — showCurrentGame=false must only hide the
+// activity label, never remove the user from Everyone Playing entirely.
+// This mirrors the real, confirmed production bug already fixed in the
+// Mercy API's getEveryonePlaying() (services/mercy-backend/api/repo/friends.js).
+const visibleNoActivity = buildEveryonePlayingEntry({
   settings: { appearOnline: true, showCurrentGame: false, showCurrentServer: true }, lastHeartbeatMs: now, nowMs: now, activity: playingActivity, isSelf: false,
-}).visible === false);
+});
+ok('REPRODUCED THE FIX: showCurrentGame=false still shows the user in Everyone Playing, just without activity details', visibleNoActivity.visible === true && visibleNoActivity.activityLabel === null && visibleNoActivity.mercyGameId === null);
 ok('a stale heartbeat hides a user from Everyone Playing', buildEveryonePlayingEntry({
   settings: fullSettings, lastHeartbeatMs: now - 200_000, nowMs: now, activity: playingActivity, isSelf: false,
 }).visible === false);

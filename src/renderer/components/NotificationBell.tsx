@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import { Bell, Check, Trash2, ArrowUpCircle, Server, Download, Package, Info } from 'lucide-react';
+import { Bell, Check, Trash2, ArrowUpCircle, Server, Download, Package, Info, UserPlus } from 'lucide-react';
 import { useNotifications } from '../stores/useNotifications';
 import { useAppStore } from '../stores/useAppStore';
 import type { NotificationCategory } from '../types/notification';
@@ -11,6 +11,7 @@ const CATEGORY_ICON: Record<NotificationCategory, React.ComponentType<{ size?: n
   download: Download,
   content: Package,
   system: Info,
+  friend: UserPlus,
 };
 
 const CATEGORY_COLOR: Record<NotificationCategory, string> = {
@@ -19,6 +20,7 @@ const CATEGORY_COLOR: Record<NotificationCategory, string> = {
   download: 'text-blue-300 bg-blue-500/15 border-blue-500/20',
   content: 'text-purple-300 bg-purple-500/15 border-purple-500/20',
   system: 'text-surface-300 bg-overlay-6 border-overlay-10',
+  friend: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/20',
 };
 
 function timeAgo(iso: string) {

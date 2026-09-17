@@ -174,7 +174,19 @@ export interface EveryonePlayingEntry {
  *  owner's own showCurrentServer setting — never exposes server id/name at
  *  all; that stays a friends-only, join-relevant detail shown only via
  *  Friends/Friends Playing. Mirrored server-side by get_everyone_playing()
- *  in the SQL schema, which is the actual authority this makes testable. */
+ *  in the SQL schema, which is the actual authority this makes testable.
+ *
+ *  appearOnline and showCurrentGame are two SEPARATE privacy controls, not
+ *  one combined visibility gate — this previously required BOTH to be true
+ *  just to appear in this list at all, which was the real, confirmed
+ *  v1.106.3 production bug (a user with Appear Online on but Show Current
+ *  Mercy Server off was invisible in Everyone Playing instead of merely
+ *  appearing without activity details, exactly mirroring the fix already
+ *  applied to the real backend's get_everyone_playing() in
+ *  services/mercy-backend/api/repo/friends.js). Visibility is gated ONLY by
+ *  appearOnline + heartbeat freshness; showCurrentGame separately gates only
+ *  whether activity details are exposed, exactly like buildPresenceForViewer
+ *  already does above. */
 export function buildEveryonePlayingEntry(args: {
   settings: PresenceSettings;
   lastHeartbeatMs: number | null;
@@ -185,10 +197,14 @@ export function buildEveryonePlayingEntry(args: {
   const { settings, lastHeartbeatMs, nowMs, activity, isSelf } = args;
   const hidden: EveryonePlayingEntry = { visible: false, activityLabel: null, mercyGameId: null };
   if (isSelf) return hidden; // never lists yourself
-  if (!settings.appearOnline || !settings.showCurrentGame) return hidden;
+  if (!settings.appearOnline) return hidden;
   if (!isHeartbeatFresh(lastHeartbeatMs, nowMs)) return hidden;
-  if (!activity) return hidden;
-  return { visible: true, activityLabel: formatActivityLabel(activity), mercyGameId: activity.mercyGameId };
+  const showActivity = settings.showCurrentGame && !!activity;
+  return {
+    visible: true,
+    activityLabel: showActivity ? formatActivityLabel(activity) : null,
+    mercyGameId: showActivity ? activity!.mercyGameId : null,
+  };
 }
 
 // ── Join authorization ──────────────────────────────────────────────────────

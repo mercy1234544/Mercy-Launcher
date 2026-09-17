@@ -61,6 +61,43 @@ function fixtureManager(servers) { return { getAllServers: () => servers }; }
     const hostingBeatsPlayingLocal = await hostingBeatsPlayingPresence.getLocalPresence();
     ok('a real running Mercy-managed server takes priority over a merely-playing process', hostingBeatsPlayingLocal.activity?.kind === 'hosting');
 
+    // ── Friends & Presence "Friends Playing / Current Game" investigation
+    // (v1.106.3): traced the full activity pipeline end to end — Minecraft
+    // server start/stop -> MinecraftManager status -> detectLocalActivity()
+    // -> getLocalPresence() -> IPC -> renderer heartbeat -> Mercy API
+    // storage/query -> Everyone/Friends Playing UI. Every layer already
+    // reports real state correctly; these tests close the one gap that had
+    // no explicit coverage — Bedrock (not just Java) edition detection, and
+    // a real start-then-stop transition correctly clearing activity back to
+    // null rather than leaving stale "hosting" state behind. ───────────────
+    const bedrockManagers = {
+      fivem: fixtureManager([]),
+      minecraft: fixtureManager([{ id: 'mc-bedrock-1', name: 'My Bedrock Server', status: 'running', edition: 'bedrock' }]),
+      assettoCorsa: fixtureManager([]),
+    };
+    const bedrockPresence = new PresenceManager(mkTempRoot(), bedrockManagers);
+    const bedrockLocal = await bedrockPresence.getLocalPresence();
+    ok('a real running Bedrock Minecraft server is reported as "hosting" activity', bedrockLocal.activity?.kind === 'hosting' && bedrockLocal.activity?.mercyGameId === 'minecraft');
+    ok('Bedrock activity carries the real detected edition ("bedrock", not "java")', bedrockLocal.activity?.edition === 'bedrock');
+
+    // A single fixture manager object whose backing array can be swapped in
+    // place — simulating the SAME real Minecraft server actually stopping,
+    // not a fresh manager instance (which would prove nothing about a real
+    // start->stop transition).
+    let mcServers = [{ id: 'mc-transition-1', name: 'My Minecraft Server', status: 'running', edition: 'java' }];
+    const transitionManagers = {
+      fivem: fixtureManager([]),
+      minecraft: { getAllServers: () => mcServers },
+      assettoCorsa: fixtureManager([]),
+    };
+    const transitionPresence = new PresenceManager(mkTempRoot(), transitionManagers);
+    const beforeStop = await transitionPresence.getLocalPresence();
+    ok('(setup) activity is populated while the real server is running', beforeStop.activity?.kind === 'hosting' && beforeStop.status === 'in-game');
+    mcServers = [{ id: 'mc-transition-1', name: 'My Minecraft Server', status: 'stopped', edition: 'java' }];
+    const afterStop = await transitionPresence.getLocalPresence();
+    ok('REPRODUCED THE FIX: once the real server stops, activity clears back to null (never left stale)', afterStop.activity === null);
+    ok('status correctly reverts to "online" (not "in-game") once activity clears', afterStop.status === 'online');
+
     // ── Explicit 3-toggle presence settings (Phase 4): private by default ──
     const settingsPresence = new PresenceManager(mkTempRoot(), idleManagers);
     const defaultSettings = settingsPresence.getPresenceSettings();

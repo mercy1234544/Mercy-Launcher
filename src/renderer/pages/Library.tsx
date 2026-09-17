@@ -261,11 +261,34 @@ function GameSettingsMenu({ game, onChangePath, onResetPath, onRemove }: {
   );
 }
 
-const PRIVACY_TOGGLES: { key: 'appearOnline' | 'showCurrentGame' | 'showCurrentServer'; label: string }[] = [
-  { key: 'appearOnline', label: 'Appear Online' },
-  { key: 'showCurrentGame', label: 'Show Current Game' },
-  { key: 'showCurrentServer', label: 'Show Current Mercy Server' },
-];
+// Two user-facing visibility controls, deliberately presented as two
+// separate, prominent cards rather than a row of small checkboxes (the
+// previous design was too easy to miss entirely). Under the hood this still
+// writes the SAME three-field PresenceSettings the Mercy API has always
+// used (appearOnline/showCurrentGame/showCurrentServer) — no schema change,
+// no new privacy concept. "Show Current Mercy Server" toggles
+// showCurrentGame AND showCurrentServer together: to a user there is one
+// real question ("can people see what I'm playing?"), not two, and the API
+// already treats showCurrentServer as meaningless unless showCurrentGame is
+// also on (see the Mercy API's own getFriendsPresence/getEveryonePlaying).
+function VisibilityCard({
+  title, description, checked, onChange, tone,
+}: { title: string; description: string; checked: boolean; onChange: (v: boolean) => void; tone: 'online' | 'activity' }) {
+  const activeBorder = tone === 'online' ? 'border-success/40 bg-success/5' : 'border-primary-500/40 bg-primary-500/5';
+  const dotColor = tone === 'online' ? 'bg-success' : 'bg-primary-400';
+  return (
+    <div className={`rounded-xl border p-3 flex items-center justify-between gap-3 transition-colors ${checked ? activeBorder : 'border-overlay-6 bg-overlay-2'}`}>
+      <div className="min-w-0">
+        <p className="text-sm font-bold text-surface-100 flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${checked ? dotColor : 'bg-surface-600'}`} />
+          {title}
+        </p>
+        <p className="text-[11px] text-surface-500 mt-0.5">{description}</p>
+      </div>
+      <Toggle checked={checked} onChange={onChange} label={title} />
+    </div>
+  );
+}
 
 // ── Friends & Presence — a REAL system: real Supabase-backed accounts,
 // friend requests, and privacy-gated presence (see
@@ -417,22 +440,11 @@ function FriendsPresenceSection() {
           <p className="text-sm font-bold text-surface-100 uppercase tracking-wide">Friends & Presence</p>
         </div>
         <div className="flex items-center gap-4">
-          {(connection === 'connected' || connection === 'reconnecting' || connection === 'unreachable') && (
-            <div className="flex gap-3">
-              {PRIVACY_TOGGLES.map((t) => (
-                <label key={t.key} className="flex items-center gap-1.5 text-[11px] text-surface-400 cursor-pointer select-none">
-                  <input type="checkbox" checked={settings[t.key]} onChange={(e) => updateSettings({ [t.key]: e.target.checked })} className="accent-primary-500" />
-                  {t.label}
-                </label>
-              ))}
-            </div>
-          )}
           {/* A compact, always-distinct identity indicator — never a full
               settings page. Only shown once the launcher's Discord session
-              is actually authorized, right next to the privacy toggles it
-              controls. */}
+              is actually authorized. */}
           {discordConnected && (
-            <div className="flex items-center gap-2 text-[11px] text-surface-400 border-l border-overlay-6 pl-4">
+            <div className="flex items-center gap-2 text-[11px] text-surface-400">
               <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
               <span>Connected with Discord{launcherAccessStatus?.username ? <> as <span className="font-semibold text-surface-200">{launcherAccessStatus.username}</span></> : null}</span>
             </div>
@@ -443,6 +455,30 @@ function FriendsPresenceSection() {
           />
         </div>
       </div>
+
+      {/* The two real visibility controls, made deliberately hard to miss —
+          see VisibilityCard's own header for why "Show Current Mercy
+          Server" drives both showCurrentGame and showCurrentServer. Shown
+          whenever the section has a real connection state to control,
+          exactly like the old checkbox row did. */}
+      {(connection === 'connected' || connection === 'reconnecting' || connection === 'unreachable') && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+          <VisibilityCard
+            tone="online"
+            title="Appear Online"
+            description={settings.appearOnline ? 'Other Mercy Launcher users can see that you\'re online.' : 'You appear offline to everyone — friends included.'}
+            checked={settings.appearOnline}
+            onChange={(v) => updateSettings({ appearOnline: v })}
+          />
+          <VisibilityCard
+            tone="activity"
+            title="Show Current Mercy Server"
+            description={settings.showCurrentGame ? 'Visible users can see what you\'re playing right now.' : 'Your current game/server stays hidden, even while online.'}
+            checked={settings.showCurrentGame}
+            onChange={(v) => updateSettings({ showCurrentGame: v, showCurrentServer: v })}
+          />
+        </div>
+      )}
 
       {(() => {
         // Whether we have real, last-known-good data worth keeping on

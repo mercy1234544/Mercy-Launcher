@@ -41,6 +41,7 @@
 // account. See the migration report for details.
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
+import { useNotifications } from './useNotifications';
 
 type FriendPresenceRow = MercyFriendPresenceRow;
 type EveryonePlayingRow = MercyEveryonePlayingRow;
@@ -155,6 +156,13 @@ let lastActivityKey = '';
  *  a transition to "no longer hosting" can mark that SAME real row offline
  *  with its own real name/game, never a guess or a blanked-out value. */
 let lastHosted: { serverId: string; mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa'; serverName: string; edition?: string } | null = null;
+/** Incoming friend-request ids already seen, so a genuinely NEW request
+ *  (arriving while the app is open) can raise an in-app notification
+ *  without re-notifying on every refresh, and without notifying about
+ *  requests that already existed before this session started. `null`
+ *  means "not seeded yet" — the very first refresh() of a session records
+ *  every currently-pending id silently, since none of them are new. */
+let knownIncomingRequestIds: Set<string> | null = null;
 
 export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
   connection: isMercyApiConfigured() ? 'connecting' : 'unconfigured',
@@ -251,6 +259,7 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
   teardown: () => {
     if (localPollTimer) { clearInterval(localPollTimer); localPollTimer = null; }
     if (unsubscribeRealtime) { unsubscribeRealtime(); unsubscribeRealtime = null; }
+    knownIncomingRequestIds = null;
   },
 
   refresh: async () => {
@@ -279,6 +288,20 @@ export const useFriendsPresence = create<FriendsPresenceState>((set, get) => ({
       set({ connection: authFailure ? 'auth-required' : 'unreachable', loading: false });
       return;
     }
+    const newIncomingIds = new Set(incomingRes.data.map((r) => r.id));
+    if (knownIncomingRequestIds !== null) {
+      for (const req of incomingRes.data) {
+        if (!knownIncomingRequestIds.has(req.id)) {
+          useNotifications.getState().push({
+            title: 'New friend request',
+            message: `${req.fromUsername} wants to be friends.`,
+            category: 'friend',
+          });
+        }
+      }
+    }
+    knownIncomingRequestIds = newIncomingIds;
+
     set({
       friends: friendsRes.data, everyone: everyoneRes.data, incoming: incomingRes.data, outgoing: outgoingRes.data,
       incomingJoinRequests: joinRes.data.incoming, outgoingJoinRequests: joinRes.data.outgoing,
