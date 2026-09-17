@@ -165,13 +165,25 @@ async function getFriendsPresence(userId) {
 }
 
 async function getEveryonePlaying(userId) {
+  // appearOnline and showCurrentGame are two SEPARATE privacy controls, not
+  // one combined gate — this mirrors getFriendsPresence() above exactly
+  // (`online` there is derived from appear_online alone; show_current_game/
+  // show_current_server separately gate only whether activity details are
+  // exposed, never whether the row is returned at all). This function used
+  // to require show_current_game = true and activity is not null in the
+  // WHERE clause, which meant a user with Appear Online ON but Show Current
+  // Mercy Server OFF was excluded from Everyone Playing entirely, rather
+  // than showing up without their activity — the real, confirmed cause of
+  // "Everyone Playing" reporting nobody visible even when other users were
+  // genuinely online with Appear Online on. Visibility (row returned at
+  // all) is governed ONLY by appear_online + heartbeat freshness now;
+  // show_current_game continues to gate the activity fields exactly like
+  // it already does for friends.
   const { rows } = await db.query(
-    `select pr.user_id, pr.activity
+    `select pr.user_id, pr.show_current_game, pr.activity
      from presence pr
      where pr.user_id <> $1
        and pr.appear_online = true
-       and pr.show_current_game = true
-       and pr.activity is not null
        and pr.last_heartbeat > now() - ($2 || ' milliseconds')::interval`,
     [userId, env.PRESENCE_STALE_MS]
   );
@@ -189,14 +201,17 @@ async function getEveryonePlaying(userId) {
     pendingRows.map((r) => (r.requester_id === userId ? r.addressee_id : r.requester_id))
   );
 
-  return rows.map((r) => ({
-    userId: r.user_id,
-    username: usernames.get(r.user_id) || 'Unknown',
-    activityLabel: activityLabel(r.activity),
-    mercyGameId: r.activity.mercyGameId,
-    isFriend: friendIds.has(r.user_id),
-    requestPending: pendingWith.has(r.user_id),
-  }));
+  return rows.map((r) => {
+    const showActivity = !!r.show_current_game && !!r.activity;
+    return {
+      userId: r.user_id,
+      username: usernames.get(r.user_id) || 'Unknown',
+      activityLabel: showActivity ? activityLabel(r.activity) : null,
+      mercyGameId: showActivity ? r.activity.mercyGameId : null,
+      isFriend: friendIds.has(r.user_id),
+      requestPending: pendingWith.has(r.user_id),
+    };
+  });
 }
 
 module.exports = {

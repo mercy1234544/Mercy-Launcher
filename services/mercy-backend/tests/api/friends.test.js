@@ -176,17 +176,65 @@ test(
       assert.equal(byId.u3.isFriend, false);
     });
 
-    await t.test('getEveryonePlaying: excludes users with appear_online=false or showCurrentGame=false', async () => {
+    // REPRODUCED THE FIX: appearOnline and showCurrentGame are two SEPARATE
+    // privacy controls (see getEveryonePlaying's own header comment) — the
+    // real, confirmed production bug was that showCurrentGame=false
+    // excluded a user from Everyone Playing ENTIRELY instead of just hiding
+    // their activity, so a user with Appear Online on but Show Current
+    // Mercy Server off was invisible even though they should have appeared
+    // (without activity details).
+    await t.test('getEveryonePlaying: appearOnline=false excludes the user entirely — the one thing that should gate visibility', async () => {
       await presence.heartbeat('u2', { appearOnline: false, showCurrentGame: true, showCurrentServer: false }, {
         mercyGameId: 'minecraft',
         kind: 'playing',
       });
+      const rows = await friends.getEveryonePlaying('u1');
+      assert.equal(rows.find((r) => r.userId === 'u2'), undefined);
+    });
+
+    await t.test('REPRODUCED THE FIX: appearOnline=true + showCurrentGame=false -> the user IS visible, with no activity/server info exposed', async () => {
       await presence.heartbeat('u3', { appearOnline: true, showCurrentGame: false, showCurrentServer: false }, {
         mercyGameId: 'minecraft',
         kind: 'playing',
       });
       const rows = await friends.getEveryonePlaying('u1');
-      assert.equal(rows.length, 0);
+      const row = rows.find((r) => r.userId === 'u3');
+      assert.notEqual(row, undefined, 'the user must still appear in Everyone Playing');
+      assert.equal(row.activityLabel, null, 'activity must be hidden when showCurrentGame is off');
+      assert.equal(row.mercyGameId, null, 'the game id must be hidden when showCurrentGame is off');
+    });
+
+    await t.test('getEveryonePlaying: appearOnline=true + showCurrentGame=true -> visible WITH real activity info', async () => {
+      await presence.heartbeat('u2', { appearOnline: true, showCurrentGame: true, showCurrentServer: false }, {
+        mercyGameId: 'fivem',
+        kind: 'playing',
+      });
+      const rows = await friends.getEveryonePlaying('u1');
+      const row = rows.find((r) => r.userId === 'u2');
+      assert.notEqual(row, undefined);
+      assert.equal(row.mercyGameId, 'fivem');
+      assert.notEqual(row.activityLabel, null);
+    });
+
+    await t.test('getEveryonePlaying: a stale heartbeat (older than the freshness window) is not visible, even with appearOnline=true', async () => {
+      await presence.heartbeat('u2', { appearOnline: true, showCurrentGame: true, showCurrentServer: false }, {
+        mercyGameId: 'minecraft',
+        kind: 'playing',
+      });
+      // Backdate the heartbeat directly — presence.heartbeat() always
+      // stamps now(), so this is the only way to create a genuinely stale
+      // row without waiting out the real PRESENCE_STALE_MS window.
+      await pool.query(`update presence set last_heartbeat = now() - interval '1 hour' where user_id = 'u2'`);
+      const rows = await friends.getEveryonePlaying('u1');
+      assert.equal(rows.find((r) => r.userId === 'u2'), undefined);
+    });
+
+    await t.test('getEveryonePlaying: multiple unrelated, non-friend users can appear simultaneously', async () => {
+      await presence.heartbeat('u2', { appearOnline: true, showCurrentGame: true, showCurrentServer: false }, { mercyGameId: 'minecraft', kind: 'playing' });
+      await presence.heartbeat('u3', { appearOnline: true, showCurrentGame: false, showCurrentServer: false }, { mercyGameId: 'fivem', kind: 'playing' });
+      const rows = await friends.getEveryonePlaying('u1');
+      const ids = rows.map((r) => r.userId).sort();
+      assert.deepEqual(ids, ['u2', 'u3']);
     });
 
     await t.test('getEveryonePlaying: never includes the caller themselves', async () => {
