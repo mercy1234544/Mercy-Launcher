@@ -27,29 +27,64 @@ function fakeAuth({ enabled = true, token = 'fake-discord-session-token' } = {})
   return { isEnabled: () => enabled, getSessionToken: () => token };
 }
 
-function freshClient(opts, apiBase) {
+const PRODUCTION_DEFAULT_API_URL = 'https://mercy.tryautoscout.com/mercy-api/v1';
+
+/** Omitting `apiBaseOverride` entirely leaves VITE_MERCY_API_URL genuinely
+ *  UNSET for the constructor call — this is what a real packaged install
+ *  looks like (no .env ships, ever — see MercyFriendsClient.ts's own
+ *  header), so it's the only way to actually prove the hardcoded
+ *  production default is what a real user gets, rather than a test-only
+ *  stand-in value. Pass an explicit string to prove the override still
+ *  works for local dev/testing. */
+function freshClient(opts, apiBaseOverride) {
+  const hadPrevious = Object.prototype.hasOwnProperty.call(process.env, 'VITE_MERCY_API_URL');
   const previous = process.env.VITE_MERCY_API_URL;
-  process.env.VITE_MERCY_API_URL = apiBase ?? 'https://mercy.tryautoscout.com/mercy-api/v1';
+  if (apiBaseOverride === undefined) delete process.env.VITE_MERCY_API_URL;
+  else process.env.VITE_MERCY_API_URL = apiBaseOverride;
   const client = new MercyFriendsClient(fakeAuth(opts));
-  process.env.VITE_MERCY_API_URL = previous;
+  if (hadPrevious) process.env.VITE_MERCY_API_URL = previous; else delete process.env.VITE_MERCY_API_URL;
   return client;
 }
 
 (async () => {
   try {
-    // ── isConfigured() — requires BOTH the existing Discord/Vehicle Studio
-    //    auth to be enabled AND a real Mercy API base URL, never either
-    //    alone. ─────────────────────────────────────────────────────────
+    // ── isConfigured() — requires the existing Discord/Vehicle Studio auth
+    //    to be enabled. The Mercy API base URL is now ALWAYS present (a
+    //    hardcoded production default when VITE_MERCY_API_URL is unset —
+    //    see MercyFriendsClient.ts's own header for why a real packaged
+    //    install never has that env var), so the only way left to reach
+    //    "unconfigured" is auth itself being disabled — never an empty API
+    //    URL, which can no longer happen. ──────────────────────────────────
     {
-      ok('neither configured -> isConfigured() === false', freshClient({ enabled: false }, '').isConfigured() === false);
-      ok('auth enabled but no Mercy API URL -> still false', freshClient({ enabled: true }, '').isConfigured() === false);
-      ok('Mercy API URL set but Discord auth not enabled -> still false (a real session is required to authenticate)', freshClient({ enabled: false }).isConfigured() === false);
-      ok('REPRODUCED THE FIX: both configured -> isConfigured() === true', freshClient({ enabled: true }).isConfigured() === true);
+      ok('auth disabled -> isConfigured() === false regardless of any API URL override', freshClient({ enabled: false }).isConfigured() === false);
+      ok('auth disabled even with an explicit API URL override -> still false (a real session is required to authenticate)', freshClient({ enabled: false }, 'https://custom.example.com/v1').isConfigured() === false);
+      ok('REPRODUCED THE FIX: auth enabled + VITE_MERCY_API_URL genuinely UNSET (the real packaged-install condition) -> isConfigured() === true via the hardcoded production default', freshClient({ enabled: true }).isConfigured() === true);
+    }
+
+    // ── The production default itself — proven by actually making a call
+    //    and inspecting the real URL fetch() was given, with
+    //    VITE_MERCY_API_URL genuinely absent from process.env (never merely
+    //    set to ''), which is what every real packaged install looks like. ─
+    {
+      const client = freshClient({ enabled: true, token: 'tok' });
+      const calls = [];
+      global.fetch = async (url, init) => { calls.push({ url, init }); return { ok: true, status: 200, json: async () => ({ data: [] }) }; };
+      await client.getFriendsPresence();
+      ok('REPRODUCED THE FIX: with VITE_MERCY_API_URL unset, a real call hits the hardcoded production Mercy API URL', calls[0].url === `${PRODUCTION_DEFAULT_API_URL}/friends`);
+    }
+
+    // ── The env-var override still works for local dev/testing. ─────────
+    {
+      const client = freshClient({ enabled: true, token: 'tok' }, 'https://custom.example.com/v1');
+      const calls = [];
+      global.fetch = async (url, init) => { calls.push({ url, init }); return { ok: true, status: 200, json: async () => ({ data: [] }) }; };
+      await client.getFriendsPresence();
+      ok('VITE_MERCY_API_URL, when explicitly set, still overrides the production default', calls[0].url === 'https://custom.example.com/v1/friends');
     }
 
     // ── notConfigured short-circuit — never calls fetch at all ──────────
     {
-      const client = freshClient({ enabled: false }, '');
+      const client = freshClient({ enabled: false });
       global.fetch = async () => { throw new Error('fetch must never be called when unconfigured'); };
       const r = await client.getFriendsPresence();
       ok('getFriendsPresence() with nothing configured returns notConfigured without ever calling fetch', r.notConfigured === true && r.data.length === 0);

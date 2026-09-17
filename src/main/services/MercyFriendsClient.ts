@@ -73,6 +73,24 @@ const WS_RECONNECT_MAX_MS = 30000;
 
 interface ApiErrorBody { error?: string; message?: string; }
 
+// The production Mercy API base URL — a public endpoint every client must
+// reach regardless of who installed it, not a per-deployment secret (same
+// configuration philosophy as the Linux side's VEHICLE_STUDIO_AUTH_URL
+// default in services/mercy-backend/api/env.js). This MUST be a hardcoded
+// fallback, not solely an env-var read: main.ts is compiled by plain tsc,
+// never touched by Vite, so unlike the renderer's `import.meta.env.VITE_*`
+// (which Vite substitutes at BUILD time, baking a real value into every
+// shipped bundle) a `process.env.VITE_MERCY_API_URL` read in the main
+// process only ever has a value if something loads a real .env file at
+// RUNTIME — and no .env file has ever shipped with a packaged build (it's
+// git-ignored and deliberately excluded from electron-builder's `files`).
+// Without this default, every real installed copy of v1.106.0 silently had
+// apiBase === '' and isConfigured() === false, so every REST call and the
+// presence WebSocket returned before ever making a network request — the
+// confirmed root cause of the production Friends & Presence outage (zero
+// heartbeats, zero new presence rows, from any real client, ever).
+const DEFAULT_MERCY_API_URL = 'https://mercy.tryautoscout.com/mercy-api/v1';
+
 export class MercyFriendsClient extends EventEmitter {
   private apiBase: string;
 
@@ -85,11 +103,11 @@ export class MercyFriendsClient extends EventEmitter {
 
   constructor(private auth: VehicleStudioAuth) {
     super();
-    // Same env var as before (VITE_MERCY_API_URL) — main.ts's
-    // loadMainProcessEnv() already loads the WHOLE .env file into
-    // process.env regardless of the VITE_ prefix, so no new variable is
-    // needed and no owner action is required beyond what's already set.
-    this.apiBase = (process.env.VITE_MERCY_API_URL || '').replace(/\/$/, '');
+    // VITE_MERCY_API_URL still overrides this for local dev/testing (see
+    // main.ts's loadMainProcessEnv(), which loads the WHOLE .env file into
+    // process.env when one exists) — it just no longer needs to for a real
+    // packaged install to work correctly.
+    this.apiBase = (process.env.VITE_MERCY_API_URL || DEFAULT_MERCY_API_URL).replace(/\/$/, '');
   }
 
   /** Configured whenever a Mercy API base URL is set AND the existing
