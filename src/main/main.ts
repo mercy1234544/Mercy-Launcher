@@ -15,12 +15,10 @@ import { AccessManager } from './services/AccessManager';
 import { VehicleResourceScanner } from './services/VehicleResourceScanner';
 import { VehicleStudio } from './services/VehicleStudio';
 import { VehicleStudioAuth } from './services/VehicleStudioAuth';
-import { MercyFriendsClient } from './services/MercyFriendsClient';
 import { SettingsManager } from './services/SettingsManager';
 import { MinecraftManager } from './services/MinecraftManager';
 import { AssettoCorsaManager } from './services/AssettoCorsaManager';
 import { GameScanner } from './services/GameScanner';
-import { PresenceManager } from './services/PresenceManager';
 import { MercyCredentialStore } from './services/MercyCredentialStore';
 import { ConnectionNegotiator } from './services/connection/ConnectionNegotiator';
 import { RelayConnectionManager } from './services/connection/RelayConnectionManager';
@@ -78,12 +76,10 @@ let databaseManager: DatabaseManager;
 let accessManager: AccessManager;
 let vehicleStudio: VehicleStudio;
 let vehicleStudioAuth: VehicleStudioAuth;
-let mercyFriendsClient: MercyFriendsClient;
 let settingsManager: SettingsManager;
 let minecraftManager: MinecraftManager;
 let assettoCorsaManager: AssettoCorsaManager;
 let gameScanner: GameScanner;
-let presenceManager: PresenceManager;
 let mercyCredentialStore: MercyCredentialStore;
 let minecraftMarketplace: MinecraftMarketplace;
 let bedrockMarketplace: BedrockMarketplace;
@@ -176,18 +172,10 @@ function initializeServices() {
   accessManager = new AccessManager(userDataPath);
   vehicleStudio = new VehicleStudio(userDataPath);
   vehicleStudioAuth = new VehicleStudioAuth(userDataPath);
-  mercyFriendsClient = new MercyFriendsClient(vehicleStudioAuth);
-  // Relay the client's own connection lifecycle/data-changed events to the
-  // renderer — this is the ONLY thing that ever crosses the process
-  // boundary for Friends & Presence now; the Discord session token itself
-  // never does (see MercyFriendsClient.ts's own header).
-  mercyFriendsClient.on('changed', () => { mainWindow?.webContents.send('mercyFriends:changed'); });
-  mercyFriendsClient.on('status', (status: string) => { mainWindow?.webContents.send('mercyFriends:status', status); });
   settingsManager = new SettingsManager();
   minecraftManager = new MinecraftManager(userDataPath);
   assettoCorsaManager = new AssettoCorsaManager(userDataPath);
   gameScanner = new GameScanner(userDataPath);
-  presenceManager = new PresenceManager(userDataPath, { fivem: serverManager, minecraft: minecraftManager, assettoCorsa: assettoCorsaManager, gameScanner });
   mercyCredentialStore = new MercyCredentialStore(userDataPath, safeStorage);
   minecraftMarketplace = new MinecraftMarketplace();
   bedrockMarketplace = new BedrockMarketplace(userDataPath);
@@ -476,14 +464,6 @@ function registerIpcHandlers() {
   ipcMain.handle('games:setPathOverride', (_, id: string, execPath: string) => gameScanner.setPathOverride(id, execPath));
   ipcMain.handle('games:clearPathOverride', (_, id: string) => gameScanner.clearPathOverride(id));
 
-  // Presence / Friends foundation (see PresenceManager.ts's own header comment).
-  ipcMain.handle('presence:getLocal', () => presenceManager.getLocalPresence());
-  ipcMain.handle('presence:getVisibility', () => presenceManager.getVisibility());
-  ipcMain.handle('presence:setVisibility', (_, v: 'everyone' | 'friends-only' | 'private') => presenceManager.setVisibility(v));
-  ipcMain.handle('presence:getFriends', () => presenceManager.getFriends());
-  ipcMain.handle('presence:getSettings', () => presenceManager.getPresenceSettings());
-  ipcMain.handle('presence:setSettings', (_, s: { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean }) => presenceManager.setPresenceSettings(s));
-
   // Securely-remembered Mercy account credentials (see
   // MercyCredentialStore.ts's own header) — used only to silently
   // re-authenticate the SAME existing Supabase username/password account
@@ -497,29 +477,7 @@ function registerIpcHandlers() {
   ipcMain.handle('mercyCredentials:getStoredUsername', () => mercyCredentialStore.getStoredUsername());
   ipcMain.handle('mercyCredentials:clear', () => mercyCredentialStore.clear());
 
-  // Friends & Presence — identity is the existing Discord/Vehicle Studio
-  // session (see MercyFriendsClient.ts's own header for why this whole
-  // client lives here instead of the renderer). The renderer never sees
-  // the Discord session token; it only ever gets these narrow, specific
-  // request/response calls plus the 'mercyFriends:changed'/'mercyFriends:status'
-  // events wired above.
-  ipcMain.handle('mercyFriends:isConfigured', () => mercyFriendsClient.isConfigured());
-  ipcMain.handle('mercyFriends:getFriends', () => mercyFriendsClient.getFriendsPresence());
-  ipcMain.handle('mercyFriends:getEveryone', () => mercyFriendsClient.getEveryonePlaying());
-  ipcMain.handle('mercyFriends:sendFriendRequest', (_, username: string) => mercyFriendsClient.sendFriendRequest(username));
-  ipcMain.handle('mercyFriends:respondToFriendRequest', (_, requestId: string, approve: boolean) => mercyFriendsClient.respondToFriendRequest(requestId, approve));
-  ipcMain.handle('mercyFriends:removeFriend', (_, friendId: string) => mercyFriendsClient.removeFriend(friendId));
-  ipcMain.handle('mercyFriends:listIncomingRequests', () => mercyFriendsClient.listIncomingRequests());
-  ipcMain.handle('mercyFriends:listOutgoingRequests', () => mercyFriendsClient.listOutgoingRequests());
-  ipcMain.handle('mercyFriends:sendHeartbeat', (_, settings, activity) => mercyFriendsClient.sendHeartbeat(settings, activity));
-  ipcMain.handle('mercyFriends:upsertServer', (_, server) => mercyFriendsClient.upsertServer(server));
-  ipcMain.handle('mercyFriends:requestJoin', (_, serverId: string) => mercyFriendsClient.requestJoin(serverId));
-  ipcMain.handle('mercyFriends:respondToJoinRequest', (_, requestId: string, approve: boolean, token?: string, endpoint?: any) => mercyFriendsClient.respondToJoinRequest(requestId, approve, token, endpoint));
-  ipcMain.handle('mercyFriends:listJoinRequests', () => mercyFriendsClient.listJoinRequests());
-  ipcMain.handle('mercyFriends:subscribe', () => mercyFriendsClient.start());
-  ipcMain.handle('mercyFriends:unsubscribe', () => mercyFriendsClient.stop());
-
-  // Real cross-computer join infrastructure — Minecraft first (see
+  // Real cross-computer connection info — Minecraft first (see
   // ConnectionNegotiator.ts / RelayConnectionManager.ts). Reuses
   // MinecraftManager's own real lanAddress/portListening/raknet detection;
   // never re-derives it. MERCY_RELAY_WS_URL is read by the main process
@@ -527,10 +485,13 @@ function registerIpcHandlers() {
   // this is honest about relay unavailability rather than assuming one
   // exists, and a relay is only ever reported available after a real,
   // successful registration (see ConnectionNegotiator.planHostEndpoint).
+  // NOTE: the relay branch in each of these handlers is only ever reachable
+  // with a real Supabase access token, which nothing in the app supplies
+  // any more since Friends & Presence (the only caller that ever had one)
+  // was removed — these handlers still return real LAN-direct connection
+  // info for each game's own Connect tab, which is the part that's kept.
   const connectionNegotiator = new ConnectionNegotiator();
   const relayConnectionManager = new RelayConnectionManager(process.env.MERCY_RELAY_WS_URL || null);
-  ipcMain.handle('presence:createJoinToken', (_, serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string; relayId?: string } | null) =>
-    presenceManager.createJoinToken(serverId, mercyGameId, ttlMs, endpoint));
   ipcMain.handle('connection:negotiateMinecraftEndpoint', async (_, serverId: string, supabaseAccessToken?: string) => {
     const info = await minecraftManager.getConnectionInfo(serverId);
     if (!info) return null;
@@ -630,11 +591,7 @@ function registerIpcHandlers() {
   // (the initial handshake/resource list fetch) and UDP (the actual game
   // protocol) on that SAME port — unlike Minecraft Java (TCP-only) or
   // Assetto Corsa (separate game/HTTP ports). Uses ServerManager's real,
-  // live-checked connection info (never a fabricated/placeholder address),
-  // and — the actual production bug this fixes — NEVER falls through to
-  // Minecraft's negotiation logic the way useFriendsPresence.ts used to
-  // (there was no 'fivem' branch there at all, only a fallback that
-  // silently treated every non-Assetto-Corsa join as Minecraft).
+  // live-checked connection info — never a fabricated/placeholder address.
   ipcMain.handle('connection:negotiateFiveMEndpoint', async (_, serverId: string, supabaseAccessToken?: string) => {
     const info = await serverManager.getConnectionInfo(serverId);
     if (!info) return null;
@@ -678,18 +635,6 @@ function registerIpcHandlers() {
     if (tcpReg.success || udpReg.success) relayConnectionManager.teardownHost(serverId);
     return { candidates: [], relayAvailable: false, unavailableExplanation: tcpReg.reason || udpReg.reason || 'Could not reach the Mercy relay.' };
   });
-  // CLIENT side: once a friend's join request comes back authorized with a
-  // strategy:'relay' endpoint, this actually connects to the relay and
-  // starts the local tunnel the real game client uses. Never reports
-  // success without a real relay-granted response (see
-  // RelayConnectionManager.connectViaRelay's own header).
-  ipcMain.handle('connection:connectViaRelay', async (_, args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) =>
-    relayConnectionManager.connectViaRelay(args.joinRequestId, args.relayId, args.token, args.transport, args.listenPort));
-  // Real cleanup — called once the renderer's own real-activity tracking
-  // (useFriendsPresence.ts, already the authoritative "did hosting stop"
-  // signal) detects a Mercy-managed server actually stopped hosting.
-  ipcMain.handle('connection:teardownRelayHost', (_, serverId: string) => relayConnectionManager.teardownHost(serverId));
-
   // Exclusive access — Discord OAuth verification (auto-grant for members)
   ipcMain.handle('access:login', () => accessManager.login());
   ipcMain.handle('access:status', (_, force?: boolean) => accessManager.status(!!force));

@@ -36,8 +36,7 @@ export class RelayDataChannel implements DataChannel {
     // type). A closed local side simply stops sending/reading; the relay is
     // expected to reclaim the channel via RELAY_IDLE_TIMEOUT_MS once traffic
     // stops, matching how the rest of this app already treats idle timeouts
-    // as the real cleanup mechanism (see FriendsPresenceLogic's heartbeat
-    // timeout for the same pattern).
+    // as the real cleanup mechanism.
     if (this.closed) return;
     this.closed = true;
     this.closeHandlers.forEach((cb) => cb());

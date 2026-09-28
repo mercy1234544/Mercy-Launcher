@@ -16,9 +16,7 @@ ok('Library no longer defines a category/platform FILTERS list', !/\bFILTERS\s*[
 ok('Library no longer defines a Filter type/tab concept', !/type\s+Filter\b/.test(librarySrc));
 ok('Library shows the single unified "Games on this PC" heading', librarySrc.includes('Games on this PC'));
 ok('Library still renders the real DetectedGamesSection (unified scanner list)', librarySrc.includes('<DetectedGamesSection'));
-ok('Library still renders the real FriendsPresenceSection (honest, not fabricated)', librarySrc.includes('<FriendsPresenceSection'));
-ok('Friends section is honest about no presence service being deployed yet, never a fake friends list', /presence service[,]? (which )?(isn't|is not) deployed yet/.test(librarySrc));
-ok('No hardcoded fake friend/player names were (re)introduced', !/(displayName:\s*['"](?!.*\{)[A-Za-z]+['"])/.test(librarySrc));
+ok('REPRODUCED THE REMOVAL: Friends & Presence has been fully removed from the Library page', !/FriendsPresenceSection|useFriendsPresence|VisibilityCard/.test(librarySrc));
 
 // ── Optional detected-apps visibility (a real, additive preference — not a
 // per-item category filter, so it doesn't conflict with the invariants

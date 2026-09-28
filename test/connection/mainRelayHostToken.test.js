@@ -1,10 +1,12 @@
-// Verifies main.ts's two relay-registration IPC handlers use the caller's
-// real Supabase access token as the HOST-role relay session token, never
-// PresenceManager.createJoinToken()'s HMAC join token (that token authorizes
-// one approved join_requests row for the CLIENT role — a separate credential
-// — see docs/backend-architecture.md §3/§4 on the Linux relay and
-// signaling/auth.js's verifyHostToken, which now verifies role:'host' hellos
-// against a real Supabase session via supabase.auth.getUser()).
+// Verifies main.ts's relay-registration IPC handlers (Minecraft/Assetto
+// Corsa's own "Connect" tab negotiation) use the caller's real Supabase
+// access token as the HOST-role relay session token — never a fabricated or
+// wrong credential. These handlers are unrelated to the removed Friends &
+// Presence feature (they're independent per-game "how would someone connect
+// to my server" info); Friends & Presence was the only caller that ever
+// supplied a real token here, so the relay branch is currently unreachable
+// in practice, but the logic itself stays correct and tested for whenever a
+// caller supplies one again.
 //
 // main.ts isn't unit-testable in isolation (it wires the whole Electron app
 // at import time — no BrowserWindow/app mocking exists in this repo, see
@@ -33,8 +35,6 @@ function handlerBody(ipcName) {
 
 const mcHandler = handlerBody('connection:negotiateMinecraftEndpoint');
 const acHandler = handlerBody('connection:negotiateAssettoCorsaEndpoint');
-const relayHandler = handlerBody('connection:connectViaRelay');
-const joinTokenHandler = handlerBody('presence:createJoinToken');
 
 ok('negotiateMinecraftEndpoint handler exists', !!mcHandler);
 ok('negotiateAssettoCorsaEndpoint handler exists', !!acHandler);
@@ -43,28 +43,22 @@ ok('negotiateMinecraftEndpoint accepts a supabaseAccessToken parameter', /supaba
 ok('negotiateAssettoCorsaEndpoint accepts a supabaseAccessToken parameter', /supabaseAccessToken\??:\s*string/.test(acHandler || ''));
 
 ok(
-  'negotiateMinecraftEndpoint uses supabaseAccessToken as the relay sessionToken, not createJoinToken',
-  /sessionToken:\s*supabaseAccessToken/.test(mcHandler || '') && !/sessionToken:\s*presenceManager\.createJoinToken/.test(mcHandler || '')
+  'negotiateMinecraftEndpoint uses supabaseAccessToken as the relay sessionToken',
+  /sessionToken:\s*supabaseAccessToken/.test(mcHandler || '')
 );
 ok(
-  'negotiateAssettoCorsaEndpoint uses supabaseAccessToken for ensureHostRegistered, not createJoinToken',
-  /const sessionToken = supabaseAccessToken/.test(acHandler || '') && !/presenceManager\.createJoinToken/.test(acHandler || '')
+  'negotiateAssettoCorsaEndpoint uses supabaseAccessToken for ensureHostRegistered',
+  /const sessionToken = supabaseAccessToken/.test(acHandler || '')
 );
 
 ok('negotiateMinecraftEndpoint never registers a relay attempt without a real token', /relayConnectionManager\.isConfigured\(\) && supabaseAccessToken/.test(mcHandler || ''));
 ok('negotiateAssettoCorsaEndpoint fails honestly (no relay attempt) when the token is missing', /if \(!supabaseAccessToken\)/.test(acHandler || ''));
 
+// ── Assetto Corsa needs a THIRD relay registration for the real, separate
+// HTTP query port (a real AC client, Content Manager especially, queries it
+// as part of a normal connection). ─────────────────────────────────────
 ok(
-  'PresenceManager.createJoinToken() is still exposed for its real purpose (join_requests.token) — not removed',
-  !!joinTokenHandler && /presenceManager\.createJoinToken\(serverId, mercyGameId, ttlMs, endpoint\)/.test(joinTokenHandler)
-);
-
-// ── Real fix: Assetto Corsa needs a THIRD relay registration for the real,
-// separate HTTP query port (a real AC client, Content Manager especially,
-// queries it as part of a normal connection — previously never tunneled at
-// all). ─────────────────────────────────────────────────────────────────
-ok(
-  'REPRODUCED THE FIX: negotiateAssettoCorsaEndpoint registers a THIRD relay channel for info.httpPort, not just the game-port TCP+UDP pair',
+  'negotiateAssettoCorsaEndpoint registers a THIRD relay channel for info.httpPort, not just the game-port TCP+UDP pair',
   /ensureHostRegistered\(serverId, 'assettocorsa', 'tcp', info\.httpPort, sessionToken\)/.test(acHandler || '')
 );
 ok(
@@ -78,11 +72,6 @@ ok(
 ok(
   'a failure on ANY of the three registrations tears down whichever succeeded, never leaking a partial relay registration',
   /if \(tcpReg\.success \|\| udpReg\.success \|\| httpReg\.success\) relayConnectionManager\.teardownHost/.test(acHandler || '')
-);
-
-ok(
-  'connectViaRelay (CLIENT role) is untouched — still forwards args.token as-is (the HMAC join token), no Supabase token threaded in',
-  !!relayHandler && /relayConnectionManager\.connectViaRelay\(args\.joinRequestId, args\.relayId, args\.token, args\.transport, args\.listenPort\)/.test(relayHandler)
 );
 
 console.log(`\nMAIN RELAY HOST TOKEN TESTS: ${pass} passed, ${fail} failed`);

@@ -244,10 +244,9 @@ function OverviewTab({ server }: { server: AssettoCorsaServer }) {
     return () => { cancelled = true; clearInterval(t); };
   }, [server.id, isRunning]);
 
-  // Real check of whether a friend could actually reach this server right
-  // now — the SAME negotiation a friend's Join approval actually uses (see
-  // useFriendsPresence.ts's approveJoin), never a separate, only-for-display
-  // guess. Only meaningful once the real UDP port is confirmed bound.
+  // Real check of whether someone could actually reach this server right
+  // now — never a separate, only-for-display guess. Only meaningful once
+  // the real UDP port is confirmed bound.
   useEffect(() => {
     if (server.status !== 'running') { setConnPlan(undefined); return; }
     let cancelled = false;

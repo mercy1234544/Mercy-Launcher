@@ -189,55 +189,12 @@ const electronAPI = {
     clearPathOverride: (id: string) => ipcRenderer.invoke('games:clearPathOverride', id),
   },
 
-  presence: {
-    getLocal: () => ipcRenderer.invoke('presence:getLocal'),
-    getVisibility: () => ipcRenderer.invoke('presence:getVisibility'),
-    setVisibility: (v: 'everyone' | 'friends-only' | 'private') => ipcRenderer.invoke('presence:setVisibility', v),
-    getFriends: () => ipcRenderer.invoke('presence:getFriends'),
-    getSettings: () => ipcRenderer.invoke('presence:getSettings'),
-    setSettings: (s: { appearOnline: boolean; showCurrentGame: boolean; showCurrentServer: boolean }) => ipcRenderer.invoke('presence:setSettings', s),
-    createJoinToken: (serverId: string, mercyGameId: 'fivem' | 'minecraft' | 'assettocorsa', ttlMs: number, endpoint?: { strategy: string; address: string; relayId?: string } | null) =>
-      ipcRenderer.invoke('presence:createJoinToken', serverId, mercyGameId, ttlMs, endpoint),
-  },
-
   mercyCredentials: {
     save: (username: string, password: string) => ipcRenderer.invoke('mercyCredentials:save', username, password),
     load: () => ipcRenderer.invoke('mercyCredentials:load'),
     hasStored: () => ipcRenderer.invoke('mercyCredentials:hasStored'),
     getStoredUsername: () => ipcRenderer.invoke('mercyCredentials:getStoredUsername'),
     clear: () => ipcRenderer.invoke('mercyCredentials:clear'),
-  },
-
-  // Friends & Presence — identity is the existing Discord/Vehicle Studio
-  // session, owned entirely by the main process (see MercyFriendsClient.ts).
-  // The renderer never receives the session token itself, only these
-  // narrow request/response calls and the two subscribe-based events below.
-  mercyFriends: {
-    isConfigured: () => ipcRenderer.invoke('mercyFriends:isConfigured'),
-    getFriends: () => ipcRenderer.invoke('mercyFriends:getFriends'),
-    getEveryone: () => ipcRenderer.invoke('mercyFriends:getEveryone'),
-    sendFriendRequest: (username: string) => ipcRenderer.invoke('mercyFriends:sendFriendRequest', username),
-    respondToFriendRequest: (requestId: string, approve: boolean) => ipcRenderer.invoke('mercyFriends:respondToFriendRequest', requestId, approve),
-    removeFriend: (friendId: string) => ipcRenderer.invoke('mercyFriends:removeFriend', friendId),
-    listIncomingRequests: () => ipcRenderer.invoke('mercyFriends:listIncomingRequests'),
-    listOutgoingRequests: () => ipcRenderer.invoke('mercyFriends:listOutgoingRequests'),
-    sendHeartbeat: (settings: any, activity: any) => ipcRenderer.invoke('mercyFriends:sendHeartbeat', settings, activity),
-    upsertServer: (server: any) => ipcRenderer.invoke('mercyFriends:upsertServer', server),
-    requestJoin: (serverId: string) => ipcRenderer.invoke('mercyFriends:requestJoin', serverId),
-    respondToJoinRequest: (requestId: string, approve: boolean, token?: string, endpoint?: any) => ipcRenderer.invoke('mercyFriends:respondToJoinRequest', requestId, approve, token, endpoint),
-    listJoinRequests: () => ipcRenderer.invoke('mercyFriends:listJoinRequests'),
-    subscribe: () => ipcRenderer.invoke('mercyFriends:subscribe'),
-    unsubscribe: () => ipcRenderer.invoke('mercyFriends:unsubscribe'),
-    onChanged: (callback: () => void) => {
-      const handler = () => callback();
-      ipcRenderer.on('mercyFriends:changed', handler);
-      return () => { ipcRenderer.removeListener('mercyFriends:changed', handler); };
-    },
-    onStatus: (callback: (status: string) => void) => {
-      const handler = (_: any, status: string) => callback(status);
-      ipcRenderer.on('mercyFriends:status', handler);
-      return () => { ipcRenderer.removeListener('mercyFriends:status', handler); };
-    },
   },
 
   connection: {
@@ -247,9 +204,6 @@ const electronAPI = {
       ipcRenderer.invoke('connection:negotiateAssettoCorsaEndpoint', serverId, supabaseAccessToken),
     negotiateFiveMEndpoint: (serverId: string, supabaseAccessToken?: string) =>
       ipcRenderer.invoke('connection:negotiateFiveMEndpoint', serverId, supabaseAccessToken),
-    connectViaRelay: (args: { joinRequestId: string; relayId: string; token: string; transport: 'tcp' | 'udp'; listenPort: number }) =>
-      ipcRenderer.invoke('connection:connectViaRelay', args),
-    teardownRelayHost: (serverId: string) => ipcRenderer.invoke('connection:teardownRelayHost', serverId),
   },
 
   onAssettoCorsaConsole: (callback: (data: { serverId: string; line: string }) => void) => {

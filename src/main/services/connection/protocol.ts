@@ -102,13 +102,13 @@ export type SignalingServerMessage =
  *  short enough that a crashed launcher's allocation dies on its own. */
 export const RELAY_HOST_REGISTRATION_TTL_MS = 10 * 60 * 1000;
 /** A granted relay data channel with no traffic for this long is closed —
- *  mirrors the same honest "don't stay online forever" principle as the
- *  presence heartbeat timeout (see FriendsPresenceLogic.HEARTBEAT_TIMEOUT_MS). */
+ *  the same honest "don't stay online forever" principle as any other
+ *  idle-connection timeout in this app. */
 export const RELAY_IDLE_TIMEOUT_MS = 90 * 1000;
 /** A signaling connection must hello within this long or the relay drops it. */
 export const RELAY_HELLO_TIMEOUT_MS = 5000;
-/** Real, deliberately small ceilings — see FriendsPresenceLogic.SlidingWindowRateLimiter,
- *  reused (not duplicated) as the actual limiter implementation on both the
- *  client's own pre-check and the relay's authoritative server-side check. */
+/** Real, deliberately small ceilings, enforced by a sliding-window rate
+ *  limiter on both the client's own pre-check and the relay's authoritative
+ *  server-side check. */
 export const RELAY_ALLOCATION_RATE_LIMIT = { maxHits: 5, windowMs: 60_000 };
 export const JOIN_REQUEST_RATE_LIMIT = { maxHits: 10, windowMs: 60_000 };
