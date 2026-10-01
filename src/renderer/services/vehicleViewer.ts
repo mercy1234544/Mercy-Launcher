@@ -23,6 +23,10 @@ export class VehicleViewer {
   private vehicle: LoadedVehicle | null = null;
   private overrideTex = new Map<string, THREE.CanvasTexture>();
   private forcedTex: THREE.CanvasTexture | null = null;
+  /** Per-slot material.map snapshotted right before forceTextureOnAll(canvas)
+   *  turns on, so turning it back off restores exactly what was really
+   *  showing — independent of overrideTex's keying. */
+  private preForceMap = new Map<string, THREE.Texture | null>();
   private uvDebugMat: THREE.ShaderMaterial | null = null;
   private savedMats = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
   private savedSection = new Map<string, { color: THREE.Color; map: THREE.Texture | null }>();
@@ -169,23 +173,43 @@ export class VehicleViewer {
 
   /** Push the edited canvas onto a specific material's map — live, no reload. */
   setSlotTexture(slot: VehicleMaterialSlot, canvas: HTMLCanvasElement, flipY = false) {
-    let tex = this.overrideTex.get(slot.id);
+    this.setTextureOnSlots(slot.id, [slot], canvas, flipY);
+  }
+
+  /**
+   * REAL FIX for the painting freeze: push ONE canvas onto MANY material
+   * slots using a SINGLE shared THREE.CanvasTexture, keyed by `textureKey`
+   * (the edit target's own id — stable across repeated calls for the same
+   * texture) instead of one new CanvasTexture PER SLOT.
+   *
+   * The old setSlotTexture(), called once per slot in a loop, created a
+   * SEPARATE CanvasTexture object per slot even though they all wrapped
+   * the exact same canvas — each one is its own real GPU texture, so
+   * marking all of them needsUpdate=true forced N full-resolution texture
+   * uploads (a multi-megabyte GPU copy each) on every single throttled
+   * composite, instead of one. For a texture used by many materials (a
+   * shared livery texture across body panels, or the Auto Sync fallback
+   * applying to every material), that is the actual multi-second-to-a-
+   * minute freeze the user hit — not the lack of frame-throttling (that
+   * part was already correct). Now exactly one GPU upload happens
+   * regardless of how many materials reference the texture.
+   */
+  setTextureOnSlots(textureKey: string, slots: VehicleMaterialSlot[], canvas: HTMLCanvasElement, flipY = false) {
+    let tex = this.overrideTex.get(textureKey);
     if (!tex) {
       tex = new THREE.CanvasTexture(canvas);
-      tex.flipY      = flipY;
+      tex.flipY = flipY;
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.anisotropy = 8;
-      this.overrideTex.set(slot.id, tex);
-      // eslint-disable-next-line no-console
-      console.log(`[setSlotTexture] slot=${slot.id} (${slot.name}) mat=${slot.materialIndex} → NEW override ${canvas.width}×${canvas.height} flipY=${flipY}`);
+      this.overrideTex.set(textureKey, tex);
     }
-    // Always (re)assign the map + force white base so the texture isn't tinted
-    // out by the material's flat colour, then flag both for GPU re-upload.
-    slot.material.map = tex;
-    slot.material.color.set(0xffffff);
-    slot.material.needsUpdate = true;
     tex.image = canvas;
-    tex.needsUpdate = true;
+    tex.needsUpdate = true; // ONE flag -> ONE GPU upload, shared by every slot below
+    for (const slot of slots) {
+      slot.material.map = tex;
+      slot.material.color.set(0xffffff);
+      slot.material.needsUpdate = true; // cheap: a material-state flag, not a texture re-upload
+    }
   }
 
   /**
@@ -197,13 +221,22 @@ export class VehicleViewer {
   forceTextureOnAll(canvas: HTMLCanvasElement | null, flipY = false): number {
     if (!this.vehicle) return 0;
     if (!canvas) {
+      // Restore whatever each slot's material was ACTUALLY showing right
+      // before the force (snapshotted below) — never guess by re-deriving
+      // from overrideTex, which is now keyed by texture id (shared across
+      // many slots, see setTextureOnSlots), not by slot id.
       for (const slot of this.vehicle.slots) {
-        const restore = this.overrideTex.get(slot.id) ?? slot.originalMap;
-        slot.material.map = restore as THREE.Texture | null;
-        slot.material.color.set(restore ? 0xffffff : 0xc0c0c0);
+        const restore = this.preForceMap.get(slot.id);
+        const map = restore !== undefined ? restore : slot.originalMap;
+        slot.material.map = map;
+        slot.material.color.set(map ? 0xffffff : 0xc0c0c0);
         slot.material.needsUpdate = true;
       }
+      this.preForceMap.clear();
       return 0;
+    }
+    if (this.preForceMap.size === 0) {
+      for (const slot of this.vehicle.slots) this.preForceMap.set(slot.id, slot.material.map ?? null);
     }
     if (!this.forcedTex) {
       this.forcedTex = new THREE.CanvasTexture(canvas);
@@ -218,8 +251,6 @@ export class VehicleViewer {
       slot.material.color.set(0xffffff);
       slot.material.needsUpdate = true;
     }
-    // eslint-disable-next-line no-console
-    console.log(`[forceTextureOnAll] applied ${canvas.width}×${canvas.height} (flipY=${flipY}) to ${this.vehicle.slots.length} materials`);
     return this.vehicle.slots.length;
   }
 

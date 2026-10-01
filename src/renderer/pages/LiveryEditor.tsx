@@ -153,6 +153,7 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
   const [showUVOverlay, setShowUVOverlay] = useState(true);
   const [showUVGen, setShowUVGen] = useState(false);
   const [uvGenSelected, setUvGenSelected] = useState<Set<string>>(new Set());
+  const [uvGenBusy, setUvGenBusy] = useState(false);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
@@ -406,7 +407,18 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
           slots = geometry.slots;
           autoSynced = slots.length > 0;
         }
-        for (const slot of slots) viewerRef.current.setSlotTexture(slot, e.canvas);
+        // REAL FIX for the painting freeze: push ONE shared GPU texture to
+        // every matching slot (viewerRef.setTextureOnSlots), instead of the
+        // old per-slot loop that created a SEPARATE full-resolution
+        // CanvasTexture — and a separate GPU upload — for every single
+        // material that referenced this texture. For a texture shared
+        // across many body panels (completely normal), or whenever Auto
+        // Sync falls back to "every material on the car", that used to
+        // multiply the GPU upload cost by the slot count on EVERY
+        // throttled frame — the actual cause of the multi-second-to-a-
+        // minute freeze, not a missing frame-throttle (that part was
+        // already correct).
+        if (slots.length > 0) viewerRef.current.setTextureOnSlots(id, slots, e.canvas);
         if (id === selected) setAutoSyncedAll(autoSynced);
       }
     }
@@ -514,36 +526,57 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
   // invented. Available whenever geometry is loaded.
   const uvGenPanels: PanelInfo[] = geometry ? listPanels(geometry.meshes) : [];
 
-  function generateUVTemplate() {
+  async function generateUVTemplate() {
     if (!geometry) return;
     const chosen = geometry.meshes.filter((m) => uvGenSelected.has(m.name));
     if (chosen.length === 0) { toast.error('Select at least one panel'); return; }
 
-    // 1. Real box-projection unwrap, applied straight to the live geometry —
-    //    the 3D preview and the UV-template overlay reflect it immediately.
-    const results = generateBoxProjectedUVs(chosen);
-    applyGeneratedUVs(results);
-    for (const { mesh, uvs } of results) pendingUVPatches.current.set(mesh.name, uvs);
+    setUvGenBusy(true);
+    // Yield one frame so the "Generating…" spinner actually paints before
+    // any work runs — this used to all happen synchronously inside the
+    // click handler, so on a vehicle with many panels selected the UI
+    // looked frozen/dead the instant Generate was clicked (same root cause
+    // as the painting freeze: see composite()'s setTextureOnSlots fix —
+    // that fix alone makes this fast now, but the explicit yield + spinner
+    // keeps it honest even on a slow machine or a huge selection).
+    await new Promise((r) => requestAnimationFrame(r));
 
-    // 2. A fresh, blank, paintable texture for these panels specifically —
-    //    composite() routes it straight to their real material slots (see
-    //    generatedTargetSlots), never "every material on the car".
-    const slotIds = new Set(
-      geometry.slots.filter((s) => s.meshes.some((m) => chosen.includes(m))).map((s) => s.id)
-    );
-    const texSize = 2048;
-    const newId = `tex_generated_${uid()}`;
-    generatedTargetSlots.current.set(newId, slotIds);
-    const newTarget: EditTarget = { id: newId, name: `generated_livery_${targets.length + 1}`, format: 'PNG', w: texSize, h: texSize, base: null };
-    const nextTargets = [...targets, newTarget];
-    setTargets(nextTargets);
-    uvEdgesByTarget.current.delete(newId); // force a fresh UV-overlay computation for the new layout
+    try {
+      // 1. Real box-projection unwrap, applied straight to the live
+      //    geometry — the 3D preview and the UV-template overlay reflect
+      //    it immediately.
+      const results = generateBoxProjectedUVs(chosen);
+      applyGeneratedUVs(results);
+      for (const { mesh, uvs } of results) pendingUVPatches.current.set(mesh.name, uvs);
 
-    setShowUVGen(false);
-    setUvGenSelected(new Set());
-    selectTarget(newId, nextTargets);
-    setView('editor');
-    toast.success(`Generated a UV template for ${chosen.length} panel${chosen.length !== 1 ? 's' : ''} — start painting`);
+      // 2. A fresh, blank, paintable texture for these panels specifically —
+      //    composite() routes it straight to their real material slots (see
+      //    generatedTargetSlots), never "every material on the car".
+      const slotIds = new Set(
+        geometry.slots.filter((s) => s.meshes.some((m) => chosen.includes(m))).map((s) => s.id)
+      );
+      const texSize = 2048;
+      const genNumber = targets.filter((t) => t.id.startsWith('tex_generated_')).length + 1;
+      const newId = `tex_generated_${uid()}`;
+      const newName = `Generated Livery ${genNumber}`;
+      generatedTargetSlots.current.set(newId, slotIds);
+      const newTarget: EditTarget = { id: newId, name: newName, format: 'PNG', w: texSize, h: texSize, base: null };
+      const nextTargets = [...targets, newTarget];
+      setTargets(nextTargets);
+      uvEdgesByTarget.current.delete(newId); // force a fresh UV-overlay computation for the new layout
+
+      setShowUVGen(false);
+      setUvGenSelected(new Set());
+      setShowUVOverlay(true); // the whole point is seeing the new layout — never leave it hidden
+      selectTarget(newId, nextTargets);
+      setView('editor');
+      setShowAllTex(false); // the new target must be visible in the real (not "show all debug") list
+      toast.success(`Created "${newName}" (${texSize}×${texSize}) for ${chosen.length} panel${chosen.length !== 1 ? 's' : ''} — selected and ready to paint`, { duration: 6000 });
+    } catch (err: any) {
+      toast.error(`Generate UV Template failed: ${err?.message || 'Unknown error'}`, { duration: 8000 });
+    } finally {
+      setUvGenBusy(false);
+    }
   }
 
   // ── Imports / layers ─────────────────────────────────────────────────────────
@@ -1230,6 +1263,17 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
           {(phase === 'edit' || phase === 'list') && diagnostics && (
             <button onClick={() => setShowDiag(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-cyan-600/15 text-cyan-300 border border-cyan-500/25 rounded-lg hover:bg-cyan-600/25 transition-all"><Stethoscope size={12} /> Diagnostics</button>
           )}
+          {phase === 'edit' && view === 'editor' && geometry && (
+            // Always-visible, top-bar entry point for Generate UV Template —
+            // the sidebar links (small text link + empty-state-only button)
+            // are easy to miss or disappear once any texture exists; this one
+            // stays put regardless of scroll position or how many textures
+            // the vehicle already has, per the explicit "make it obvious and
+            // easy to find" requirement.
+            <button onClick={() => setShowUVGen(true)} title="Generate a fresh UV template for selected panels" className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-sky-600/15 text-sky-300 border border-sky-500/25 rounded-lg hover:bg-sky-600/25 transition-all">
+              <Scan size={12} /> Generate UV Template
+            </button>
+          )}
           {phase === 'edit' && view === 'editor' && (
             <button onClick={() => setShowAssets((v) => !v)} title="Asset Library" className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg transition-all ${showAssets ? 'bg-emerald-600/25 text-emerald-200 border-emerald-500/30' : 'border-overlay-6 text-surface-400 hover:bg-overlay-4'}`}>
               <Grid3x3 size={12} /> Assets
@@ -1830,7 +1874,7 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
 
       {/* GENERATE UV TEMPLATE MODAL */}
       {showUVGen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={() => setShowUVGen(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={() => !uvGenBusy && setShowUVGen(false)}>
           <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg max-h-[80vh] flex flex-col bg-surface-900 border border-overlay-6 rounded-2xl shadow-2xl overflow-hidden">
             <div className="shrink-0 flex items-center gap-2 px-5 py-3.5 border-b border-overlay-6 bg-surface-950/50">
               <Scan size={16} className="text-sky-400" />
@@ -1838,11 +1882,11 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
                 <h2 className="text-sm font-bold text-surface-100">Generate UV Template</h2>
                 <p className="text-[10px] text-surface-500">Select the body panels to include — a clean UV layout is generated and a new paintable texture is created for them.</p>
               </div>
-              <button onClick={() => setShowUVGen(false)} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-200 hover:bg-overlay-4"><X size={16} /></button>
+              <button onClick={() => setShowUVGen(false)} disabled={uvGenBusy} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-200 hover:bg-overlay-4 disabled:opacity-30"><X size={16} /></button>
             </div>
             <div className="shrink-0 flex items-center gap-2 px-5 py-2.5 border-b border-overlay-6">
-              <button onClick={() => setUvGenSelected(new Set(uvGenPanels.map((p) => p.name)))} className="text-xs text-primary-300 hover:text-primary-200 font-medium">Select All</button>
-              <button onClick={() => setUvGenSelected(new Set())} className="text-xs text-surface-500 hover:text-surface-300 font-medium">Select None</button>
+              <button onClick={() => setUvGenSelected(new Set(uvGenPanels.map((p) => p.name)))} disabled={uvGenBusy} className="text-xs text-primary-300 hover:text-primary-200 font-medium disabled:opacity-40">Select All</button>
+              <button onClick={() => setUvGenSelected(new Set())} disabled={uvGenBusy} className="text-xs text-surface-500 hover:text-surface-300 font-medium disabled:opacity-40">Select None</button>
               <span className="ml-auto text-[11px] text-surface-500">{uvGenSelected.size} of {uvGenPanels.length} selected</span>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-1">
@@ -1850,8 +1894,8 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
               {uvGenPanels.map((p) => {
                 const checked = uvGenSelected.has(p.name);
                 return (
-                  <label key={p.name} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${checked ? 'bg-sky-500/10 border border-sky-500/25' : 'hover:bg-overlay-4 border border-transparent'}`}>
-                    <input type="checkbox" checked={checked} onChange={(e) => {
+                  <label key={p.name} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${checked ? 'bg-sky-500/10 border border-sky-500/25' : 'hover:bg-overlay-4 border border-transparent'} ${uvGenBusy ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <input type="checkbox" checked={checked} disabled={uvGenBusy} onChange={(e) => {
                       setUvGenSelected((prev) => { const n = new Set(prev); if (e.target.checked) n.add(p.name); else n.delete(p.name); return n; });
                     }} className="w-4 h-4 accent-sky-500" />
                     <span className="text-sm text-surface-200 flex-1 truncate">{p.name}</span>
@@ -1861,8 +1905,8 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
               })}
             </div>
             <div className="shrink-0 border-t border-overlay-6 p-4">
-              <button onClick={generateUVTemplate} disabled={uvGenSelected.size === 0} className="w-full py-2.5 rounded-xl text-sm font-semibold bg-sky-600/25 text-sky-200 border border-sky-500/30 hover:bg-sky-600/40 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
-                <Scan size={15} /> Generate UV Template for {uvGenSelected.size} panel{uvGenSelected.size !== 1 ? 's' : ''}
+              <button onClick={generateUVTemplate} disabled={uvGenSelected.size === 0 || uvGenBusy} className="w-full py-2.5 rounded-xl text-sm font-semibold bg-sky-600/25 text-sky-200 border border-sky-500/30 hover:bg-sky-600/40 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
+                {uvGenBusy ? <><Loader2 size={15} className="animate-spin" /> Generating…</> : <><Scan size={15} /> Generate UV Template for {uvGenSelected.size} panel{uvGenSelected.size !== 1 ? 's' : ''}</>}
               </button>
               <p className="text-[10px] text-surface-600 mt-2 text-center">A real box-projection unwrap — not a placeholder. Saving writes the new layout back into the real .yft; the new texture is saved as a .yft-ready YTD replacement when one exists, or exported as PNG otherwise.</p>
             </div>

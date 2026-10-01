@@ -113,5 +113,45 @@ ok('color swatches were enlarged (24px -> 36px)', /className="w-9 h-9 rounded-lg
 ok('the brush-size slider is labeled and widened, not a bare unlabeled 80px-wide range input', /<span className="text-xs text-surface-500">Size<\/span>/.test(editorSrc) && /className="w-32 h-2 accent-pink-500"/.test(editorSrc));
 ok('the layer opacity panel text/controls were enlarged (11px -> text-sm, thicker slider)', /<span className="text-sm font-medium text-surface-300">Opacity<\/span>/.test(editorSrc));
 
+// ── 10. The GPU-texture-multiplication freeze (shared CanvasTexture) ─────
+// THE BUG: setSlotTexture(), called once per slot in a loop, created a
+// SEPARATE THREE.CanvasTexture per slot even when every slot wraps the
+// exact same canvas — each is its own real GPU resource, so N slots meant
+// N full-resolution texImage2D uploads on every throttled composite
+// instead of one, which is what produced the multi-second-to-a-minute
+// freeze (scheduleRender's rAF-batching, fixed last turn, was already
+// correct and did NOT help because it only throttles frequency, not the
+// per-frame GPU cost).
+ok('REPRODUCED THE FIX: vehicleViewer exposes setTextureOnSlots, pushing ONE shared CanvasTexture to many slots keyed by textureKey', /setTextureOnSlots\(textureKey: string, slots: VehicleMaterialSlot\[\], canvas: HTMLCanvasElement, flipY = false\)/.test(viewerSrc));
+ok('setTextureOnSlots reuses an existing texture for the same key instead of allocating a new GPU texture on every call', /let tex = this\.overrideTex\.get\(textureKey\);\s*\n\s*if \(!tex\)/.test(viewerSrc));
+ok('exactly one needsUpdate flag triggers the real GPU upload, shared by every slot in the loop below it', /tex\.needsUpdate = true;[\s\S]{0,150}for \(const slot of slots\)/.test(viewerSrc));
+ok('setSlotTexture is now a thin wrapper delegating to setTextureOnSlots, not its own separate-CanvasTexture-per-call implementation', /setSlotTexture\(slot: VehicleMaterialSlot, canvas: HTMLCanvasElement, flipY = false\) \{\s*\n\s*this\.setTextureOnSlots\(slot\.id, \[slot\], canvas, flipY\);/.test(viewerSrc));
+ok('REPRODUCED THE FIX: composite() calls setTextureOnSlots ONCE for all matching slots, replacing the old per-slot setSlotTexture loop that multiplied GPU uploads by slot count', /setTextureOnSlots\(id, slots, e\.canvas\)/.test(editorSrc) && !/for \(const slot of slots\) viewerRef\.current\.setSlotTexture\(slot, e\.canvas\);/.test(editorSrc));
+ok('forceTextureOnAll restores each slot\'s pre-force map from a dedicated preForceMap snapshot, correct regardless of overrideTex\'s new per-texture-key scheme', /private preForceMap = new Map<string, THREE\.Texture \| null>\(\);/.test(viewerSrc) && /const restore = this\.preForceMap\.get\(slot\.id\);/.test(viewerSrc));
+
+// ── 11. Generate UV Template — async, visible progress, honest errors ────
+// THE BUG: generateUVTemplate() ran entirely synchronously inside the
+// click handler, so on a vehicle with real geometry it hit the exact same
+// GPU-upload freeze as painting (via the synchronous composite() call
+// inside selectTarget/ensureEdit) before any loading UI could even paint
+// a frame — it looked like Generate did nothing because the thread never
+// yielded back to React until it was already done (or looked stuck).
+ok('REPRODUCED THE FIX: generateUVTemplate is now async with an explicit requestAnimationFrame yield so the busy/loading UI actually paints before any heavy work runs', /async function generateUVTemplate\(\)/.test(editorSrc) && /await new Promise\(\(r\) => requestAnimationFrame\(r\)\);/.test(editorSrc));
+ok('a dedicated uvGenBusy state drives the modal\'s loading/disabled UI, not a fire-and-forget synchronous call', /const \[uvGenBusy, setUvGenBusy\] = useState\(false\);/.test(editorSrc));
+ok('generateUVTemplate wraps its real work in try/catch and reports failures to the user instead of failing silently', /} catch \(err: any\) \{\s*\n\s*toast\.error\(`Generate UV Template failed: \$\{err\?\.message \|\| 'Unknown error'\}`/.test(editorSrc));
+ok('uvGenBusy is always cleared via finally, so a thrown error can never leave the modal stuck in a permanent loading state', /\} finally \{\s*\n\s*setUvGenBusy\(false\);/.test(editorSrc));
+ok('REPRODUCED THE FIX: the generated texture now gets a clear, human-readable name instead of an opaque id, so the user knows what was created', /const newName = `Generated Livery \$\{genNumber\}`;/.test(editorSrc));
+ok('REPRODUCED THE FIX: after a successful generate, the overlay/target list/editor view are all forced visible so the new template is never hidden behind "show all debug" or an empty-state screen', /setShowUVOverlay\(true\); \/\/ the whole point is seeing the new layout — never leave it hidden/.test(editorSrc) && /setShowAllTex\(false\);/.test(editorSrc) && /setView\('editor'\);/.test(editorSrc));
+ok('a success toast names the exact texture, its resolution, and how many panels it covers — concrete confirmation, not a generic "done"', /toast\.success\(`Created "\$\{newName\}" \(\$\{texSize\}×\$\{texSize\}\) for \$\{chosen\.length\} panel/.test(editorSrc));
+ok('the Generate UV Template modal shows a real spinner and "Generating…" label while busy, and disables Select All/None/close/checkboxes so the user can\'t fight the in-flight generation', /uvGenBusy \? <><Loader2 size=\{15\} className="animate-spin" \/> Generating…<\/> : <><Scan size=\{15\} \/>/.test(editorSrc) && /disabled=\{uvGenBusy\}/.test(editorSrc));
+
+// ── 12. Generate UV Template — obvious, always-visible entry point ───────
+ok('REPRODUCED THE FIX: a persistent "Generate UV Template" button lives in the top action bar, visible whenever a vehicle is loaded — not just a tiny 9px sidebar link or an empty-state-only button that disappears once any texture exists', (() => {
+  const idx = editorSrc.indexOf(`{phase === 'edit' && view === 'editor' && geometry && (`);
+  if (idx === -1) return false;
+  const body = editorSrc.slice(idx, idx + 700);
+  return /onClick=\{\(\) => setShowUVGen\(true\)\}/.test(body) && /Generate UV Template/.test(body);
+})());
+
 console.log(`\nLIVERY EDITOR PAINT/UV/TRANSFORM TESTS: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
