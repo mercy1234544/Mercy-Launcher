@@ -28,6 +28,7 @@ export class VehicleViewer {
   private savedSection = new Map<string, { color: THREE.Color; map: THREE.Texture | null }>();
   private highlightKey: string | null = null;
   private wireframe = false;
+  private pointerDownAt: { x: number; y: number } | null = null;
 
   onPickSlot: ((slotId: string, meshName: string) => void) | null = null;
 
@@ -89,7 +90,15 @@ export class VehicleViewer {
     this.controls.maxDistance = 40;
     this.controls.maxPolarAngle = Math.PI / 2 + 0.15;
 
-    this.renderer.domElement.addEventListener('click', this.handleClick);
+    // REAL FIX for "mesh switching is glitchy": a plain 'click' listener also
+    // fires after OrbitControls drags the camera (mousedown → drag-orbit →
+    // mouseup still dispatches 'click'), so a small orbit nudge could pick
+    // the wrong mesh or re-pick the one under the cursor after the camera
+    // moved. Tracking pointerdown/up ourselves and only treating it as a
+    // pick when the pointer barely moved makes selection only ever fire for
+    // a genuine click, never a drag-orbit.
+    this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown);
+    this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp);
 
     this.resizeObs = new ResizeObserver(() => this.resize());
     this.resizeObs.observe(container);
@@ -112,8 +121,22 @@ export class VehicleViewer {
     this.renderer.setSize(w, h);
   }
 
-  private handleClick = (e: MouseEvent) => {
-    if (!this.vehicle || !this.onPickSlot) return;
+  private handlePointerDown = (e: PointerEvent) => {
+    this.pointerDownAt = { x: e.clientX, y: e.clientY };
+  };
+
+  /** A "click" only counts as a mesh pick if the pointer moved less than
+   *  this many CSS pixels between down and up — anything more is a
+   *  camera-orbit drag, not a selection gesture. */
+  private static readonly CLICK_MOVE_TOLERANCE_PX = 4;
+
+  private handlePointerUp = (e: PointerEvent) => {
+    const down = this.pointerDownAt;
+    this.pointerDownAt = null;
+    if (!down || !this.vehicle || !this.onPickSlot) return;
+    const dx = e.clientX - down.x, dy = e.clientY - down.y;
+    if (Math.hypot(dx, dy) > VehicleViewer.CLICK_MOVE_TOLERANCE_PX) return; // was a drag/orbit, not a pick
+
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -209,9 +232,12 @@ export class VehicleViewer {
     if (this.highlightKey === key) return;
     for (const slot of this.vehicle.slots) {
       const on = idSet.has(slot.id);
-      // Subtle tint only — must NOT mask the (painted) diffuse texture underneath.
-      slot.material.emissive = new THREE.Color(on ? 0x1133aa : 0x000000);
-      slot.material.emissiveIntensity = on ? 0.18 : 0;
+      // A real, clearly visible highlight — must still not mask the
+      // (painted) diffuse texture underneath. 0.18 was too subtle to read
+      // as "selected" against bright paintwork; a brighter emissive plus a
+      // wireframe overlay reads clearly regardless of the base texture.
+      slot.material.emissive = new THREE.Color(on ? 0x2255ff : 0x000000);
+      slot.material.emissiveIntensity = on ? 0.45 : 0;
       slot.material.needsUpdate = true;
     }
     this.highlightKey = key;
@@ -303,7 +329,8 @@ export class VehicleViewer {
   dispose() {
     cancelAnimationFrame(this.animId);
     this.resizeObs.disconnect();
-    this.renderer.domElement.removeEventListener('click', this.handleClick);
+    this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown);
+    this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp);
     this.controls.dispose();
     this.overrideTex.forEach((t) => t.dispose());
     this.renderer.dispose();

@@ -13,7 +13,8 @@ import {
 import { ddsToImageData, extractTexturesFromYTD } from '../services/ytdParser';
 import { loadVehicle, type DetectedVehicle, type LoadStage, type VehicleDiagnostics } from '../services/vehicleResourceLoader';
 import type { VehicleTexture } from '../services/rage/ytd';
-import type { LoadedVehicle } from '../services/glbVehicle';
+import type { LoadedVehicle, VehicleMaterialSlot } from '../services/glbVehicle';
+import { slotUVEdges } from '../services/glbVehicle';
 import { VehicleViewer } from '../services/vehicleViewer';
 import { LIVERY_ASSETS, applyAsset, assetThumbnail, renderNumberSticker, type NumberStyle, type NumberOptions } from '../services/liveryAssets';
 import { replaceTexturesInYTD } from '../services/rage/ytdWriter';
@@ -25,11 +26,19 @@ interface Layer {
   id: string; name: string; kind: LayerKind; visible: boolean; opacity: number;
   blendMode: GlobalCompositeOperation; canvas: HTMLCanvasElement;
   x: number; y: number; w: number; h: number;
+  /** Radians, rotated around the layer's own center. Only image/text/shape/
+   *  gradient/fill layers are user-transformable (see TRANSFORMABLE_KINDS) —
+   *  base and paint layers always cover the full texture and are never moved. */
+  rotation?: number;
   locked?: boolean;
   text?: string; fontSize?: number; color?: string;
   textOutline?: boolean; textOutlineColor?: string; textOutlineWidth?: number;
   textShadow?: boolean; textShadowColor?: string;
 }
+const TRANSFORMABLE_KINDS = new Set<LayerKind>(['image', 'text', 'shape', 'gradient', 'fill']);
+type TransformHandle = 'move' | 'tl' | 'tr' | 'bl' | 'br' | 'rotate';
+const HANDLE_SIZE = 10;
+const ROTATE_HANDLE_OFFSET = 28;
 interface TargetEdit { layers: Layer[]; canvas: HTMLCanvasElement; w: number; h: number; }
 interface EditTarget { id: string; name: string; format: string; w: number; h: number; base: ImageData | null; }
 interface UndoHistory { undo: ImageData[]; redo: ImageData[]; }
@@ -121,6 +130,8 @@ export default function LiveryEditor() {
   const [zoom, setZoom] = useState(0.4);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [exporterId, setExporterId] = useState('png');
+  const [showUVOverlay, setShowUVOverlay] = useState(true);
+  const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
 
@@ -128,6 +139,7 @@ export default function LiveryEditor() {
   const historyRef = useRef<Map<string, UndoHistory>>(new Map());
   const centerCanvas = useRef<HTMLCanvasElement>(null);
   const overlayCanvas = useRef<HTMLCanvasElement>(null);
+  const uvCanvas = useRef<HTMLCanvasElement>(null);
   const viewerMount = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<VehicleViewer | null>(null);
   const texInput = useRef<HTMLInputElement>(null);
@@ -135,6 +147,28 @@ export default function LiveryEditor() {
   const panning = useRef(false);
   const shapeStart = useRef<{ x: number; y: number } | null>(null);
   const lastPt = useRef({ x: 0, y: 0 });
+  // The last point a brush dab was stamped at — separate from `lastPt` (which
+  // tracks panning) so fast strokes can be line-interpolated instead of
+  // leaving gaps between discrete dabs.
+  const lastPaintPt = useRef<{ x: number; y: number } | null>(null);
+  // PERFORMANCE FIX for "painting is laggy": a pointermove fires far more
+  // often than the screen can usefully redraw. Painting itself (stamping a
+  // dab onto the small active-layer canvas) stays immediate, but the
+  // expensive part — recompositing every layer across the full texture and
+  // re-uploading it to the GPU for the 3D preview — is batched to at most
+  // once per animation frame via this flag, instead of once per pointer
+  // event (which can fire 100+ times/second).
+  const renderPending = useRef(false);
+  // Cached per-target UV wireframe edges (see slotUVEdges in glbVehicle.ts) —
+  // computed once when a texture/geometry is selected, never recomputed on
+  // every paint stroke or pan/zoom.
+  const uvEdgesByTarget = useRef<Map<string, Float32Array[]>>(new Map());
+  // Active image/text/shape/gradient/fill layer transform gesture (move,
+  // corner-resize, or rotate) — see TRANSFORMABLE_KINDS.
+  const transformGesture = useRef<{
+    handle: TransformHandle; startX: number; startY: number;
+    layer: { x: number; y: number; w: number; h: number; rotation: number };
+  } | null>(null);
   // Keep a ref to targets so the slot-pick handler never captures a stale closure.
   const targetsRef = useRef<EditTarget[]>([]);
   useEffect(() => { targetsRef.current = targets; }, [targets]);
@@ -193,6 +227,10 @@ export default function LiveryEditor() {
     setPhase('loading');
     setGeometry(null); setGeomReason(undefined);
     edits.current.clear();
+    // Target ids are index-based (tex_0, tex_1, …) and get reused across
+    // vehicles — a stale UV-edge cache from the PREVIOUS vehicle would
+    // silently draw the wrong wireframe on this one.
+    uvEdgesByTarget.current.clear();
     const stageText: Record<LoadStage, string> = {
       scanning: 'Scanning files…', reading: 'Reading model…',
       textures: 'Reading textures…', geometry: 'Building preview…', done: 'Done',
@@ -268,6 +306,10 @@ export default function LiveryEditor() {
     for (const l of e.layers) {
       if (!l.visible) continue;
       ctx.save(); ctx.globalAlpha = l.opacity / 100; ctx.globalCompositeOperation = l.blendMode;
+      if (l.rotation) {
+        const cx = l.x + l.w / 2, cy = l.y + l.h / 2;
+        ctx.translate(cx, cy); ctx.rotate(l.rotation); ctx.translate(-cx, -cy);
+      }
       ctx.drawImage(l.canvas, l.x, l.y, l.w, l.h); ctx.restore();
     }
     if (id === selected) drawCenter(e);
@@ -288,15 +330,82 @@ export default function LiveryEditor() {
     }
   }
 
+  // Checker pattern built once (not per frame) — it's identical every time,
+  // so rebuilding it on every paint stroke was pure waste on the main thread.
+  const checkerPatternRef = useRef<HTMLCanvasElement | null>(null);
+  function checkerPattern(): HTMLCanvasElement {
+    if (checkerPatternRef.current) return checkerPatternRef.current;
+    const pat = newCanvas(16, 16); const pc = pat.getContext('2d')!;
+    pc.fillStyle = '#1a1c26'; pc.fillRect(0, 0, 16, 16);
+    pc.fillStyle = '#232533'; pc.fillRect(0, 0, 8, 8); pc.fillRect(8, 8, 8, 8);
+    checkerPatternRef.current = pat;
+    return pat;
+  }
+
   function drawCenter(e: TargetEdit) {
     const cv = centerCanvas.current; if (!cv) return;
     cv.width = e.w; cv.height = e.h;
     const ctx = cv.getContext('2d')!;
-    const pat = newCanvas(16, 16); const pc = pat.getContext('2d')!;
-    pc.fillStyle = '#1a1c26'; pc.fillRect(0, 0, 16, 16);
-    pc.fillStyle = '#232533'; pc.fillRect(0, 0, 8, 8); pc.fillRect(8, 8, 8, 8);
-    ctx.fillStyle = ctx.createPattern(pat, 'repeat')!; ctx.fillRect(0, 0, e.w, e.h);
+    ctx.fillStyle = ctx.createPattern(checkerPattern(), 'repeat')!; ctx.fillRect(0, 0, e.w, e.h);
     ctx.drawImage(e.canvas, 0, 0);
+  }
+
+  // PERFORMANCE FIX: the single most impactful change for brush lag. Paint
+  // dabs themselves are cheap (they only touch the small active-layer
+  // canvas), but composite() + drawCenter() + pushing the result to the GPU
+  // for the live 3D preview each redraw the FULL texture (up to 4096×4096) —
+  // genuinely expensive work that used to run synchronously on every single
+  // pointermove event (which can fire 100+ times/second). Collapsing that
+  // to at most once per animation frame removes the main-thread stutter
+  // without changing what gets drawn.
+  function scheduleRender(id: string) {
+    if (renderPending.current) return;
+    renderPending.current = true;
+    requestAnimationFrame(() => { renderPending.current = false; composite(id); });
+  }
+
+  // ── UV template overlay ──────────────────────────────────────────────────
+  // THE REAL FIX for "the paint area is just a plain square box": draw the
+  // vehicle's actual UV-unwrap wireframe (which panel/part owns which pixels
+  // of this texture) directly on top of the raw texture, exactly like
+  // Zoov/FiveForge's livery templates. slotUVEdges() already existed in
+  // glbVehicle.ts (built for this, never wired up) — it returns each
+  // triangle edge in the mesh's real UV space; this just scales those
+  // [0,1] coordinates into texture-pixel space and strokes them.
+  function uvEdgesForTarget(t: EditTarget): Float32Array[] {
+    const cached = uvEdgesByTarget.current.get(t.id);
+    if (cached) return cached;
+    const result: Float32Array[] = [];
+    if (geometry) {
+      const tn = t.name.toLowerCase();
+      const slots = geometry.slots.filter(
+        (s: VehicleMaterialSlot) => s.textureHint?.toLowerCase() === tn || s.textures.some((tx) => tx.toLowerCase() === tn)
+      );
+      for (const slot of slots) result.push(slotUVEdges(slot));
+    }
+    uvEdgesByTarget.current.set(t.id, result);
+    return result;
+  }
+
+  function drawUVOverlay(t: EditTarget | null) {
+    const cv = uvCanvas.current; if (!cv) return;
+    if (!t || !showUVOverlay || !geometry) { cv.width = 1; cv.height = 1; return; }
+    const edgeSets = uvEdgesForTarget(t);
+    cv.width = t.w; cv.height = t.h;
+    if (edgeSets.every((s) => s.length === 0)) return; // no UV data for this texture — draw nothing, not a wrong grid
+    const ctx = cv.getContext('2d')!;
+    ctx.clearRect(0, 0, t.w, t.h);
+    ctx.strokeStyle = 'rgba(80,220,255,0.55)';
+    ctx.lineWidth = Math.max(1, Math.min(2, t.w / 1024));
+    ctx.beginPath();
+    for (const edges of edgeSets) {
+      for (let i = 0; i < edges.length; i += 4) {
+        const x1 = edges[i] * t.w, y1 = (1 - edges[i + 1]) * t.h;
+        const x2 = edges[i + 2] * t.w, y2 = (1 - edges[i + 3]) * t.h;
+        ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      }
+    }
+    ctx.stroke();
   }
 
   function selectTarget(id: string, list = targets) {
@@ -314,7 +423,7 @@ export default function LiveryEditor() {
     }
     const e = ensureEdit(t);
     setActiveLayerId(e.layers[e.layers.length - 1]?.id ?? null);
-    requestAnimationFrame(() => drawCenter(e));
+    requestAnimationFrame(() => { drawCenter(e); drawUVOverlay(t); });
     rerender();
   }
 
@@ -555,7 +664,11 @@ export default function LiveryEditor() {
   function updateLayer(id: string, changes: Partial<Layer>) {
     const e = edits.current.get(selected || ''); if (!e) return;
     const l = e.layers.find((x) => x.id === id); if (!l) return;
-    Object.assign(l, changes); if (l.kind === 'text') renderTextLayer(l); composite(selected!); rerender();
+    Object.assign(l, changes); if (l.kind === 'text') renderTextLayer(l);
+    // Same throttling as painting — an opacity/blend-mode slider fires
+    // onChange continuously while dragging, and a full recomposite on every
+    // tick is exactly the same main-thread cost that made brushing laggy.
+    scheduleRender(selected!); rerender();
   }
   function deleteLayer(id: string) {
     const e = edits.current.get(selected || ''); if (!e) return;
@@ -577,11 +690,33 @@ export default function LiveryEditor() {
     return { x: ((ev.clientX - r.left) / r.width) * cv.width, y: ((ev.clientY - r.top) / r.height) * cv.height };
   }
 
-  function paintAt(ev: React.PointerEvent) {
-    const e = edits.current.get(selected || ''); if (!e) return;
-    const l = ensurePaintLayer(e); const p = canvasPoint(ev); if (!p) return;
+  /** Stamp one dab, directly on the active paint layer — cheap (small
+   *  canvas region), always synchronous. Never recomposites itself; callers
+   *  batch that via scheduleRender(). */
+  function stampDab(l: Layer, x: number, y: number) {
     const ctx = l.canvas.getContext('2d')!; ctx.fillStyle = brushColor;
-    ctx.beginPath(); ctx.arc(p.x, p.y, brushSize, 0, Math.PI * 2); ctx.fill(); composite(selected!);
+    ctx.beginPath(); ctx.arc(x, y, brushSize, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /** REAL FIX for choppy/dotted strokes: a fast mouse move can jump several
+   *  brush-widths between two pointermove events, leaving gaps between
+   *  discrete dabs. This stamps evenly-spaced dabs along the segment from
+   *  the last painted point to the new one instead of just the endpoint. */
+  function paintAt(p: { x: number; y: number }) {
+    const e = edits.current.get(selected || ''); if (!e) return;
+    const l = ensurePaintLayer(e);
+    const prev = lastPaintPt.current;
+    if (!prev) {
+      stampDab(l, p.x, p.y);
+    } else {
+      const dx = p.x - prev.x, dy = p.y - prev.y;
+      const dist = Math.hypot(dx, dy);
+      const step = Math.max(1, brushSize / 3);
+      const steps = Math.max(1, Math.ceil(dist / step));
+      for (let i = 1; i <= steps; i++) stampDab(l, prev.x + (dx * i) / steps, prev.y + (dy * i) / steps);
+    }
+    lastPaintPt.current = p;
+    scheduleRender(selected!);
   }
 
   function floodFill(x0: number, y0: number) {
@@ -654,13 +789,102 @@ export default function LiveryEditor() {
     }
   }
 
+  // ── Image/text/shape layer transforms (move / scale / rotate) ───────────────
+  // REAL FIX for "importing graphics is awkward": a newly imported image
+  // used to land at (0,0) at its native size with no way to reposition it
+  // except editing numbers nowhere in the UI. This gives the active
+  // transformable layer real on-canvas handles — drag the body to move,
+  // drag a corner to scale (uniformly, from the layer's own center), drag
+  // the handle above it to rotate.
+  function getActiveTransformableLayer(): Layer | null {
+    const e = edits.current.get(selected || ''); if (!e) return null;
+    const l = e.layers.find((x) => x.id === activeLayerId); if (!l) return null;
+    if (!TRANSFORMABLE_KINDS.has(l.kind) || l.locked) return null;
+    return l;
+  }
+  function layerCenter(l: { x: number; y: number; w: number; h: number }) { return { cx: l.x + l.w / 2, cy: l.y + l.h / 2 }; }
+  function rotatePoint(x: number, y: number, cx: number, cy: number, rot: number) {
+    const dx = x - cx, dy = y - cy, cos = Math.cos(rot), sin = Math.sin(rot);
+    return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+  }
+  function layerHandles(l: Layer) {
+    const rot = l.rotation || 0;
+    const { cx, cy } = layerCenter(l);
+    const rotateOffset = ROTATE_HANDLE_OFFSET / zoom;
+    return {
+      cx, cy,
+      tl: rotatePoint(l.x, l.y, cx, cy, rot),
+      tr: rotatePoint(l.x + l.w, l.y, cx, cy, rot),
+      bl: rotatePoint(l.x, l.y + l.h, cx, cy, rot),
+      br: rotatePoint(l.x + l.w, l.y + l.h, cx, cy, rot),
+      topMid: rotatePoint(cx, l.y, cx, cy, rot),
+      rotateHandle: rotatePoint(cx, l.y - rotateOffset, cx, cy, rot),
+    };
+  }
+  function pointInLayer(p: { x: number; y: number }, l: Layer) {
+    const { cx, cy } = layerCenter(l);
+    const inv = rotatePoint(p.x, p.y, cx, cy, -(l.rotation || 0));
+    return inv.x >= l.x && inv.x <= l.x + l.w && inv.y >= l.y && inv.y <= l.y + l.h;
+  }
+  function hitTestHandle(p: { x: number; y: number }, l: Layer): TransformHandle | null {
+    const hs = HANDLE_SIZE / zoom;
+    const h = layerHandles(l);
+    if (Math.hypot(p.x - h.rotateHandle.x, p.y - h.rotateHandle.y) <= hs) return 'rotate';
+    if (Math.hypot(p.x - h.tl.x, p.y - h.tl.y) <= hs) return 'tl';
+    if (Math.hypot(p.x - h.tr.x, p.y - h.tr.y) <= hs) return 'tr';
+    if (Math.hypot(p.x - h.bl.x, p.y - h.bl.y) <= hs) return 'bl';
+    if (Math.hypot(p.x - h.br.x, p.y - h.br.y) <= hs) return 'br';
+    if (pointInLayer(p, l)) return 'move';
+    return null;
+  }
+  function drawTransformHandles(l: Layer) {
+    const oc = overlayCanvas.current; const e = edits.current.get(selected || '');
+    if (!oc || !e) return;
+    oc.width = e.w; oc.height = e.h;
+    const ctx = oc.getContext('2d')!; ctx.clearRect(0, 0, e.w, e.h);
+    const h = layerHandles(l);
+    const hs = HANDLE_SIZE / zoom;
+    ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = Math.max(1, 1.5 / zoom); ctx.setLineDash([6 / zoom, 4 / zoom]);
+    ctx.beginPath();
+    ctx.moveTo(h.tl.x, h.tl.y); ctx.lineTo(h.tr.x, h.tr.y); ctx.lineTo(h.br.x, h.br.y); ctx.lineTo(h.bl.x, h.bl.y); ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(h.topMid.x, h.topMid.y); ctx.lineTo(h.rotateHandle.x, h.rotateHandle.y); ctx.stroke();
+    ctx.fillStyle = '#38bdf8'; ctx.strokeStyle = '#0a1622'; ctx.lineWidth = Math.max(1, 1.5 / zoom);
+    for (const pt of [h.tl, h.tr, h.bl, h.br]) { ctx.beginPath(); ctx.rect(pt.x - hs / 2, pt.y - hs / 2, hs, hs); ctx.fill(); ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(h.rotateHandle.x, h.rotateHandle.y, hs / 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  // Keep handles visible/current whenever the select tool has a
+  // transformable active layer — tool switches, layer switches, and zoom
+  // changes all need a redraw; the live drag itself is handled imperatively
+  // in onPointerMove below for immediate feedback.
+  useEffect(() => {
+    const l = getActiveTransformableLayer();
+    if (tool === 'select' && l) drawTransformHandles(l);
+    else { const oc = overlayCanvas.current; if (oc) { oc.width = 1; oc.height = 1; } }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, activeLayerId, zoom, selected]);
+
   const onPointerDown = (ev: React.PointerEvent) => {
     const p = canvasPoint(ev);
-    if (ev.button === 1 || ev.altKey || tool === 'select') {
+    if (ev.button === 1 || ev.altKey) {
       panning.current = true; lastPt.current = { x: ev.clientX, y: ev.clientY };
+    } else if (tool === 'select') {
+      const activeLayer = getActiveTransformableLayer();
+      const handle = activeLayer && p ? hitTestHandle(p, activeLayer) : null;
+      if (activeLayer && handle && p && selected) {
+        pushUndo(selected); // one undo step for the whole move/scale/rotate gesture
+        transformGesture.current = {
+          handle, startX: p.x, startY: p.y,
+          layer: { x: activeLayer.x, y: activeLayer.y, w: activeLayer.w, h: activeLayer.h, rotation: activeLayer.rotation || 0 },
+        };
+      } else {
+        panning.current = true; lastPt.current = { x: ev.clientX, y: ev.clientY };
+      }
     } else if (tool === 'brush') {
       if (!painting.current) pushUndo(selected!);
-      painting.current = true; paintAt(ev);
+      painting.current = true; lastPaintPt.current = null;
+      if (p) paintAt(p);
     } else if (tool === 'fill') {
       if (p) floodFill(p.x, p.y);
     } else if (tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'gradient') {
@@ -670,21 +894,52 @@ export default function LiveryEditor() {
   };
 
   const onPointerMove = (ev: React.PointerEvent) => {
+    if (transformGesture.current) {
+      const p = canvasPoint(ev); if (!p || !selected) return;
+      const g = transformGesture.current;
+      const activeLayer = getActiveTransformableLayer();
+      if (!activeLayer) { transformGesture.current = null; return; }
+      if (g.handle === 'move') {
+        activeLayer.x = g.layer.x + (p.x - g.startX);
+        activeLayer.y = g.layer.y + (p.y - g.startY);
+      } else if (g.handle === 'rotate') {
+        const { cx, cy } = layerCenter(g.layer);
+        const startAngle = Math.atan2(g.startY - cy, g.startX - cx);
+        const curAngle = Math.atan2(p.y - cy, p.x - cx);
+        activeLayer.rotation = g.layer.rotation + (curAngle - startAngle);
+      } else {
+        // Corner handle: uniform scale from the layer's own center — avoids
+        // the ambiguity of "which corner stays anchored" once rotation is
+        // involved, and matches how most lightweight editors behave.
+        const { cx, cy } = layerCenter(g.layer);
+        const startDist = Math.hypot(g.startX - cx, g.startY - cy) || 1;
+        const curDist = Math.hypot(p.x - cx, p.y - cy);
+        const scale = Math.max(0.05, curDist / startDist);
+        const newW = g.layer.w * scale, newH = g.layer.h * scale;
+        activeLayer.w = newW; activeLayer.h = newH;
+        activeLayer.x = cx - newW / 2; activeLayer.y = cy - newH / 2;
+      }
+      scheduleRender(selected);
+      drawTransformHandles(activeLayer);
+      return;
+    }
     if (panning.current) {
       setPan((pp) => ({ x: pp.x + ev.clientX - lastPt.current.x, y: pp.y + ev.clientY - lastPt.current.y }));
       lastPt.current = { x: ev.clientX, y: ev.clientY };
     } else if (painting.current) {
-      paintAt(ev);
+      const p = canvasPoint(ev); if (p) paintAt(p);
     } else if (shapeStart.current) {
       const p = canvasPoint(ev);
       if (p) updateShapeOverlay(shapeStart.current.x, shapeStart.current.y, p.x, p.y);
-      // Force re-render of the overlay
-      rerender();
     }
   };
 
   const onPointerUp = (ev: React.PointerEvent) => {
-    if (shapeStart.current) {
+    if (transformGesture.current) {
+      transformGesture.current = null;
+      if (selected) composite(selected);
+      rerender();
+    } else if (shapeStart.current) {
       const p = canvasPoint(ev);
       if (p && selected) {
         const e = edits.current.get(selected);
@@ -711,6 +966,7 @@ export default function LiveryEditor() {
       rerender();
     }
     panning.current = false; painting.current = false;
+    lastPaintPt.current = null;
   };
 
   const onWheel = (ev: React.WheelEvent) => setZoom((z) => Math.max(0.05, Math.min(5, z * (ev.deltaY > 0 ? 0.9 : 1.1))));
@@ -773,6 +1029,13 @@ export default function LiveryEditor() {
     if (e && slot) viewerRef.current.setSlotTexture(slot, e.canvas);
   }, [geometry, selected]);
 
+  // Redraw the UV wireframe overlay whenever its visibility is toggled or
+  // the geometry finishes loading after the target was already selected.
+  useEffect(() => {
+    drawUVOverlay(targetById(selected));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showUVOverlay, selected, geometry]);
+
   const curEdit = selected ? edits.current.get(selected) : null;
   const curTarget = targetById(selected);
   const activeLayer = curEdit?.layers.find((l) => l.id === activeLayerId) || null;
@@ -810,23 +1073,40 @@ export default function LiveryEditor() {
             </button>
           )}
           {phase === 'edit' && (
-            <>
-              <button onClick={batchSaveToYTD} disabled={!diagnostics} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-600/30 text-emerald-100 border border-emerald-500/40 rounded-lg hover:bg-emerald-600/50 disabled:opacity-40 transition-all" title="Save all edited textures back into their .ytd files">
-                <Save size={12} /> Save All
+            <div className="relative flex items-stretch rounded-lg overflow-hidden border border-emerald-500/40">
+              {/* ONE clear primary action — the sensible default (save every
+                  edited texture back into its real .ytd, with an automatic
+                  .bak backup) rather than making the user pick between four
+                  separate save/export buttons to figure out which one
+                  actually produces a usable FiveM file. */}
+              <button onClick={batchSaveToYTD} disabled={!diagnostics} className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-emerald-600/30 text-emerald-100 hover:bg-emerald-600/50 disabled:opacity-40 transition-all" title="Save every edited texture back into its .ytd file (backs up the original first)">
+                <Save size={13} /> Save
               </button>
-              <button onClick={saveToYTD} disabled={!curEdit || !diagnostics} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-600/15 text-emerald-200 border border-emerald-500/25 rounded-lg hover:bg-emerald-600/30 disabled:opacity-40 transition-all" title="Save this texture only">
-                Save to YTD
+              <button onClick={() => setShowSaveMenu((v) => !v)} disabled={!curEdit} className="px-1.5 border-l border-emerald-500/30 bg-emerald-600/15 text-emerald-200 hover:bg-emerald-600/30 disabled:opacity-40 transition-all" title="More save/export options">
+                <ChevronDown size={13} />
               </button>
-              <button onClick={saveActiveTexture} disabled={!curEdit} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-600/10 text-emerald-300 border border-emerald-500/20 rounded-lg hover:bg-emerald-600/25 disabled:opacity-40 transition-all">
-                <Download size={12} /> Save PNG
-              </button>
-              <div className="flex items-center rounded-lg overflow-hidden border border-pink-500/30">
-                <select value={exporterId} onChange={(e) => setExporterId(e.target.value)} className="px-2 py-1.5 text-xs bg-pink-600/15 text-pink-200 focus:outline-none">
-                  {EXPORTERS.map((x) => <option key={x.id} value={x.id} disabled={!x.ready}>{x.label}{x.ready ? '' : ' (soon)'}</option>)}
-                </select>
-                <button onClick={doExport} disabled={!curEdit} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-pink-600/25 text-pink-200 hover:bg-pink-600/40 disabled:opacity-40"><Download size={12} /> Export</button>
-              </div>
-            </>
+              {showSaveMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowSaveMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-xl border border-overlay-6 bg-surface-900 shadow-2xl p-1.5 space-y-0.5">
+                    <button onClick={() => { setShowSaveMenu(false); saveToYTD(); }} disabled={!curEdit || !diagnostics} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs font-medium rounded-lg text-surface-200 hover:bg-overlay-6 disabled:opacity-40">
+                      <Save size={12} className="text-emerald-400" /> Save this texture only
+                    </button>
+                    <button onClick={() => { setShowSaveMenu(false); saveActiveTexture(); }} disabled={!curEdit} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs font-medium rounded-lg text-surface-200 hover:bg-overlay-6 disabled:opacity-40">
+                      <Download size={12} className="text-surface-400" /> Save as PNG…
+                    </button>
+                    <div className="h-px bg-overlay-6 my-1" />
+                    <div className="px-2.5 pb-1 text-[9px] uppercase tracking-widest text-surface-600">Export as</div>
+                    <div className="flex items-center gap-1 px-1.5 pb-1">
+                      <select value={exporterId} onChange={(e) => setExporterId(e.target.value)} className="flex-1 px-2 py-1 text-xs bg-overlay-6 border border-overlay-6 rounded text-surface-200 focus:outline-none">
+                        {EXPORTERS.map((x) => <option key={x.id} value={x.id} disabled={!x.ready}>{x.label}{x.ready ? '' : ' (soon)'}</option>)}
+                      </select>
+                      <button onClick={() => { setShowSaveMenu(false); doExport(); }} disabled={!curEdit} className="px-2.5 py-1 text-xs font-medium rounded bg-pink-600/25 text-pink-200 hover:bg-pink-600/40 disabled:opacity-40">Go</button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
         <input ref={texInput} type="file" multiple accept=".dds,.ytd,.png,.jpg,.jpeg,.webp,.svg" className="hidden" onChange={(e) => { Array.from(e.target.files || []).forEach(importTexture); e.target.value = ''; }} />
@@ -1077,6 +1357,15 @@ export default function LiveryEditor() {
               <button onClick={() => setZoom((z) => Math.max(0.05, z * 0.8))} className="p-1.5 text-surface-500 hover:text-surface-200 hover:bg-overlay-4 rounded"><ZoomOut size={13} /></button>
               <span className="text-xs text-surface-500 font-mono w-10 text-center">{Math.round(zoom * 100)}%</span>
               <button onClick={() => { setZoom(0.4); setPan({ x: 0, y: 0 }); }} className="text-xs text-surface-500 hover:text-surface-200 px-2 py-1 hover:bg-overlay-4 rounded">Fit</button>
+              <div className="w-px h-4 bg-overlay-6 mx-0.5" />
+              <button
+                onClick={() => setShowUVOverlay((v) => !v)}
+                disabled={!geometry}
+                title={geometry ? 'Toggle the UV template — which panel owns which pixels of this texture' : 'Load a vehicle model to see its UV template'}
+                className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded transition-all disabled:opacity-30 ${showUVOverlay ? 'bg-sky-600/20 text-sky-300' : 'text-surface-500 hover:text-surface-200 hover:bg-overlay-4'}`}
+              >
+                <Grid3x3 size={12} /> UV Template
+              </button>
               <span className="ml-auto text-[11px] text-surface-600 truncate max-w-40">{curTarget ? `${curTarget.name} · ${curEdit?.w}×${curEdit?.h}` : 'No texture selected'}</span>
             </div>
             <div
@@ -1090,7 +1379,9 @@ export default function LiveryEditor() {
                   <div style={{ position: 'absolute', left: '50%', top: '50%', transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${zoom})`, transformOrigin: 'center center', pointerEvents: 'all' }}>
                     <div className="relative" style={{ boxShadow: '0 0 0 1px rgba(255,255,255,0.08), 0 20px 60px rgba(0,0,0,0.7)' }}>
                       <canvas ref={centerCanvas} style={{ display: 'block', imageRendering: zoom < 0.5 ? 'auto' : 'pixelated' }} />
-                      {/* Overlay canvas for shape/gradient preview */}
+                      {/* UV template wireframe — which panel owns which pixels of this texture */}
+                      <canvas ref={uvCanvas} style={{ display: 'block', position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }} />
+                      {/* Overlay canvas for shape/gradient preview AND layer transform handles */}
                       <canvas ref={overlayCanvas} style={{ display: 'block', position: 'absolute', top: 0, left: 0, pointerEvents: 'none', imageRendering: zoom < 0.5 ? 'auto' : 'pixelated', opacity: 0.85 }} />
                     </div>
                   </div>
