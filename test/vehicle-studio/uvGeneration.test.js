@@ -70,17 +70,56 @@ const YFT_WRITER_PATH = path.resolve(__dirname, '../../src/renderer/services/rag
   ok('REPRODUCED A REAL UNWRAP: vertex (0,0,0) maps near the padded origin of its cell', approx(uvs1[0], padFrac, 0.01) && approx(uvs1[1], padFrac, 0.01));
   ok('REPRODUCED A REAL UNWRAP: vertex (1,1,0) maps near the padded far corner of its cell', approx(uvs1[4], 1 - padFrac, 0.01) && approx(uvs1[5], 1 - padFrac, 0.01));
 
-  // ── generateBoxProjectedUVs: multiple panels pack into distinct cells ──
-  const hoodMesh = makeFlatMesh('hood', [0, 0, 0, 2, 0, 0, 2, 2, 0, 0, 2, 0]); // a different flat panel
+  // ── generateBoxProjectedUVs: multiple panels pack into distinct, non-
+  //    overlapping islands, sized PROPORTIONALLY to their real footprint ──
+  function uvBBox(uvs) {
+    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+    for (let i = 0; i < uvs.length / 2; i++) {
+      const u = uvs[i * 2], v = uvs[i * 2 + 1];
+      if (u < minU) minU = u; if (u > maxU) maxU = u;
+      if (v < minV) minV = v; if (v > maxV) maxV = v;
+    }
+    return { minU, maxU, minV, maxV };
+  }
+  const rectsOverlap = (a, b) => a.minU < b.maxU && b.minU < a.maxU && a.minV < b.maxV && b.minV < a.maxV;
+
+  const hoodMesh = makeFlatMesh('hood', [0, 0, 0, 2, 0, 0, 2, 2, 0, 0, 2, 0]); // a different flat panel, 2x the real size
   const multi = uvGen.generateBoxProjectedUVs([doorMesh, hoodMesh]);
-  const doorU = multi[0].uvs[0], hoodU = multi[1].uvs[0];
-  ok('REPRODUCED THE FIX: two selected panels are packed into DISTINCT, non-overlapping grid cells — never the same UV space', Math.abs(doorU - hoodU) > 0.3);
+  const doorBox = uvBBox(multi[0].uvs), hoodBox = uvBBox(multi[1].uvs);
+  ok('REPRODUCED THE FIX: two selected panels are packed into DISTINCT, non-overlapping UV islands — never the same UV space (checked by real bounding-box overlap, not an incidental grid-column coordinate)', !rectsOverlap(doorBox, hoodBox));
+  const doorArea = (doorBox.maxU - doorBox.minU) * (doorBox.maxV - doorBox.minV);
+  const hoodArea = (hoodBox.maxU - hoodBox.minU) * (hoodBox.maxV - hoodBox.minV);
+  ok('REPRODUCED THE FIX: islands are sized PROPORTIONALLY to each panel\'s real-world footprint (a panel twice as wide and tall in both selected dims gets ~4x the UV area) instead of the old uniform grid that forced every panel into an identically-sized cell regardless of its real size', approx(hoodArea / doorArea, 4, 0.02));
 
   // ── applyGeneratedUVs: actually writes onto the live geometry ───────────
   uvGen.applyGeneratedUVs(single);
   const appliedAttr = doorMesh.geometry.getAttribute('uv');
   ok('applyGeneratedUVs sets a real "uv" attribute on the live geometry', !!appliedAttr && appliedAttr.count === 4);
   ok('the applied UVs match exactly what generateBoxProjectedUVs computed', appliedAttr.array[0] === uvs1[0] && appliedAttr.array[1] === uvs1[1]);
+
+  // ── selectBodyPanels: real candidate-list filtering for Generate UV ────
+  // THE BUG: the old candidate list was every mesh on the vehicle, so
+  // selecting wheels/lights/interior/glass/tiny painted hardware alongside
+  // real panels produced the scattered, unusable layouts users reported.
+  function makeSlot(section, meshes) {
+    return { id: `slot_${section}`, name: section, material: new THREE.MeshStandardMaterial(), meshes, originalMap: null, section, textures: [] };
+  }
+  const bodyDoor = makeFlatMesh('bodyDoor', [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
+  const wheelMesh = makeFlatMesh('wheelMesh', [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
+  const vehicleMixed = { meshes: [bodyDoor, wheelMesh], slots: [makeSlot('Body / Livery', [bodyDoor]), makeSlot('Wheels', [wheelMesh])] };
+  const filtered = uvGen.selectBodyPanels(vehicleMixed);
+  ok('REPRODUCED THE FIX: selectBodyPanels keeps only meshes whose material is the real body-paint shader (section "Body / Livery"), excluding wheels/lights/interior/glass entirely', filtered.length === 1 && filtered[0].name === 'bodyDoor');
+
+  const bigPanel = makeFlatMesh('bigPanel', [0, 0, 0, 2, 0, 0, 2, 2, 0, 0, 2, 0]); // real area 4
+  const tinyHandle = makeFlatMesh('tinyHandle', [0, 0, 0, 0.05, 0, 0, 0.05, 0.05, 0, 0, 0.05, 0]); // real area 0.0025 — well under 3% of 4
+  const vehicleWithHardware = { meshes: [bigPanel, tinyHandle], slots: [makeSlot('Body / Livery', [bigPanel, tinyHandle])] };
+  const majorOnly = uvGen.selectBodyPanels(vehicleWithHardware);
+  ok('REPRODUCED THE FIX: selectBodyPanels drops tiny painted hardware (door handles, mirror caps, antenna mounts) even when it shares the body-paint material with real panels — that flood of tiny fragments is what made generated layouts look like random noise', majorOnly.length === 1 && majorOnly[0].name === 'bigPanel');
+
+  const onlyWheel = makeFlatMesh('onlyWheel', [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
+  const vehicleNoBodyShader = { meshes: [onlyWheel], slots: [makeSlot('Wheels', [onlyWheel])] };
+  const fallback = uvGen.selectBodyPanels(vehicleNoBodyShader);
+  ok('selectBodyPanels honestly falls back to every mesh on the vehicle instead of leaving the user with zero choices when no paint-shaded material is found at all', fallback.length === 1 && fallback[0].name === 'onlyWheel');
 
   // ── Half-float codec round-trip (resource.ts) — the YFT UV writer's own
   //    encoding must invert the reader's decoding for real UV-range values.

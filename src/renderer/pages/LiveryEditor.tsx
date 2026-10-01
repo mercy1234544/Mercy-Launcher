@@ -19,7 +19,7 @@ import { VehicleViewer } from '../services/vehicleViewer';
 import { LIVERY_ASSETS, applyAsset, assetThumbnail, renderNumberSticker, type NumberStyle, type NumberOptions } from '../services/liveryAssets';
 import { replaceTexturesInYTD } from '../services/rage/ytdWriter';
 import { writeUVsToYFT } from '../services/rage/yftWriter';
-import { listPanels, generateBoxProjectedUVs, applyGeneratedUVs, type PanelInfo } from '../services/rage/uvGenerator';
+import { selectBodyPanels, generateBoxProjectedUVs, applyGeneratedUVs, type PanelInfo } from '../services/rage/uvGenerator';
 import { EXPORTERS, downloadResult } from '../services/liveryExport';
 
 // ── Layer model ─────────────────────────────────────────────────────────────
@@ -522,9 +522,12 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
   }
 
   // ── Generate UV Template ──────────────────────────────────────────────────
-  // Real panel list for the picker — the vehicle's own meshes, nothing
-  // invented. Available whenever geometry is loaded.
-  const uvGenPanels: PanelInfo[] = geometry ? listPanels(geometry.meshes) : [];
+  // Real panel list for the picker — only the vehicle's real body-paint
+  // panels (hood, doors, roof, fenders, bumpers, trunk…), never wheels/
+  // lights/interior/glass/trim or the dozens of tiny painted hardware bits
+  // that used to flood this list and produce a scattered, unusable UV
+  // layout (see selectBodyPanels in uvGenerator.ts for the full fix).
+  const uvGenPanels: PanelInfo[] = geometry ? selectBodyPanels(geometry) : [];
 
   async function generateUVTemplate() {
     if (!geometry) return;
@@ -1880,7 +1883,7 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
               <Scan size={16} className="text-sky-400" />
               <div className="flex-1">
                 <h2 className="text-sm font-bold text-surface-100">Generate UV Template</h2>
-                <p className="text-[10px] text-surface-500">Select the body panels to include — a clean UV layout is generated and a new paintable texture is created for them.</p>
+                <p className="text-[10px] text-surface-500">Only the vehicle's real body-paint panels are listed (wheels, lights, interior, glass and small trim are excluded automatically) — pick the ones to include and a clean, proportionally-packed UV layout is generated for them.</p>
               </div>
               <button onClick={() => setShowUVGen(false)} disabled={uvGenBusy} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-200 hover:bg-overlay-4 disabled:opacity-30"><X size={16} /></button>
             </div>
@@ -1890,15 +1893,20 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
               <span className="ml-auto text-[11px] text-surface-500">{uvGenSelected.size} of {uvGenPanels.length} selected</span>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              {uvGenPanels.length === 0 && <p className="text-xs text-surface-500 p-3">No mesh panels found on this vehicle.</p>}
-              {uvGenPanels.map((p) => {
+              {uvGenPanels.length === 0 && <p className="text-xs text-surface-500 p-3">No body panels found on this vehicle.</p>}
+              {uvGenPanels.map((p, i) => {
                 const checked = uvGenSelected.has(p.name);
                 return (
                   <label key={p.name} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${checked ? 'bg-sky-500/10 border border-sky-500/25' : 'hover:bg-overlay-4 border border-transparent'} ${uvGenBusy ? 'opacity-50 pointer-events-none' : ''}`}>
                     <input type="checkbox" checked={checked} disabled={uvGenBusy} onChange={(e) => {
                       setUvGenSelected((prev) => { const n = new Set(prev); if (e.target.checked) n.add(p.name); else n.delete(p.name); return n; });
                     }} className="w-4 h-4 accent-sky-500" />
-                    <span className="text-sm text-surface-200 flex-1 truncate">{p.name}</span>
+                    {/* mesh.name is a generic index ("mesh_12") carried over from
+                        the raw YFT geometry list — GTA vehicle files have no
+                        semantic per-panel names to show instead, so a stable,
+                        human-friendly "Body panel N" label is used here rather
+                        than the meaningless raw id. */}
+                    <span className="text-sm text-surface-200 flex-1 truncate">Body panel {i + 1}</span>
                     <span className="text-[10px] text-surface-600 font-mono">{p.vertexCount.toLocaleString()} verts</span>
                   </label>
                 );
@@ -1908,7 +1916,7 @@ export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps)
               <button onClick={generateUVTemplate} disabled={uvGenSelected.size === 0 || uvGenBusy} className="w-full py-2.5 rounded-xl text-sm font-semibold bg-sky-600/25 text-sky-200 border border-sky-500/30 hover:bg-sky-600/40 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
                 {uvGenBusy ? <><Loader2 size={15} className="animate-spin" /> Generating…</> : <><Scan size={15} /> Generate UV Template for {uvGenSelected.size} panel{uvGenSelected.size !== 1 ? 's' : ''}</>}
               </button>
-              <p className="text-[10px] text-surface-600 mt-2 text-center">A real box-projection unwrap — not a placeholder. Saving writes the new layout back into the real .yft; the new texture is saved as a .yft-ready YTD replacement when one exists, or exported as PNG otherwise.</p>
+              <p className="text-[10px] text-surface-600 mt-2 text-center">A real box-projection unwrap, packed proportionally to each panel's actual size — not a placeholder. Saving writes the new layout back into the real .yft; the new texture is saved as a .yft-ready YTD replacement when one exists, or exported as PNG otherwise.</p>
             </div>
           </div>
         </div>
