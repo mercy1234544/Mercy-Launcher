@@ -380,7 +380,7 @@ export default function ServerPanel() {
           {tab === 'files' && <FileManagerTab server={server} />}
           {tab === 'resources' && <ResourcesTab server={server} />}
           {tab === 'backups' && <BackupsTab server={server} updateServer={updateServer} />}
-          {tab === 'tools' && <ToolsTab />}
+          {tab === 'tools' && <ToolsTab server={server} />}
         </div>
       </div>
 
@@ -1089,23 +1089,32 @@ function BackupsTab({ server, updateServer }: { server: ServerType; updateServer
 // All the utilities that used to clutter the global sidebar — now scoped to the
 // selected server (they operate on the active server set by this panel).
 
-function ToolsTab() {
+function ToolsTab({ server }: { server: ServerType | null }) {
   const navigate = useNavigate();
+  // Livery Editor is a convenience link now, not the only way in — the
+  // real entry point is Vehicle Studio's own "Livery" tab, reachable
+  // without any server at all (FiveM hub → Vehicle Studio → import a
+  // folder/ZIP). This just opens that same place with the Livery tab
+  // pre-selected; there's no single unambiguous "this server's vehicle
+  // folder" to pre-fill (a server can have many vehicle resources), so it
+  // intentionally doesn't guess one — the user imports there exactly like
+  // from the hub.
+  const openLivery = () => navigate('/vehicle-studio', { state: { defaultTab: 'livery' } });
   const tools = [
-    { icon: HeartPulse, title: 'Health Scanner', desc: 'Scan for config issues & broken resources', path: '/health', tint: 'bg-emerald-600/20 text-emerald-400 border-emerald-500/20' },
-    { icon: FileCode, title: 'server.cfg Editor', desc: 'Edit your server configuration', path: '/editor', tint: 'bg-sky-600/20 text-sky-400 border-sky-500/20' },
-    { icon: ImportIcon, title: 'Import Resources', desc: 'Install scripts from ZIPs or folders', path: '/import', tint: 'bg-cyan-600/20 text-cyan-400 border-cyan-500/20' },
-    { icon: RefreshCw, title: 'Resource Updater', desc: 'Update GitHub-installed resources', path: '/updater', tint: 'bg-teal-600/20 text-teal-400 border-teal-500/20' },
-    { icon: Car, title: 'Vehicle Packs', desc: 'Import vehicle packs with auto manifests', path: '/vehicles', tint: 'bg-amber-600/20 text-amber-400 border-amber-500/20' },
-    { icon: Palette, title: 'Livery Editor', desc: 'Paint vehicle liveries on the 3D model', path: '/livery', tint: 'bg-pink-600/20 text-pink-400 border-pink-500/20' },
-    { icon: FolderTree, title: 'Organizer', desc: 'Sort resources into bracket categories', path: '/organizer', tint: 'bg-purple-600/20 text-purple-400 border-purple-500/20' },
-    { icon: ListOrdered, title: 'Startup Order', desc: 'Reorder resource start sequence', path: '/startup', tint: 'bg-indigo-600/20 text-indigo-400 border-indigo-500/20' },
+    { icon: HeartPulse, title: 'Health Scanner', desc: 'Scan for config issues & broken resources', action: () => navigate('/health'), tint: 'bg-emerald-600/20 text-emerald-400 border-emerald-500/20' },
+    { icon: FileCode, title: 'server.cfg Editor', desc: 'Edit your server configuration', action: () => navigate('/editor'), tint: 'bg-sky-600/20 text-sky-400 border-sky-500/20' },
+    { icon: ImportIcon, title: 'Import Resources', desc: 'Install scripts from ZIPs or folders', action: () => navigate('/import'), tint: 'bg-cyan-600/20 text-cyan-400 border-cyan-500/20' },
+    { icon: RefreshCw, title: 'Resource Updater', desc: 'Update GitHub-installed resources', action: () => navigate('/updater'), tint: 'bg-teal-600/20 text-teal-400 border-teal-500/20' },
+    { icon: Car, title: 'Vehicle Packs', desc: 'Import vehicle packs with auto manifests', action: () => navigate('/vehicles'), tint: 'bg-amber-600/20 text-amber-400 border-amber-500/20' },
+    { icon: Palette, title: 'Livery Editor', desc: 'Opens Vehicle Studio’s Livery tab — import any vehicle folder, no server needed', action: openLivery, tint: 'bg-pink-600/20 text-pink-400 border-pink-500/20' },
+    { icon: FolderTree, title: 'Organizer', desc: 'Sort resources into bracket categories', action: () => navigate('/organizer'), tint: 'bg-purple-600/20 text-purple-400 border-purple-500/20' },
+    { icon: ListOrdered, title: 'Startup Order', desc: 'Reorder resource start sequence', action: () => navigate('/startup'), tint: 'bg-indigo-600/20 text-indigo-400 border-indigo-500/20' },
   ];
   return (
     <div className="h-full overflow-y-auto p-5">
       <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
         {tools.map((t) => (
-          <button key={t.path} onClick={() => navigate(t.path)}
+          <button key={t.title} onClick={t.action}
             className="group flex items-start gap-4 rounded-2xl border border-overlay-6 bg-surface-900/40 hover:bg-overlay-4 hover:border-overlay-10 p-5 text-left transition-all">
             <div className={`w-11 h-11 rounded-xl border flex items-center justify-center shrink-0 ${t.tint}`}>
               <t.icon size={19} />

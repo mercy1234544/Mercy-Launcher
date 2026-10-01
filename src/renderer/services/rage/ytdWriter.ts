@@ -10,7 +10,7 @@
 // - Uncompressed originals stay uncompressed.
 // - Mip chains are rebuilt at every level.
 
-import { unpackRSC7Detailed } from './resource';
+import { unpackRSC7Detailed, compressDeflateRaw, buildRSC7 } from './resource';
 import { parseYtdDetailed, type TextureRecord } from './ytd';
 import { buildMipChainDXT1, encodeRawDXT1, downsample2x } from '../ddsEncoder';
 
@@ -22,39 +22,6 @@ export interface YtdWriteResult {
   bytes: Uint8Array;
   replaced: string[];
   skipped: { name: string; reason: string }[];
-}
-
-// ── RSC7 utilities ─────────────────────────────────────────────────────────────
-
-async function compressDeflateRaw(data: Uint8Array): Promise<Uint8Array> {
-  const cs = new (globalThis as any).CompressionStream('deflate-raw') as {
-    writable: WritableStream<Uint8Array>;
-    readable: ReadableStream<Uint8Array>;
-  };
-  const writer = cs.writable.getWriter();
-  const reader = cs.readable.getReader();
-  // CompressionStream.write requires ArrayBuffer-backed Uint8Array
-  const safeBuf = data.buffer instanceof ArrayBuffer
-    ? data
-    : new Uint8Array(data);
-  writer.write(safeBuf); writer.close();
-  const chunks: Uint8Array[] = [];
-  while (true) { const { done, value } = await reader.read(); if (done) break; if (value) chunks.push(value); }
-  const total = chunks.reduce((s, c) => s + c.length, 0);
-  const out = new Uint8Array(total); let off = 0;
-  for (const c of chunks) { out.set(c, off); off += c.length; }
-  return out;
-}
-
-function buildRSC7(version: number, systemFlags: number, graphicsFlags: number, payload: Uint8Array): Uint8Array {
-  const out = new Uint8Array(16 + payload.length);
-  const dv = new DataView(out.buffer);
-  dv.setUint32(0, 0x37435352, true); // 'RSC7'
-  dv.setUint32(4, version, true);
-  dv.setUint32(8, systemFlags, true);
-  dv.setUint32(12, graphicsFlags, true);
-  out.set(payload, 16);
-  return out;
 }
 
 // ── Pixel encoder ─────────────────────────────────────────────────────────────

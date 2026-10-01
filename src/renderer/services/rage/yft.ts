@@ -24,7 +24,7 @@
 // Pointers are 32-bit segmented (top nibble 0x5 = system). These dump files put
 // everything in one "system" segment so resolve() is offset = ptr & 0x0FFFFFFF.
 
-import { unpackRSC7Detailed, ResourceReader } from './resource';
+import { unpackRSC7Detailed, ResourceReader, decodeHalf } from './resource';
 
 // ── Public interfaces ────────────────────────────────────────────────────────
 
@@ -41,6 +41,21 @@ export interface ParsedGeometry {
   fvf: number;
   /** Which texcoord channel the UVs were read from (0 or 1). */
   uvChannel: number;
+  /** Absolute byte offset of this mesh's vertex buffer within the
+   *  decompressed RSC7 resource (ResourceReader.resolve()'s flat address
+   *  space — system then graphics concatenated). Together with
+   *  vertexStride/uvFieldOffset/uvIsHalf/vertexCount, this is everything
+   *  needed to patch UV values back into the real YFT file in place (see
+   *  uvGenerator.ts) — same vertex count, same stride, only the UV floats
+   *  at this known offset change, so no pointers or buffer sizes move. */
+  vertexBufferOffset: number;
+  /** Byte offset of the UV field WITHIN one vertex (i.e. add
+   *  vertexBufferOffset + i*vertexStride to get one vertex's UV bytes). */
+  uvFieldOffset: number;
+  /** Whether that UV field is stored as 2 half-floats (4 bytes) or 2 full
+   *  floats (8 bytes) per vertex. */
+  uvIsHalf: boolean;
+  vertexCount: number;
 }
 
 export interface ParsedShader {
@@ -120,17 +135,6 @@ export interface YftParseResult {
   drawable: ParsedDrawable | null;
   reason?: string;
   diagnostics: YftDiagnostics;
-}
-
-// ── Half-precision float ─────────────────────────────────────────────────────
-
-function decodeHalf(h: number): number {
-  const s = (h & 0x8000) ? -1 : 1;
-  const e = (h >> 10) & 0x1f;
-  const f = h & 0x3ff;
-  if (e === 0)  return s * Math.pow(2, -14) * (f / 1024);
-  if (e === 31) return f ? NaN : s * Infinity;
-  return s * Math.pow(2, e - 15) * (1 + f / 1024);
 }
 
 // ── Safe-read helpers ────────────────────────────────────────────────────────
@@ -379,12 +383,14 @@ function buildGeometry(
   };
   let uvs: Float32Array | null = null;
   let uvChannel = 0;
+  let uvFieldOffset = layout.uvOff;
+  let uvIsHalf = layout.uvIsHalf;
   const uv0 = readUVChannel(layout.uvOff, layout.uvIsHalf);
   if (uv0 && uv0.ext > 0.002) {
     uvs = uv0.uvs;
   } else {
     const uv1 = readUVChannel(layout.uv1Off, layout.uv1IsHalf);
-    if (uv1 && uv1.ext > 0.002) { uvs = uv1.uvs; uvChannel = 1; }
+    if (uv1 && uv1.ext > 0.002) { uvs = uv1.uvs; uvChannel = 1; uvFieldOffset = layout.uv1Off; uvIsHalf = layout.uv1IsHalf; }
     else uvs = uv0 ? uv0.uvs : null;
   }
 
@@ -409,6 +415,7 @@ function buildGeometry(
     name: `mesh_${geoIdx}`,
     positions, uvs, normals, indices,
     shaderIndex, vertexStride: vb.stride, fvf: 0, uvChannel,
+    vertexBufferOffset: vb.dataOff, uvFieldOffset, uvIsHalf, vertexCount: vb.count,
   };
 }
 

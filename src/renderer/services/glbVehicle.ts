@@ -277,6 +277,12 @@ export function buildVehicleFromDrawable(
       diffuseSlot: slot.diffuseSlot,
       hasTexture: !!slot.originalMap,
       texSource: slot.originalMap ? 'YTD' : 'none',
+      // Real byte offsets into the original YFT's decompressed buffer —
+      // see ParsedGeometry's own header in rage/yft.ts. Lets uvGenerator.ts
+      // patch newly-generated UVs back into the actual file in place.
+      vertexBufferOffset: geo.vertexBufferOffset,
+      uvFieldOffset: geo.uvFieldOffset,
+      uvIsHalf: geo.uvIsHalf,
     };
     slot.uvChannel = geo.uvChannel;
     root.add(mesh);

@@ -8,7 +8,7 @@ import {
   FolderOpen, Box, Loader2, ChevronLeft, ArrowLeft, Wand2, Square, Stethoscope, X,
   CheckCircle2, XCircle, FileText, Image as ImageIcon,
   RotateCcw, Scan, BoxSelect, TriangleRight, Circle, Minus, Droplets,
-  Undo2, Redo2, PaintBucket, Slash, Lock, Unlock, Save,
+  Undo2, Redo2, PaintBucket, Slash, Lock, Unlock, Save, Zap,
 } from 'lucide-react';
 import { ddsToImageData, extractTexturesFromYTD } from '../services/ytdParser';
 import { loadVehicle, type DetectedVehicle, type LoadStage, type VehicleDiagnostics } from '../services/vehicleResourceLoader';
@@ -18,6 +18,8 @@ import { slotUVEdges } from '../services/glbVehicle';
 import { VehicleViewer } from '../services/vehicleViewer';
 import { LIVERY_ASSETS, applyAsset, assetThumbnail, renderNumberSticker, type NumberStyle, type NumberOptions } from '../services/liveryAssets';
 import { replaceTexturesInYTD } from '../services/rage/ytdWriter';
+import { writeUVsToYFT } from '../services/rage/yftWriter';
+import { listPanels, generateBoxProjectedUVs, applyGeneratedUVs, type PanelInfo } from '../services/rage/uvGenerator';
 import { EXPORTERS, downloadResult } from '../services/liveryExport';
 
 // ── Layer model ─────────────────────────────────────────────────────────────
@@ -89,7 +91,20 @@ function Row({ k, v, ok }: { k: string; v?: string; ok?: boolean }) {
   );
 }
 
-export default function LiveryEditor() {
+export interface LiveryWorkspaceProps {
+  /** When set, the editor auto-scans this folder on mount instead of
+   *  showing the "Open a Vehicle Resource" landing screen — used when
+   *  embedded as Vehicle Studio's Livery tab, which already has a real
+   *  imported workspace folder (scan.root) and should never make the user
+   *  pick a folder a second time. */
+  initialRoot?: string;
+  /** True when rendered inside Vehicle Studio's tab layout rather than as
+   *  the standalone /livery page — hides the standalone page's own back
+   *  button and title (Vehicle Studio's own header already shows both). */
+  embedded?: boolean;
+}
+
+export function LiveryWorkspace({ initialRoot, embedded }: LiveryWorkspaceProps) {
   const navigate = useNavigate();
   const [phase, setPhase] = useState<Phase>('empty');
   const [vehicles, setVehicles] = useState<DetectedVehicle[]>([]);
@@ -115,6 +130,11 @@ export default function LiveryEditor() {
   const [wireframe, setWireframe] = useState(false);
   const [pickedSlotId, setPickedSlotId] = useState<string | null>(null);
   const [forceTexOn, setForceTexOn] = useState(false);
+  // True when the CURRENTLY SELECTED texture had no direct material match
+  // and composite() auto-applied it to every material as a fallback — a
+  // real status, not a toggle, shown so the user knows why (and that
+  // nothing is broken, Auto Sync handled it).
+  const [autoSyncedAll, setAutoSyncedAll] = useState(false);
   const [uvDebug, setUvDebug] = useState(false);
   const [flipV, setFlipV] = useState(false);
   const [sectionDebug, setSectionDebug] = useState(false);
@@ -131,6 +151,8 @@ export default function LiveryEditor() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [exporterId, setExporterId] = useState('png');
   const [showUVOverlay, setShowUVOverlay] = useState(true);
+  const [showUVGen, setShowUVGen] = useState(false);
+  const [uvGenSelected, setUvGenSelected] = useState<Set<string>>(new Set());
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
@@ -169,6 +191,18 @@ export default function LiveryEditor() {
     handle: TransformHandle; startX: number; startY: number;
     layer: { x: number; y: number; w: number; h: number; rotation: number };
   } | null>(null);
+  // ── Generate UV Template state ──────────────────────────────────────────
+  // For a texture target created by "Generate UV Template" (no real YTD
+  // entry ever existed for it), composite()'s normal name-based material
+  // matching has nothing to match against — this records EXACTLY which
+  // material slots that target's selected panels actually belong to, so it
+  // goes straight there instead of falling back to "every material on the
+  // car" (which would be wrong — only the panels the user picked for this
+  // template should show it).
+  const generatedTargetSlots = useRef<Map<string, Set<string>>>(new Map());
+  // mesh name -> newly-generated UVs, kept so Save can also patch them back
+  // into the real YFT file in place (see yftWriter.ts).
+  const pendingUVPatches = useRef<Map<string, Float32Array>>(new Map());
   // Keep a ref to targets so the slot-pick handler never captures a stale closure.
   const targetsRef = useRef<EditTarget[]>([]);
   useEffect(() => { targetsRef.current = targets; }, [targets]);
@@ -208,9 +242,7 @@ export default function LiveryEditor() {
   }, [geometry, view]);
 
   // ── Folder workflow ──────────────────────────────────────────────────────────
-  const openFolder = useCallback(async () => {
-    const dir = await window.electronAPI.livery.pickFolder();
-    if (!dir) return;
+  const scanDir = useCallback(async (dir: string) => {
     try {
       const res = await window.electronAPI.livery.scanFolder(dir);
       if (!res.vehicles.length) { toast.error('No .yft/.ytd vehicle files found in that folder'); return; }
@@ -222,6 +254,20 @@ export default function LiveryEditor() {
     }
   }, []);
 
+  const openFolder = useCallback(async () => {
+    const dir = await window.electronAPI.livery.pickFolder();
+    if (!dir) return;
+    scanDir(dir);
+  }, [scanDir]);
+
+  // Embedded in Vehicle Studio: the user already imported a workspace
+  // (scan.root) — auto-scan it immediately instead of showing the "Open a
+  // Vehicle Resource" landing screen a second time.
+  useEffect(() => {
+    if (initialRoot) scanDir(initialRoot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRoot]);
+
   const selectVehicle = useCallback(async (v: DetectedVehicle) => {
     setActiveVehicle(v);
     setPhase('loading');
@@ -231,6 +277,9 @@ export default function LiveryEditor() {
     // vehicles — a stale UV-edge cache from the PREVIOUS vehicle would
     // silently draw the wrong wireframe on this one.
     uvEdgesByTarget.current.clear();
+    generatedTargetSlots.current.clear();
+    pendingUVPatches.current.clear();
+    setUvGenSelected(new Set());
     const stageText: Record<LoadStage, string> = {
       scanning: 'Scanning files…', reading: 'Reading model…',
       textures: 'Reading textures…', geometry: 'Building preview…', done: 'Done',
@@ -260,6 +309,15 @@ export default function LiveryEditor() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Embedded + exactly one vehicle in the resource: skip the pick-a-vehicle
+  // list too — most FiveM vehicle resources contain just one model, and the
+  // whole point of embedding this in Vehicle Studio is removing extra
+  // clicks before painting.
+  useEffect(() => {
+    if (initialRoot && phase === 'list' && vehicles.length === 1) selectVehicle(vehicles[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRoot, phase, vehicles]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -314,18 +372,42 @@ export default function LiveryEditor() {
     }
     if (id === selected) drawCenter(e);
 
-    // Push edited canvas live onto EVERY material that references this texture
-    // (as diffuse or any param), case-insensitively — not just the one whose
-    // primary name matches. A material can use the painted texture in any slot.
+    // REAL FIX for "I have to click Force every time": push edited canvas
+    // live onto EVERY material that references this texture (as diffuse or
+    // any param), case-insensitively AND whitespace/null-trimmed — the
+    // YFT/YTD binary parsers read fixed-length string fields and can leave
+    // trailing padding that broke the old exact comparison for some
+    // vehicles. "Auto Sync" (per the task spec) means this must never
+    // require a manual click: if the targeted match finds zero materials
+    // for the texture actually being edited, THIS IS THE ONLY TEXTURE BEING
+    // PAINTED, so apply it everywhere automatically rather than silently
+    // doing nothing — the same effect the old manual "Force" button had,
+    // now automatic instead of a debug-only action. A real per-material
+    // match (the common case for correctly-mapped vehicles) is always
+    // preferred and never overridden.
     if (geometry && viewerRef.current) {
       const t = targets.find((tx) => tx.id === id);
       if (t) {
-        const tn = t.name.toLowerCase();
-        const slots = geometry.slots.filter(
-          (s) => s.textureHint?.toLowerCase() === tn ||
-                 s.textures.some((tx) => tx.toLowerCase() === tn)
-        );
+        // A "Generate UV Template" target has no real YTD entry to name-
+        // match against — it was created for EXACTLY these material slots
+        // (the panels the user selected), so go straight there instead of
+        // falling through to "every material on the car".
+        const explicitSlotIds = generatedTargetSlots.current.get(id);
+        const norm = (s: string) => s.trim().replace(/\0+$/, '').toLowerCase();
+        const tn = norm(t.name);
+        let slots = explicitSlotIds
+          ? geometry.slots.filter((s) => explicitSlotIds.has(s.id))
+          : geometry.slots.filter(
+              (s) => (s.textureHint && norm(s.textureHint) === tn) ||
+                     s.textures.some((tx) => norm(tx) === tn)
+            );
+        let autoSynced = false;
+        if (!explicitSlotIds && slots.length === 0) {
+          slots = geometry.slots;
+          autoSynced = slots.length > 0;
+        }
         for (const slot of slots) viewerRef.current.setSlotTexture(slot, e.canvas);
+        if (id === selected) setAutoSyncedAll(autoSynced);
       }
     }
   }
@@ -425,6 +507,43 @@ export default function LiveryEditor() {
     setActiveLayerId(e.layers[e.layers.length - 1]?.id ?? null);
     requestAnimationFrame(() => { drawCenter(e); drawUVOverlay(t); });
     rerender();
+  }
+
+  // ── Generate UV Template ──────────────────────────────────────────────────
+  // Real panel list for the picker — the vehicle's own meshes, nothing
+  // invented. Available whenever geometry is loaded.
+  const uvGenPanels: PanelInfo[] = geometry ? listPanels(geometry.meshes) : [];
+
+  function generateUVTemplate() {
+    if (!geometry) return;
+    const chosen = geometry.meshes.filter((m) => uvGenSelected.has(m.name));
+    if (chosen.length === 0) { toast.error('Select at least one panel'); return; }
+
+    // 1. Real box-projection unwrap, applied straight to the live geometry —
+    //    the 3D preview and the UV-template overlay reflect it immediately.
+    const results = generateBoxProjectedUVs(chosen);
+    applyGeneratedUVs(results);
+    for (const { mesh, uvs } of results) pendingUVPatches.current.set(mesh.name, uvs);
+
+    // 2. A fresh, blank, paintable texture for these panels specifically —
+    //    composite() routes it straight to their real material slots (see
+    //    generatedTargetSlots), never "every material on the car".
+    const slotIds = new Set(
+      geometry.slots.filter((s) => s.meshes.some((m) => chosen.includes(m))).map((s) => s.id)
+    );
+    const texSize = 2048;
+    const newId = `tex_generated_${uid()}`;
+    generatedTargetSlots.current.set(newId, slotIds);
+    const newTarget: EditTarget = { id: newId, name: `generated_livery_${targets.length + 1}`, format: 'PNG', w: texSize, h: texSize, base: null };
+    const nextTargets = [...targets, newTarget];
+    setTargets(nextTargets);
+    uvEdgesByTarget.current.delete(newId); // force a fresh UV-overlay computation for the new layout
+
+    setShowUVGen(false);
+    setUvGenSelected(new Set());
+    selectTarget(newId, nextTargets);
+    setView('editor');
+    toast.success(`Generated a UV template for ${chosen.length} panel${chosen.length !== 1 ? 's' : ''} — start painting`);
   }
 
   // ── Imports / layers ─────────────────────────────────────────────────────────
@@ -584,15 +703,22 @@ export default function LiveryEditor() {
     if (editedTargets.length === 0) { toast.error('No textures have been edited'); return; }
     // Group by source YTD
     const byYtd = new Map<string, Array<{ name: string; canvas: HTMLCanvasElement }>>();
+    // "Generate UV Template" targets have no existing YTD entry to replace —
+    // there's no writer that can ADD a brand-new texture into a YTD's
+    // dictionary (only replace an existing same-size one), so those are
+    // exported as a loose PNG instead of silently losing the painted work.
+    const unmatchedGenerated: EditTarget[] = [];
     for (const t of editedTargets) {
       const e = edits.current.get(t.id)!;
       const ytdEntry = diagnostics.ytds.find((y) => y.textures.some((tx) => tx.name === t.name));
-      if (!ytdEntry) continue;
+      if (!ytdEntry) { unmatchedGenerated.push(t); continue; }
       if (!byYtd.has(ytdEntry.path)) byYtd.set(ytdEntry.path, []);
       byYtd.get(ytdEntry.path)!.push({ name: t.name, canvas: e.canvas });
     }
-    if (byYtd.size === 0) { toast.error('Could not match edits to YTD files'); return; }
-    const tid = toast.loading(`Saving ${editedTargets.length} texture(s) to ${byYtd.size} YTD file(s)…`);
+    if (byYtd.size === 0 && unmatchedGenerated.length === 0 && pendingUVPatches.current.size === 0) {
+      toast.error('Could not match edits to YTD files'); return;
+    }
+    const tid = toast.loading(`Saving ${editedTargets.length} texture(s)…`);
     let totalReplaced = 0, totalSkipped = 0;
     try {
       for (const [ytdPath, reps] of byYtd) {
@@ -606,11 +732,48 @@ export default function LiveryEditor() {
         totalReplaced += wr.replaced.length;
         totalSkipped += wr.skipped.length;
       }
+
+      // Generated-livery targets: export as PNG next to the vehicle's files
+      // — honest about there being no YTD slot to write into yet.
+      const exportedPaths: string[] = [];
+      for (const t of unmatchedGenerated) {
+        const e = edits.current.get(t.id)!;
+        const pngPath = `${activeVehicle!.dir}/${t.name}.png`.replace(/\\/g, '/');
+        const b64 = await new Promise<string>((res) => e.canvas.toBlob(async (blob) => {
+          res(blob ? bufToB64(new Uint8Array(await blob.arrayBuffer())) : '');
+        }, 'image/png'));
+        if (b64 && await window.electronAPI.livery.writeFile(pngPath, b64)) exportedPaths.push(`${t.name}.png`);
+      }
+
+      // Write any generated UVs back into the real YFT (in place — same
+      // vertex count/stride/offsets, see yftWriter.ts's own header).
+      let uvPatchResult: { patched: number; skipped: number } | null = null;
+      if (pendingUVPatches.current.size > 0 && geometry) {
+        const modelPath = activeVehicle.hiYft || activeVehicle.yft;
+        if (modelPath) {
+          const patches = geometry.meshes
+            .filter((m) => pendingUVPatches.current.has(m.name))
+            .map((m) => ({ mesh: m, uvs: pendingUVPatches.current.get(m.name)! }));
+          const origB64 = await window.electronAPI.livery.readBinary(modelPath);
+          const origBuf = b64ToBuf(origB64);
+          const wr = await writeUVsToYFT(origBuf, patches);
+          if (wr.patchedMeshes.length > 0) {
+            await window.electronAPI.livery.writeFile(modelPath + '.bak', origB64);
+            await window.electronAPI.livery.writeFile(modelPath, bufToB64(new Uint8Array(wr.bytes)));
+          }
+          uvPatchResult = { patched: wr.patchedMeshes.length, skipped: wr.skipped.length };
+          if (wr.patchedMeshes.length > 0) pendingUVPatches.current.clear();
+        }
+      }
+
       toast.dismiss(tid);
-      if (totalSkipped > 0)
-        toast(`Saved ${totalReplaced} textures · ${totalSkipped} skipped`, { icon: totalReplaced > 0 ? '✅' : '⚠️' });
-      else
-        toast.success(`Saved all ${totalReplaced} texture(s) to YTD · backups written`);
+      const parts: string[] = [];
+      if (totalReplaced > 0) parts.push(`${totalReplaced} texture(s) saved to YTD`);
+      if (totalSkipped > 0) parts.push(`${totalSkipped} skipped`);
+      if (exportedPaths.length > 0) parts.push(`${exportedPaths.length} exported as PNG (no existing YTD slot — add via your texture tool)`);
+      if (uvPatchResult) parts.push(`${uvPatchResult.patched} mesh(es) UV-updated in the .yft${uvPatchResult.skipped ? ` (${uvPatchResult.skipped} skipped)` : ''}`);
+      if (parts.length === 0) { toast.error('Nothing could be saved'); return; }
+      toast.success(parts.join(' · '), { duration: 7000 });
     } catch (err: any) {
       toast.dismiss(tid);
       toast.error(err?.message || 'Batch save failed');
@@ -1046,7 +1209,7 @@ export default function LiveryEditor() {
       {/* Top bar */}
       <div className="shrink-0 flex items-center gap-3 px-5 py-2.5 border-b border-overlay-6 bg-surface-950/60 backdrop-blur-sm">
         <div className="flex items-center gap-2">
-          <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>
+          {!embedded && <button onClick={() => navigate(-1)} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors shrink-0"><ArrowLeft size={16} /></button>}
           <div className="w-8 h-8 rounded-lg bg-pink-500/15 border border-pink-500/25 flex items-center justify-center"><Palette size={16} className="text-pink-400" /></div>
           <div>
             <h1 className="text-sm font-bold text-surface-100">Livery Editor</h1>
@@ -1114,7 +1277,13 @@ export default function LiveryEditor() {
       </div>
 
       {/* EMPTY */}
-      {phase === 'empty' && (
+      {phase === 'empty' && initialRoot && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3">
+          <Loader2 size={24} className="text-pink-400 animate-spin" />
+          <p className="text-sm text-surface-400">Scanning the imported vehicle for .yft/.ytd files…</p>
+        </div>
+      )}
+      {phase === 'empty' && !initialRoot && (
         <div className="flex-1 flex flex-col items-center justify-center px-8">
           <div className="border-2 border-dashed border-pink-500/20 rounded-2xl p-12 flex flex-col items-center text-center bg-pink-500/3 max-w-lg">
             <div className="w-16 h-16 rounded-2xl bg-pink-500/15 border border-pink-500/20 flex items-center justify-center mb-4"><Car size={28} className="text-pink-400" /></div>
@@ -1225,10 +1394,20 @@ export default function LiveryEditor() {
           <div className="w-60 shrink-0 flex flex-col border-r border-overlay-6 bg-surface-950/20 overflow-hidden">
             <div className="shrink-0 px-3 pt-3 pb-1 flex items-center justify-between">
               <span className="text-[10px] font-semibold uppercase tracking-widest text-surface-600">Textures</span>
-              <button onClick={() => setShowAllTex((v) => !v)} title="Show every texture in the YTD (debug)" className={`text-[9px] px-1.5 py-0.5 rounded transition-all ${showAllTex ? 'bg-cyan-600/20 text-cyan-300' : 'text-surface-600 hover:text-surface-300 hover:bg-overlay-4'}`}>Show all</button>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setShowUVGen(true)} disabled={!geometry} title={geometry ? 'Generate a new, paintable UV layout for selected body panels' : 'Load a vehicle model first'} className="text-[9px] px-1.5 py-0.5 rounded transition-all text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 disabled:opacity-30 disabled:hover:bg-transparent font-semibold">+ UV Template</button>
+                <button onClick={() => setShowAllTex((v) => !v)} title="Show every texture in the YTD (debug)" className={`text-[9px] px-1.5 py-0.5 rounded transition-all ${showAllTex ? 'bg-cyan-600/20 text-cyan-300' : 'text-surface-600 hover:text-surface-300 hover:bg-overlay-4'}`}>Show all</button>
+              </div>
             </div>
             <div className="overflow-y-auto" style={{ maxHeight: '42%' }}>
-              {targets.length === 0 && !showAllTex && <p className="text-[11px] text-surface-600 px-3 pb-3">No editable textures decoded. Toggle <b className="text-surface-400">Show all</b> or open <b className="text-cyan-400">Diagnostics</b>.</p>}
+              {targets.length === 0 && !showAllTex && (
+                <div className="px-3 pb-3 space-y-2">
+                  <p className="text-[11px] text-surface-600">No editable textures decoded — this vehicle has no usable livery layout. Toggle <b className="text-surface-400">Show all</b> or open <b className="text-cyan-400">Diagnostics</b> to see why, or:</p>
+                  <button onClick={() => setShowUVGen(true)} disabled={!geometry} className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-sky-600/20 text-sky-300 border border-sky-500/30 hover:bg-sky-600/30 disabled:opacity-30 transition-all">
+                    <Scan size={12} /> Generate UV Template
+                  </button>
+                </div>
+              )}
               {!showAllTex && targets.map((t) => (
                 <button key={t.id} onClick={() => selectTarget(t.id)} className={`w-full text-left px-3 py-2 flex items-center gap-2 transition-all ${selected === t.id ? 'bg-primary-600/15 text-primary-300' : 'text-surface-400 hover:bg-overlay-4 hover:text-surface-200'}`}>
                   <div className="w-8 h-8 rounded bg-surface-800 border border-overlay-6 shrink-0 overflow-hidden">{t.base ? <ThumbImageData id={t.base} /> : <div className="w-full h-full bg-surface-700" />}</div>
@@ -1281,10 +1460,10 @@ export default function LiveryEditor() {
                 ))}
               </div>
               {activeLayer && (
-                <div className="shrink-0 border-t border-overlay-6 p-3 space-y-2">
-                  <div className="flex items-center justify-between"><span className="text-[11px] text-surface-400">Opacity</span><span className="text-[11px] text-surface-300 font-mono">{activeLayer.opacity}%</span></div>
-                  <input type="range" min={0} max={100} value={activeLayer.opacity} onChange={(e) => updateLayer(activeLayer.id, { opacity: Number(e.target.value) })} className="w-full h-1.5 accent-pink-500" />
-                  <select value={activeLayer.blendMode} onChange={(e) => updateLayer(activeLayer.id, { blendMode: e.target.value as GlobalCompositeOperation })} className="w-full px-2 py-1 text-[11px] bg-overlay-4 border border-overlay-6 rounded text-surface-200 focus:outline-none">{BLEND_MODES.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+                <div className="shrink-0 border-t border-overlay-6 p-4 space-y-3">
+                  <div className="flex items-center justify-between"><span className="text-sm font-medium text-surface-300">Opacity</span><span className="text-sm text-surface-200 font-mono">{activeLayer.opacity}%</span></div>
+                  <input type="range" min={0} max={100} value={activeLayer.opacity} onChange={(e) => updateLayer(activeLayer.id, { opacity: Number(e.target.value) })} className="w-full h-2.5 accent-pink-500" />
+                  <select value={activeLayer.blendMode} onChange={(e) => updateLayer(activeLayer.id, { blendMode: e.target.value as GlobalCompositeOperation })} className="w-full px-3 py-2 text-sm bg-overlay-4 border border-overlay-6 rounded-lg text-surface-200 focus:outline-none">{BLEND_MODES.map((m) => <option key={m} value={m}>{m}</option>)}</select>
                   {activeLayer.kind === 'text' && (
                     <div className="space-y-1.5 pt-1">
                       <input value={activeLayer.text || ''} onChange={(e) => updateLayer(activeLayer.id, { text: e.target.value })} placeholder="Text" className="w-full px-2 py-1 text-[11px] bg-overlay-4 border border-overlay-6 rounded text-surface-200 focus:outline-none" />
@@ -1314,59 +1493,81 @@ export default function LiveryEditor() {
 
           {/* CENTER — texture editor */}
           <div className="flex-1 flex flex-col overflow-hidden bg-surface-950/30">
-            {/* Toolbar row 1 — tools */}
-            <div className="shrink-0 flex items-center gap-1 px-3 py-2 border-b border-overlay-6 flex-wrap">
+            {/* Toolbar row 1 — tools. Enlarged across the board (bigger hit
+                targets, bigger swatches, bigger sliders) — the old 13px
+                icons / 24px swatches were too cramped to use comfortably. */}
+            <div className="shrink-0 flex items-center gap-1.5 px-4 py-3 border-b border-overlay-6 flex-wrap">
               {/* History */}
-              <button onClick={() => selected && applyUndo(selected)} title="Undo (Ctrl+Z)" className="p-1.5 rounded text-surface-500 hover:text-surface-200 hover:bg-overlay-4"><Undo2 size={13} /></button>
-              <button onClick={() => selected && applyRedo(selected)} title="Redo (Ctrl+Y)" className="p-1.5 rounded text-surface-500 hover:text-surface-200 hover:bg-overlay-4"><Redo2 size={13} /></button>
-              <div className="w-px h-4 bg-overlay-6 mx-0.5" />
+              <button onClick={() => selected && applyUndo(selected)} title="Undo (Ctrl+Z)" className="p-2.5 rounded-lg text-surface-500 hover:text-surface-200 hover:bg-overlay-4"><Undo2 size={18} /></button>
+              <button onClick={() => selected && applyRedo(selected)} title="Redo (Ctrl+Y)" className="p-2.5 rounded-lg text-surface-500 hover:text-surface-200 hover:bg-overlay-4"><Redo2 size={18} /></button>
+              <div className="w-px h-6 bg-overlay-6 mx-1" />
               {/* Drawing tools */}
-              {([['select','V',<MousePointer size={13} />,'Move / pan'],['brush','B',<Brush size={13} />,'Brush'],['fill','F',<PaintBucket size={13} />,'Bucket fill'],['rect','R',<Square size={13} />,'Rectangle'],['ellipse','E',<Circle size={13} />,'Ellipse'],['line','L',<Slash size={13} />,'Line'],['gradient','G',<Droplets size={13} />,'Gradient fill']] as [DrawTool,string,React.ReactNode,string][]).map(([t,key,icon,label]) => (
-                <button key={t} onClick={() => setTool(t)} title={`${label} (${key})`} className={`p-1.5 rounded ${tool === t ? 'bg-primary-600/20 text-primary-300' : 'text-surface-500 hover:text-surface-200 hover:bg-overlay-4'}`}>{icon}</button>
+              {([['select','V',<MousePointer size={18} />,'Move / pan'],['brush','B',<Brush size={18} />,'Brush'],['fill','F',<PaintBucket size={18} />,'Bucket fill'],['rect','R',<Square size={18} />,'Rectangle'],['ellipse','E',<Circle size={18} />,'Ellipse'],['line','L',<Slash size={18} />,'Line'],['gradient','G',<Droplets size={18} />,'Gradient fill']] as [DrawTool,string,React.ReactNode,string][]).map(([t,key,icon,label]) => (
+                <button key={t} onClick={() => setTool(t)} title={`${label} (${key})`} className={`p-2.5 rounded-lg transition-all ${tool === t ? 'bg-primary-600/20 text-primary-300 ring-1 ring-primary-500/30' : 'text-surface-500 hover:text-surface-200 hover:bg-overlay-4'}`}>{icon}</button>
               ))}
-              <div className="w-px h-4 bg-overlay-6 mx-0.5" />
+              <div className="w-px h-6 bg-overlay-6 mx-1" />
               {/* Color pickers */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-2">
                 <label title="Primary color" className="relative cursor-pointer">
                   <input type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} className="sr-only" />
-                  <div className="w-6 h-6 rounded border-2 border-overlay-6 shadow" style={{ background: brushColor }} />
+                  <div className="w-9 h-9 rounded-lg border-2 border-overlay-8 shadow-md hover:scale-105 transition-transform" style={{ background: brushColor }} />
                 </label>
                 {(tool === 'gradient') && (
                   <label title="Secondary color (gradient end)" className="relative cursor-pointer">
                     <input type="color" value={brushColor2} onChange={(e) => setBrushColor2(e.target.value)} className="sr-only" />
-                    <div className="w-6 h-6 rounded border-2 border-overlay-6 shadow" style={{ background: brushColor2 }} />
+                    <div className="w-9 h-9 rounded-lg border-2 border-overlay-8 shadow-md hover:scale-105 transition-transform" style={{ background: brushColor2 }} />
                   </label>
                 )}
               </div>
               {/* Brush size / shape options */}
               {tool === 'brush' && (
-                <><input type="range" min={2} max={120} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-20 accent-pink-500" /><span className="text-[10px] text-surface-500 font-mono w-7">{brushSize}px</span></>
+                <div className="flex items-center gap-2 pl-1">
+                  <span className="text-xs text-surface-500">Size</span>
+                  <input type="range" min={2} max={120} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-32 h-2 accent-pink-500" />
+                  <span className="text-xs text-surface-300 font-mono w-10">{brushSize}px</span>
+                </div>
               )}
               {(tool === 'rect' || tool === 'ellipse') && (
-                <select value={shapeFill} onChange={(e) => setShapeFill(e.target.value as ShapeFill)} className="text-[10px] px-1 py-0.5 rounded bg-overlay-4 border border-overlay-6 text-surface-200 focus:outline-none">
+                <select value={shapeFill} onChange={(e) => setShapeFill(e.target.value as ShapeFill)} className="text-xs px-2.5 py-1.5 rounded-lg bg-overlay-4 border border-overlay-6 text-surface-200 focus:outline-none">
                   <option value="fill">Fill</option>
                   <option value="stroke">Stroke</option>
                   <option value="both">Both</option>
                 </select>
               )}
               {(tool === 'rect' || tool === 'ellipse' || tool === 'line') && (
-                <><input type="range" min={1} max={40} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-16 accent-pink-500" /><span className="text-[10px] text-surface-500 font-mono w-5">{brushSize}</span></>
+                <div className="flex items-center gap-2 pl-1">
+                  <span className="text-xs text-surface-500">Width</span>
+                  <input type="range" min={1} max={40} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-24 h-2 accent-pink-500" />
+                  <span className="text-xs text-surface-300 font-mono w-8">{brushSize}</span>
+                </div>
               )}
-              <div className="w-px h-4 bg-overlay-6 mx-0.5" />
-              <button onClick={() => setZoom((z) => Math.min(5, z * 1.25))} className="p-1.5 text-surface-500 hover:text-surface-200 hover:bg-overlay-4 rounded"><ZoomIn size={13} /></button>
-              <button onClick={() => setZoom((z) => Math.max(0.05, z * 0.8))} className="p-1.5 text-surface-500 hover:text-surface-200 hover:bg-overlay-4 rounded"><ZoomOut size={13} /></button>
-              <span className="text-xs text-surface-500 font-mono w-10 text-center">{Math.round(zoom * 100)}%</span>
-              <button onClick={() => { setZoom(0.4); setPan({ x: 0, y: 0 }); }} className="text-xs text-surface-500 hover:text-surface-200 px-2 py-1 hover:bg-overlay-4 rounded">Fit</button>
-              <div className="w-px h-4 bg-overlay-6 mx-0.5" />
+              <div className="w-px h-6 bg-overlay-6 mx-1" />
+              <button onClick={() => setZoom((z) => Math.min(5, z * 1.25))} className="p-2.5 text-surface-500 hover:text-surface-200 hover:bg-overlay-4 rounded-lg"><ZoomIn size={18} /></button>
+              <button onClick={() => setZoom((z) => Math.max(0.05, z * 0.8))} className="p-2.5 text-surface-500 hover:text-surface-200 hover:bg-overlay-4 rounded-lg"><ZoomOut size={18} /></button>
+              <span className="text-sm text-surface-400 font-mono w-12 text-center">{Math.round(zoom * 100)}%</span>
+              <button onClick={() => { setZoom(0.4); setPan({ x: 0, y: 0 }); }} className="text-sm text-surface-400 hover:text-surface-200 px-3 py-1.5 hover:bg-overlay-4 rounded-lg font-medium">Fit</button>
+              <div className="w-px h-6 bg-overlay-6 mx-1" />
               <button
                 onClick={() => setShowUVOverlay((v) => !v)}
                 disabled={!geometry}
                 title={geometry ? 'Toggle the UV template — which panel owns which pixels of this texture' : 'Load a vehicle model to see its UV template'}
-                className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded transition-all disabled:opacity-30 ${showUVOverlay ? 'bg-sky-600/20 text-sky-300' : 'text-surface-500 hover:text-surface-200 hover:bg-overlay-4'}`}
+                className={`flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg transition-all disabled:opacity-30 ${showUVOverlay ? 'bg-sky-600/20 text-sky-300' : 'text-surface-500 hover:text-surface-200 hover:bg-overlay-4'}`}
               >
-                <Grid3x3 size={12} /> UV Template
+                <Grid3x3 size={16} /> UV Template
               </button>
-              <span className="ml-auto text-[11px] text-surface-600 truncate max-w-40">{curTarget ? `${curTarget.name} · ${curEdit?.w}×${curEdit?.h}` : 'No texture selected'}</span>
+              <div className="w-px h-6 bg-overlay-6 mx-1" />
+              {/* Always-on status, not a toggle — every paint stroke, fill,
+                  opacity change, and layer transform pushes straight to the
+                  3D preview with zero extra clicks. See composite()'s own
+                  header for the automatic no-material-match fallback that
+                  makes this actually always true, not just a label. */}
+              <span
+                title={autoSyncedAll ? 'This texture has no direct material match on this vehicle — Auto Sync applied it to every material so it still shows up live.' : 'Every change updates the 3D preview instantly — no manual sync needed.'}
+                className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-lg ${autoSyncedAll ? 'bg-amber-500/15 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`}
+              >
+                <Zap size={16} /> Auto Sync {autoSyncedAll ? '· synced to all materials' : 'ON'}
+              </span>
+              <span className="ml-auto text-xs text-surface-600 truncate max-w-48">{curTarget ? `${curTarget.name} · ${curEdit?.w}×${curEdit?.h}` : 'No texture selected'}</span>
             </div>
             <div
               className="flex-1 overflow-hidden relative"
@@ -1472,7 +1673,12 @@ export default function LiveryEditor() {
               const texSource = picked && edits.current.get(diffuseTarget?.id || '') ? 'edited canvas' : (inYtd(diffuse) ? 'original YTD' : 'none');
               return (
                 <div className="shrink-0 border-t border-overlay-6 px-3 py-2 space-y-2 max-h-72 overflow-y-auto text-[10px]">
-                  {/* Force Selected Texture test */}
+                  {/* Manual override — normal painting no longer needs this.
+                      Auto Sync (see the toolbar badge above the canvas)
+                      already applies a texture to every material automatically
+                      whenever it has no direct material match, so this is only
+                      for manually forcing ALL materials regardless of mapping
+                      (debugging a specific vehicle's material setup). */}
                   <button
                     disabled={!curEditCanvas}
                     onClick={() => {
@@ -1481,9 +1687,9 @@ export default function LiveryEditor() {
                       viewerRef.current?.forceTextureOnAll(nv && curEditCanvas ? curEditCanvas : null);
                     }}
                     className={`w-full px-2 py-1.5 rounded font-semibold ${forceTexOn ? 'bg-amber-500/25 text-amber-300 ring-1 ring-amber-400/40' : curEditCanvas ? 'bg-overlay-6 text-surface-200 hover:bg-overlay-8' : 'bg-overlay-4 text-surface-600 cursor-not-allowed'}`}
-                    title="Apply the selected texture to EVERY material to test the live pipeline"
+                    title="Debug override: force EVERY material to show the selected texture, ignoring material mapping entirely"
                   >
-                    {forceTexOn ? '● Forcing selected texture on ALL — click to restore' : 'Force Selected Texture (test all materials)'}
+                    {forceTexOn ? '● Debug override active — click to restore normal mapping' : 'Debug: force selected texture on ALL materials'}
                   </button>
 
                   {/* Selected-texture usage */}
@@ -1621,8 +1827,56 @@ export default function LiveryEditor() {
 
       {/* DIAGNOSTICS MODAL */}
       {showDiag && diagnostics && <DiagnosticsPanel diag={diagnostics} onClose={() => setShowDiag(false)} />}
+
+      {/* GENERATE UV TEMPLATE MODAL */}
+      {showUVGen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={() => setShowUVGen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg max-h-[80vh] flex flex-col bg-surface-900 border border-overlay-6 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="shrink-0 flex items-center gap-2 px-5 py-3.5 border-b border-overlay-6 bg-surface-950/50">
+              <Scan size={16} className="text-sky-400" />
+              <div className="flex-1">
+                <h2 className="text-sm font-bold text-surface-100">Generate UV Template</h2>
+                <p className="text-[10px] text-surface-500">Select the body panels to include — a clean UV layout is generated and a new paintable texture is created for them.</p>
+              </div>
+              <button onClick={() => setShowUVGen(false)} className="p-1.5 rounded-lg text-surface-500 hover:text-surface-200 hover:bg-overlay-4"><X size={16} /></button>
+            </div>
+            <div className="shrink-0 flex items-center gap-2 px-5 py-2.5 border-b border-overlay-6">
+              <button onClick={() => setUvGenSelected(new Set(uvGenPanels.map((p) => p.name)))} className="text-xs text-primary-300 hover:text-primary-200 font-medium">Select All</button>
+              <button onClick={() => setUvGenSelected(new Set())} className="text-xs text-surface-500 hover:text-surface-300 font-medium">Select None</button>
+              <span className="ml-auto text-[11px] text-surface-500">{uvGenSelected.size} of {uvGenPanels.length} selected</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              {uvGenPanels.length === 0 && <p className="text-xs text-surface-500 p-3">No mesh panels found on this vehicle.</p>}
+              {uvGenPanels.map((p) => {
+                const checked = uvGenSelected.has(p.name);
+                return (
+                  <label key={p.name} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${checked ? 'bg-sky-500/10 border border-sky-500/25' : 'hover:bg-overlay-4 border border-transparent'}`}>
+                    <input type="checkbox" checked={checked} onChange={(e) => {
+                      setUvGenSelected((prev) => { const n = new Set(prev); if (e.target.checked) n.add(p.name); else n.delete(p.name); return n; });
+                    }} className="w-4 h-4 accent-sky-500" />
+                    <span className="text-sm text-surface-200 flex-1 truncate">{p.name}</span>
+                    <span className="text-[10px] text-surface-600 font-mono">{p.vertexCount.toLocaleString()} verts</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="shrink-0 border-t border-overlay-6 p-4">
+              <button onClick={generateUVTemplate} disabled={uvGenSelected.size === 0} className="w-full py-2.5 rounded-xl text-sm font-semibold bg-sky-600/25 text-sky-200 border border-sky-500/30 hover:bg-sky-600/40 disabled:opacity-40 transition-all flex items-center justify-center gap-2">
+                <Scan size={15} /> Generate UV Template for {uvGenSelected.size} panel{uvGenSelected.size !== 1 ? 's' : ''}
+              </button>
+              <p className="text-[10px] text-surface-600 mt-2 text-center">A real box-projection unwrap — not a placeholder. Saving writes the new layout back into the real .yft; the new texture is saved as a .yft-ready YTD replacement when one exists, or exported as PNG otherwise.</p>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
+}
+
+// Standalone page (the old /livery route, and the per-server "Tools" tab
+// shortcut both still land here) — unchanged behavior, no auto-scan.
+export default function LiveryEditor() {
+  return <LiveryWorkspace />;
 }
 
 // ── Diagnostics panel ─────────────────────────────────────────────────────────

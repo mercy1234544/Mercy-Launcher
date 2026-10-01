@@ -50,6 +50,67 @@ export function sizeFromFlags(flags: number): number {
   return baseSize * (s0 + s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8);
 }
 
+// ── Half-precision float (shared by the yft reader and any writer that
+// needs to re-encode UV/normal data back into the same half-float fields) ──
+
+export function decodeHalf(h: number): number {
+  const s = (h & 0x8000) ? -1 : 1;
+  const e = (h >> 10) & 0x1f;
+  const f = h & 0x3ff;
+  if (e === 0)  return s * Math.pow(2, -14) * (f / 1024);
+  if (e === 31) return f ? NaN : s * Infinity;
+  return s * Math.pow(2, e - 15) * (1 + f / 1024);
+}
+
+/** Simplified float32 → float16 — correct for the small, finite, well-
+ *  behaved values UV coordinates always are; does not special-case the
+ *  full IEEE-754 subnormal/NaN/overflow range a general-purpose encoder
+ *  would need. */
+export function encodeHalf(v: number): number {
+  const f32 = new Float32Array(1); f32[0] = v;
+  const bits = new Uint32Array(f32.buffer)[0];
+  const sign = (bits >>> 16) & 0x8000;
+  const exp = ((bits >>> 23) & 0xff) - 127 + 15;
+  const mantissa = bits & 0x7fffff;
+  if (exp <= 0) return sign; // underflow/subnormal -> flush to zero
+  if (exp >= 31) return sign | 0x7bff; // overflow -> clamp to max half value
+  return sign | (exp << 10) | (mantissa >>> 13);
+}
+
+// ── RSC7 (re)compression — shared by every in-place binary writer (YTD
+// texture replacement, YFT UV patching, …): decompress → patch bytes at
+// known offsets → recompress with the same deflate-raw method → rebuild
+// the same 16-byte RSC7 header with the ORIGINAL version/size flags
+// (buffer size never changes, so the same flags are still correct). ──────
+
+export async function compressDeflateRaw(data: Uint8Array): Promise<Uint8Array> {
+  const cs = new (globalThis as any).CompressionStream('deflate-raw') as {
+    writable: WritableStream<Uint8Array>;
+    readable: ReadableStream<Uint8Array>;
+  };
+  const writer = cs.writable.getWriter();
+  const reader = cs.readable.getReader();
+  const safeBuf = data.buffer instanceof ArrayBuffer ? data : new Uint8Array(data);
+  writer.write(safeBuf); writer.close();
+  const chunks: Uint8Array[] = [];
+  while (true) { const { done, value } = await reader.read(); if (done) break; if (value) chunks.push(value); }
+  const total = chunks.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(total); let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
+  return out;
+}
+
+export function buildRSC7(version: number, systemFlags: number, graphicsFlags: number, payload: Uint8Array): Uint8Array {
+  const out = new Uint8Array(16 + payload.length);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, 0x37435352, true); // 'RSC7'
+  dv.setUint32(4, version, true);
+  dv.setUint32(8, systemFlags, true);
+  dv.setUint32(12, graphicsFlags, true);
+  out.set(payload, 16);
+  return out;
+}
+
 export function isRSC7(bytes: Uint8Array): boolean {
   if (bytes.length < 16) return false;
   const magic = (bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] * 0x1000000)) >>> 0;

@@ -5,14 +5,14 @@
 // editor, fixer, build/export, server install) arrive in later phases and are
 // clearly marked "coming next" — no faked controls.
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
   Car, FolderOpen, FileArchive, Upload, Wrench, Sparkles, AlertTriangle,
   CheckCircle2, XCircle, Info, Loader2, ArrowLeft, Package, FileCode, Clock,
   Gauge, ShieldCheck, RefreshCw, Boxes, Save, RotateCcw, Download, Search,
-  X, Server, ChevronRight, ChevronDown, Undo2, Cog, Lock, Shield,
+  X, Server, ChevronRight, ChevronDown, Undo2, Cog, Lock, Shield, Palette,
 } from 'lucide-react';
 import { useAppStore } from '../stores/useAppStore';
 import { OverviewTab } from '../components/vehicle-studio/OverviewTab';
@@ -21,6 +21,7 @@ import { HandlingTab } from '../components/vehicle-studio/HandlingTab';
 import { SmartTuneTab } from '../components/vehicle-studio/SmartTuneTab';
 import { PresetsTab } from '../components/vehicle-studio/PresetsTab';
 import { ChangesTab } from '../components/vehicle-studio/ChangesTab';
+import { LiveryTab } from '../components/vehicle-studio/LiveryTab';
 import { NoHandling, TuneMissing } from '../components/vehicle-studio/repair';
 
 const RECENT_KEY = 'vs_recent';
@@ -28,17 +29,24 @@ interface Recent { name: string; path: string; type: string; at: number; }
 const loadRecent = (): Recent[] => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; } };
 const saveRecent = (r: Recent[]) => localStorage.setItem(RECENT_KEY, JSON.stringify(r.slice(0, 8)));
 
-type Tab = 'overview' | 'tune' | 'presets' | 'changes' | 'performance' | 'transmission' | 'handling' | 'brakes' | 'traction' | 'suspension' | 'drivetrain' | 'damage' | 'vehicles' | 'variations' | 'lighting' | 'files' | 'diagnostics';
+type Tab = 'overview' | 'tune' | 'presets' | 'changes' | 'performance' | 'transmission' | 'handling' | 'brakes' | 'traction' | 'suspension' | 'drivetrain' | 'damage' | 'vehicles' | 'variations' | 'lighting' | 'files' | 'diagnostics' | 'livery';
 
 // Access control is enforced app-wide by AppAccessGate (in Layout), so Vehicle
 // Studio no longer gates itself — it renders directly.
 export default function VehicleStudio() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [scan, setScan] = useState<VSScan | null>(null);
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [tab, setTab] = useState<Tab>('overview');
   const [recent, setRecent] = useState<Recent[]>(loadRecent());
+  // One-shot: a per-server "Livery Editor" shortcut arrives here with
+  // { defaultTab: 'livery' } in router state so it lands straight on the
+  // Livery tab once the user imports a vehicle — consumed after the first
+  // scan so a LATER manual import in the same session defaults back to
+  // Overview like normal, rather than being stuck on Livery forever.
+  const pendingTabRef = React.useRef<Tab | null>((location.state as { defaultTab?: Tab } | null)?.defaultTab ?? null);
 
   // copy=true on a fresh import (makes a safe workspace copy so the original is
   // never modified); re-opening a recent points at the existing workspace.
@@ -50,7 +58,8 @@ export default function VehicleStudio() {
       if (!res.ok || !res.data) { toast.error(res.error || 'Could not scan that vehicle'); return; }
       const data = res.data;
       setScan(data);
-      setTab('overview');
+      setTab(pendingTabRef.current || 'overview');
+      pendingTabRef.current = null;
       const next = [{ name: data.name, path: data.workspacePath, type: data.vehicles[0]?.type || 'Vehicle', at: Date.now() },
         ...recent.filter((r) => r.path !== data.workspacePath && r.path !== inputPath)];
       setRecent(next); saveRecent(next);
@@ -180,6 +189,9 @@ function Workspace({ scan, onBack, onRescan, tab, setTab, rescanning }: {
     { label: 'Vehicle', tabs: [
       { id: 'overview', label: 'Overview', icon: Info },
     ] },
+    { label: 'Appearance', tabs: [
+      { id: 'livery', label: 'Livery', icon: Palette },
+    ] },
     { label: 'Tuning', tabs: [
       { id: 'performance', label: 'Performance', icon: Gauge },
       { id: 'transmission', label: 'Transmission', icon: Cog },
@@ -258,8 +270,12 @@ function Workspace({ scan, onBack, onRescan, tab, setTab, rescanning }: {
           ))}
         </div>
 
-        {/* Content */}
-        <div className="flex-1 min-w-0 overflow-y-auto p-6">
+        {/* Content — Livery manages its own internal scrolling/layout
+            (canvas + 3D viewport sized to fill the available space), so it
+            gets a plain, unpadded flex container instead of the other
+            tabs' scrolling/padded one. */}
+        <div className={tab === 'livery' ? 'flex-1 min-w-0 overflow-hidden flex' : 'flex-1 min-w-0 overflow-y-auto p-6'}>
+          {tab === 'livery' && <LiveryTab root={scan.root} />}
           {tab === 'overview' && <OverviewTab scan={scan} root={scan.root} handlingId={handlingId} vehicle={selVeh || null} />}
           {tab === 'tune' && (handlingId && selVeh?.hasHandling ? <SmartTuneTab root={scan.root} handlingId={handlingId} type={selVeh?.type || 'Unknown'} onChanged={onRescan} />
             : handlingId ? <TuneMissing modelName={selVeh?.modelName || ''} handlingId={handlingId} onGoHandling={() => setTab('handling')} /> : <NoHandling />)}
