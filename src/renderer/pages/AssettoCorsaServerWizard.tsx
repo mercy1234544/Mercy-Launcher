@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, FlagTriangleRight, FolderOpen, Loader2, XCircle, AlertTriangle, Plus, Trash2, Info } from 'lucide-react';
 import { Panel, SectionHeading, Toggle } from '../components/ui';
+import AcSectionNav from '../components/AcSectionNav';
 import toast from 'react-hot-toast';
 
 export default function AssettoCorsaServerWizard() {
@@ -126,6 +127,7 @@ export default function AssettoCorsaServerWizard() {
         <button onClick={() => navigate('/assetto-corsa')} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors"><ArrowLeft size={16} /></button>
         <SectionHeading icon={FlagTriangleRight} iconClass="bg-rose-500/15 border-rose-500/25 text-rose-300" title="Create Assetto Corsa Server" subtitle="Configured from your real installed cars and tracks" />
       </div>
+      <AcSectionNav />
 
       <Panel>
         <label className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-2 block">Server Name</label>

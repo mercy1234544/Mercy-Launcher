@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1.0.0",
+  "note": "RELEASE-FACING. Only PUBLIC endpoints may ever appear in this file. host stays null until the owner assigns a public hostname (placeholder PUBLIC_HOST_TBD) — nothing here is invented. Private LAN addresses are forbidden here and rejected by test/assettocorsa/endpoints.test.js; the owner's LAN address is a local, per-machine launcher setting stored outside the app bundle. tcpPort/httpPort null = use the port from the server's requirements file; set them only if the router maps a different public port.",
+  "servers": {
+    "main": { "hostPlaceholder": "PUBLIC_HOST_TBD", "host": null, "tcpPort": null, "httpPort": null },
+    "server2": { "hostPlaceholder": "PUBLIC_HOST_TBD", "host": null, "tcpPort": null, "httpPort": null }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-10-09T21:28:37.100Z",
+  "note": "Nothing in this list is bundled. Redistribution permission for third-party content is NOT verified, so the launcher must send players to the official source (or host nothing until the owners agree). URLs were checked on the date below; hashes are of the archives downloaded to the server on 2026-10-03.",
+  "sources": [
+    {
+      "sourceId": "srp_track_0_9_3",
+      "name": "Shutoko Revival Project 0.9.3 Stable",
+      "provider": "Shutoko Revival Project",
+      "homepage": "https://shutokorevivalproject.com",
+      "officialDirectUrl": "https://files.shutokorevivalproject.com/r/SRP%200.9.3.7z",
+      "directUrlStatus": "DEAD on 2026-10-09: HTTP 302 to the project homepage (no file served); this was the URL in the earlier install checklist",
+      "localArchive": {
+        "file": "library/downloads/SRP_0.9.3.7z",
+        "bytes": 1206051675,
+        "sha256": "6d37e1cf97bcbc2c50353da6711a320f3140adf8ae47807513cf65cca6d5374e"
+      },
+      "redistribution": "unverified - do not bundle",
+      "installTo": "<Assetto Corsa>\\content\\tracks\\shuto_revival_project_beta",
+      "contentManagerDrag": true,
+      "acquisition": "Players obtain SRP from the official project site/Discord. IMPORTANT: the servers run 0.9.3 Stable; a different SRP version is not verified to be compatible (spawns/AI spline/layout names)."
+    },
+    {
+      "sourceId": "srp_car_pack_3_6",
+      "name": "SRP Car Pack 3.6",
+      "provider": "Shutoko Revival Project",
+      "homepage": "https://shutokorevivalproject.com",
+      "officialDirectUrl": "https://files.shutokorevivalproject.com/SRP_Car_Pack_3.6.7z",
+      "directUrlStatus": "LIVE on 2026-10-09: HTTP 200, content-length 4811088129 (equals the local archive size)",
+      "localArchive": {
+        "file": "library/downloads/SRP_Car_Pack_3.6.7z",
+        "bytes": 4811088129,
+        "sha256": "9e65839461c1c49c0bb1215761d4728871dd02d1ab1f7e36bc9f7daf033fb93a"
+      },
+      "carsInPack": 94,
+      "redistribution": "unverified - do not bundle",
+      "installTo": "<Assetto Corsa>\\content\\cars\\ (the archive contains content\\cars\\...) and its fonts (accept the font install prompts)",
+      "contentManagerDrag": true,
+      "acquisition": "Free official download. ~4.8 GB; installs ~94 cars of which 44 are used by these two servers."
+    },
+    {
+      "sourceId": "ac_base_game",
+      "name": "Assetto Corsa (Kunos) base game",
+      "provider": "Kunos Simulazioni",
+      "redistribution": "proprietary - never bundle",
+      "acquisition": "Player owns it on Steam. Provides bmw_m3_e92 and bmw_1m. No DLC is required by either server."
+    },
+    {
+      "sourceId": "csp",
+      "name": "Custom Shaders Patch",
+      "provider": "Ilja Jusupov (x4fab)",
+      "homepage": "https://acstuff.club/patch",
+      "redistribution": "not bundled",
+      "acquisition": "Installed by the player (Content Manager can install/update it). See csp section of each requirements file for versions."
+    }
+  ]
+}

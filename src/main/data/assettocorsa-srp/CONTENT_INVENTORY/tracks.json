@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-10-09T21:28:37.100Z",
+  "tracks": [
+    {
+      "id": "shuto_revival_project_beta",
+      "name": "Shutoko Revival Project",
+      "version": "0.9.3",
+      "versionEvidence": "\"0.9.3 Stable.txt\" in the server copy: \"Public version Stable 09/11/25 + HOTFIX 3 (Yaesu falling through road fix)\"; ui_track.json version 0.9.3",
+      "markerFileSha256": "d2fcd4e87a640e5b996dcdc13e1e1e8d4b79262f5204576ce76276d8dcc60731",
+      "mainKn5Sha256": "53303296de38539459ef46382fea2a9ccb4da520d00c7f9668d7105baffdc755",
+      "layouts": [
+        {
+          "config": "daishi_pa",
+          "name": "Shutoko Revival Project 0.9.3 - Daishi PA",
+          "pitboxes": 14,
+          "version": "0.9.3",
+          "uiTrackJsonSha256": "3e4189a986a49a5bc98dc7e35072060ccd58805e2e07c737094a4baccb681acc",
+          "usedBy": [
+            "main"
+          ]
+        },
+        {
+          "config": "main_layout",
+          "name": "Shutoko Revival Project 0.9.3 - Main Layout",
+          "pitboxes": 170,
+          "version": "0.9.3",
+          "uiTrackJsonSha256": "059ec3c9b6283d167f832f7a904fecc96b9458ab61d238055a7dbe93e10b2a52",
+          "usedBy": [
+            "server2"
+          ]
+        }
+      ],
+      "needsCsp": true,
+      "cspEvidence": "the dashboard flags the track as CSP-dependent and its extension/ folder holds CSP Lua/config; the minimum CSP version SRP requires is NOT documented in the files",
+      "serverOnlyFiles": [
+        {
+          "path": "ai/fast_lane.aip",
+          "purpose": "AI traffic spline (AssettoServer, Server 2 only). Players do NOT need it.",
+          "sha256": "a3255b1f7dfde3f4c8db98d858623f73c4a9449a3446f575058c1e8d6e238ad0",
+          "bytes": 5479324
+        }
+      ],
+      "source": {
+        "sourceId": "srp_track_0_9_3"
+      },
+      "requirement": "required-to-join",
+      "serverDelivered": false,
+      "installMethod": "content-manager-drag-or-extract-archive"
+    }
+  ]
+}

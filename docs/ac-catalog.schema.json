@@ -1,0 +1,163 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.invalid/mercy/ac-catalog-1.0.0.json",
+  "title": "Mercy Assetto Corsa server catalog (schema v1)",
+  "description": "Structural schema for catalog.json. The launcher ALSO enforces rules a JSON Schema cannot express (cross-references between servers/content/archives, host allow-lists, no private addresses in production, signature, revision monotonicity) — see docs/ASSETTO_CORSA_CATALOG_CONTRACT.md. The generator must validate against this schema AND refuse to publish when any cross-reference is dangling.",
+  "type": "object",
+  "required": ["schema", "schemaVersion", "catalog", "servers", "content", "archives"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "mercy.ac.catalog" },
+    "schemaVersion": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$", "description": "Major version 1. Newer minor/patch versions may add optional fields." },
+    "example": { "const": true, "description": "Set ONLY on example files. The launcher refuses any catalog that has it." },
+    "notice": { "type": "string", "maxLength": 2000 },
+    "catalog": {
+      "type": "object",
+      "required": ["id", "revision", "generatedAt", "environment"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9._-]{1,64}$" },
+        "revision": { "type": "integer", "minimum": 0, "description": "Strictly increases whenever the content-bearing bytes change. Never reused, never lowered." },
+        "generatedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T" },
+        "expiresAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T", "description": "Optional. Must be later than generatedAt." },
+        "environment": { "enum": ["production", "development"] }
+      }
+    },
+    "servers": { "type": "array", "maxItems": 50, "items": { "$ref": "#/definitions/server" } },
+    "content": {
+      "type": "object",
+      "required": ["cars", "tracks"],
+      "properties": {
+        "cars": { "type": "array", "maxItems": 2000, "items": { "$ref": "#/definitions/car" } },
+        "tracks": { "type": "array", "maxItems": 200, "items": { "$ref": "#/definitions/track" } }
+      }
+    },
+    "archives": { "type": "array", "maxItems": 100, "items": { "$ref": "#/definitions/archive" } }
+  },
+  "definitions": {
+    "hex64": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "hex64OrNull": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{64}$" }] },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "folder": { "type": "string", "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9_.\\-][A-Za-z0-9_.\\- ]*$", "maxLength": 100, "description": "A single safe folder name (no slashes, no '..')." },
+    "relPath": { "type": "string", "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(^|/)\\.{1,2}(/|$))(?!.*//)[^\\u0000]+$", "maxLength": 300 },
+    "endpoint": {
+      "type": "object",
+      "required": ["host", "gamePort", "httpPort"],
+      "properties": {
+        "host": { "type": "string", "pattern": "^[A-Za-z0-9.\\-]{1,253}$" },
+        "gamePort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "httpPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "origin": {
+      "type": "object",
+      "required": ["kind"],
+      "oneOf": [
+        { "properties": { "kind": { "const": "archive" }, "archiveId": { "$ref": "#/definitions/id" }, "path": { "$ref": "#/definitions/relPath" } }, "required": ["kind", "archiveId"] },
+        { "properties": { "kind": { "const": "base-game" } }, "required": ["kind"] },
+        { "properties": { "kind": { "const": "dlc" }, "name": { "type": "string", "minLength": 1 } }, "required": ["kind", "name"] },
+        { "properties": { "kind": { "const": "manual" }, "homepage": { "type": "string", "pattern": "^https://" }, "instructions": { "type": "string", "minLength": 1, "maxLength": 2000 } }, "required": ["kind", "instructions"] }
+      ]
+    },
+    "car": {
+      "type": "object",
+      "required": ["id", "name", "version", "origin", "identity"],
+      "properties": {
+        "id": { "$ref": "#/definitions/folder" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "version": { "type": ["string", "null"], "maxLength": 40 },
+        "origin": { "$ref": "#/definitions/origin" },
+        "identity": {
+          "type": "object",
+          "required": ["dataAcdSha256", "uiCarJsonSha256"],
+          "properties": { "dataAcdSha256": { "$ref": "#/definitions/hex64OrNull" }, "uiCarJsonSha256": { "$ref": "#/definitions/hex64OrNull" } }
+        }
+      }
+    },
+    "track": {
+      "type": "object",
+      "required": ["id", "name", "version", "origin", "verify", "layouts"],
+      "properties": {
+        "id": { "$ref": "#/definitions/folder" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "origin": { "$ref": "#/definitions/origin" },
+        "verify": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "object", "required": ["markerFile", "markerSha256"], "properties": { "markerFile": { "$ref": "#/definitions/folder" }, "markerSha256": { "$ref": "#/definitions/hex64" } } }
+          ]
+        },
+        "layouts": {
+          "type": "array", "minItems": 1, "maxItems": 64,
+          "items": {
+            "type": "object", "required": ["config"],
+            "properties": {
+              "config": { "type": "string", "maxLength": 100, "description": "Layout folder name, or \"\" for the track's single default layout." },
+              "name": { "type": "string", "maxLength": 200 },
+              "uiTrackJsonSha256": { "$ref": "#/definitions/hex64OrNull" }
+            }
+          }
+        }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "required": ["id", "name", "fileName", "format", "bytes", "sha256", "url", "allowedHosts", "provider", "redistribution"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "name": { "type": "string", "minLength": 1 },
+        "fileName": { "$ref": "#/definitions/folder" },
+        "format": { "enum": ["7z", "zip"] },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 17179869184, "description": "Exact size. Max 16 GiB." },
+        "sha256": { "$ref": "#/definitions/hex64" },
+        "url": { "type": ["string", "null"], "pattern": "^https://", "description": "https only in production. null = manual download." },
+        "allowedHosts": { "type": "array", "maxItems": 10, "items": { "type": "string", "pattern": "^[A-Za-z0-9.\\-]{1,253}$" }, "description": "The URL host and every redirect hop must be listed. No wildcards." },
+        "provider": { "type": "object", "required": ["name", "homepage"], "properties": { "name": { "type": "string", "minLength": 1 }, "homepage": { "type": "string", "pattern": "^https://" } } },
+        "redistribution": { "enum": ["provider-official", "owner-authorized", "none"] }
+      }
+    },
+    "server": {
+      "type": "object",
+      "required": ["id", "displayName", "engine", "connection", "tracks", "cars", "requirements"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "engine": { "type": "object", "required": ["type"], "properties": { "type": { "enum": ["kunos-stock", "assettoserver", "other"] }, "version": { "type": "string" } } },
+        "maxPlayers": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "ai": { "type": "object", "required": ["enabled", "trafficCars"], "properties": { "enabled": { "type": "boolean" }, "trafficCars": { "type": "integer", "minimum": 0, "maximum": 10000 } } },
+        "passwordRequired": { "type": "boolean" },
+        "connection": {
+          "type": "object", "required": ["public"],
+          "properties": {
+            "public": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/endpoint" }], "description": "A real, configured PUBLIC endpoint, or null. Never invent one." },
+            "ports": { "type": "object", "required": ["gamePort", "httpPort"], "properties": { "gamePort": { "type": "integer", "minimum": 1, "maximum": 65535 }, "httpPort": { "type": "integer", "minimum": 1, "maximum": 65535 } }, "description": "Ports to use when public is null (the host is then supplied by the player, e.g. for a LAN test)." },
+            "lan": { "$ref": "#/definitions/endpoint", "description": "DEVELOPMENT catalogs only. Rejected in production." }
+          }
+        },
+        "tracks": {
+          "type": "array", "minItems": 1,
+          "items": { "type": "object", "required": ["trackId", "layouts"], "properties": { "trackId": { "type": "string" }, "layouts": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "required": { "type": "boolean", "default": true } } }
+        },
+        "cars": {
+          "type": "array",
+          "items": { "type": "object", "required": ["carId", "role"], "properties": { "carId": { "type": "string" }, "role": { "enum": ["player", "traffic"] }, "required": { "type": "boolean", "default": true }, "skins": { "type": "array", "maxItems": 64, "items": { "$ref": "#/definitions/folder" } } } }
+        },
+        "requirements": {
+          "type": "object", "required": ["csp"],
+          "properties": {
+            "csp": {
+              "oneOf": [
+                { "type": "null" },
+                { "type": "object", "required": ["required", "minimumVersion"], "properties": { "required": { "type": "boolean" }, "minimumVersion": { "type": "string", "pattern": "^\\d+(\\.\\d+){1,3}$" }, "testedVersion": { "type": "string", "maxLength": 40 } } }
+              ]
+            }
+          }
+        },
+        "hud": { "type": "object", "required": ["delivery", "version"], "properties": { "delivery": { "enum": ["none", "server-csp-online-script"] }, "version": { "type": "string", "minLength": 1, "maxLength": 40 } } },
+        "companionApps": { "type": "array", "items": { "type": "string" }, "description": "Only the built-in app id \"srp_board\" is installable; any other id is ignored." },
+        "status": { "enum": ["active", "maintenance", "retired"] }
+      }
+    }
+  }
+}

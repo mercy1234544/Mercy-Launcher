@@ -36,6 +36,7 @@ import AssettoCorsaHub from './pages/AssettoCorsaHub';
 import AssettoCorsaServerWizard from './pages/AssettoCorsaServerWizard';
 import AssettoCorsaServerPanel from './pages/AssettoCorsaServerPanel';
 import AssettoCorsaContent from './pages/AssettoCorsaContent';
+import AssettoCorsaSetup from './pages/AssettoCorsaSetup';
 import Settings from './pages/Settings';
 import AdminPanel from './pages/AdminPanel';
 import VehicleStudio from './pages/VehicleStudio';
@@ -66,6 +67,7 @@ function RoutedContent() {
         <Route path="/assetto-corsa/create" element={<AssettoCorsaServerWizard />} />
         <Route path="/assetto-corsa/server/:id" element={<AssettoCorsaServerPanel />} />
         <Route path="/assetto-corsa/content" element={<AssettoCorsaContent />} />
+        <Route path="/assetto-corsa/setup" element={<AssettoCorsaSetup />} />
         <Route path="/beamng" element={<ComingSoon />} />
         <Route path="/library" element={<Library />} />
         <Route path="/downloads" element={<Downloads />} />

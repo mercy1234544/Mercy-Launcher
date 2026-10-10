@@ -1,0 +1,1338 @@
+{
+  "schema": "mercy.ac.catalog",
+  "schemaVersion": "1.0.0",
+  "catalog": {
+    "id": "example-from-builtin-package",
+    "revision": 1,
+    "generatedAt": "2026-10-09T00:00:00Z",
+    "environment": "production"
+  },
+  "example": true,
+  "notice": "EXAMPLE ONLY — derived from the launcher's built-in handoff package, NOT from live server configurations. Not verified. The launcher refuses any catalog carrying \"example\": true.",
+  "servers": [
+    {
+      "id": "main",
+      "displayName": "SRP Daishi PA",
+      "engine": {
+        "type": "kunos-stock"
+      },
+      "maxPlayers": 14,
+      "ai": {
+        "enabled": false,
+        "trafficCars": 0
+      },
+      "connection": {
+        "public": null,
+        "ports": {
+          "gamePort": 9600,
+          "httpPort": 8081
+        }
+      },
+      "tracks": [
+        {
+          "trackId": "shuto_revival_project_beta",
+          "layouts": [
+            "daishi_pa"
+          ]
+        }
+      ],
+      "cars": [
+        {
+          "carId": "art_nissan_gtr_bcnr33_600r",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "3_Ultimate_Metal_Silver"
+          ]
+        },
+        {
+          "carId": "bksy_nissan_skyline_r34_vspec",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "00_bayside_blue"
+          ]
+        },
+        {
+          "carId": "ddm_honda_civic_fd2",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "00_championship_white"
+          ]
+        },
+        {
+          "carId": "ddm_nissan_skyline_bnr32",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "1_crystal_white"
+          ]
+        },
+        {
+          "carId": "ddm_subaru_22b",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "0_sonic_blue_mica"
+          ]
+        },
+        {
+          "carId": "naz_jza80_ridox_modern",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "01_Soul_Red"
+          ]
+        },
+        {
+          "carId": "pear_nissan_silvia_s13_wangan",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "Red"
+          ]
+        },
+        {
+          "carId": "rize_efini_rx7_fd3s_keisuke_1",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "00_itsdraik_J9_Competition_Yellow_Mica"
+          ]
+        },
+        {
+          "carId": "sl_toyota_supra_mkiv_ridox",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "01_scarlet_red"
+          ]
+        },
+        {
+          "carId": "srp_bcnr33_wangan",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "1_GV1_Black_Pearl"
+          ]
+        },
+        {
+          "carId": "srp_honda_s2000_legendary",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "Apex_Blue"
+          ]
+        },
+        {
+          "carId": "srp_toyota_supra_mkiv_interceptor",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "ichiban"
+          ]
+        },
+        {
+          "carId": "wm_mazda_rx7_fd_rgo",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "0_yellow_wmps3_anime"
+          ]
+        },
+        {
+          "carId": "wm_nissan_s15",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "0_wmmt"
+          ]
+        }
+      ],
+      "requirements": {
+        "csp": {
+          "required": true,
+          "minimumVersion": "0.1.76",
+          "testedVersion": "0.2.11 b3465"
+        }
+      },
+      "hud": {
+        "delivery": "none",
+        "version": "4.0.2"
+      },
+      "companionApps": []
+    },
+    {
+      "id": "server2",
+      "displayName": "SRP Traffic",
+      "engine": {
+        "type": "assettoserver"
+      },
+      "maxPlayers": 32,
+      "ai": {
+        "enabled": true,
+        "trafficCars": 138
+      },
+      "connection": {
+        "public": null,
+        "ports": {
+          "gamePort": 9650,
+          "httpPort": 8090
+        }
+      },
+      "tracks": [
+        {
+          "trackId": "shuto_revival_project_beta",
+          "layouts": [
+            "main_layout"
+          ]
+        }
+      ],
+      "cars": [
+        {
+          "carId": "art_nissan_gtr_bcnr33_600r",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "3_Ultimate_Metal_Silver"
+          ]
+        },
+        {
+          "carId": "bati_e46_nspec54",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "Alpinweiss III"
+          ]
+        },
+        {
+          "carId": "bksy_nissan_skyline_r34_vspec",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "00_bayside_blue",
+            "01_mnp3"
+          ]
+        },
+        {
+          "carId": "bmw_1m",
+          "role": "player",
+          "required": true
+        },
+        {
+          "carId": "bmw_m3_e92",
+          "role": "player",
+          "required": true
+        },
+        {
+          "carId": "ddm_honda_civic_fd2",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "00_championship_white"
+          ]
+        },
+        {
+          "carId": "ddm_nissan_skyline_bnr32",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "1_crystal_white",
+            "2_spark_silver_metallic"
+          ]
+        },
+        {
+          "carId": "ddm_subaru_22b",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "0_sonic_blue_mica"
+          ]
+        },
+        {
+          "carId": "gmp_e60_m5_f10style",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "300_Alpine_White_III"
+          ]
+        },
+        {
+          "carId": "naz_jza80_ridox_modern",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "01_Soul_Red",
+            "02_Matte"
+          ]
+        },
+        {
+          "carId": "p3_mitsubishi_evo8",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "00_cool_silver_met"
+          ]
+        },
+        {
+          "carId": "pear_nissan_silvia_s13_wangan",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "Red",
+            "Spark_Silver_Metallic"
+          ]
+        },
+        {
+          "carId": "rize_efini_rx7_fd3s_keisuke_1",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "00_itsdraik_J9_Competition_Yellow_Mica",
+            "01_itsdraik_M8_Montego_Blue_Metallic"
+          ]
+        },
+        {
+          "carId": "rize_traffic_mazda_rx8_se3p",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Brilliant Black",
+            "Velocity Red Mica",
+            "Winning Blue Metallic",
+            "lightning yellow",
+            "snowflake white pearl mica",
+            "titanium gray metallic"
+          ]
+        },
+        {
+          "carId": "rize_traffic_toyota_celica_supra",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "black",
+            "red",
+            "silver",
+            "white"
+          ]
+        },
+        {
+          "carId": "rize_traffic_toyota_fj_cruiser",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Black",
+            "Radiant Red",
+            "Sun Fusion",
+            "Voodoo Blue",
+            "White"
+          ]
+        },
+        {
+          "carId": "sl_toyota_supra_mkiv_ridox",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "01_scarlet_red",
+            "02_jet_black"
+          ]
+        },
+        {
+          "carId": "srp_bcnr33_wangan",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "1_GV1_Black_Pearl",
+            "2_KR4_Sonic_Silver"
+          ]
+        },
+        {
+          "carId": "srp_honda_s2000_legendary",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "Apex_Blue"
+          ]
+        },
+        {
+          "carId": "srp_mitsubishi_evo_5_kai",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "00_scotia_white"
+          ]
+        },
+        {
+          "carId": "srp_toyota_supra_mkiv_interceptor",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "ichiban",
+            "niban"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_airport_bus",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_daihatsu_copen",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Black Mica Metallic",
+            "Bright Silver Metallic",
+            "Clear Blue Crystal Metallic",
+            "Jaune Yellow",
+            "Liquid Silver Metallic",
+            "Matador Red Pearl"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_izuzu_npr",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_izuzu_npr_box",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_mazda_cx3",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Arctic_White_Solid",
+            "blue_reflex_mica",
+            "crystal_white_pearlescent",
+            "jet_black_mica",
+            "meteor_grey_mica",
+            "soul_red_metallic"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_subaru_levorg",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Black",
+            "Crystal White Pearl",
+            "Dark Grey Metallic",
+            "Ice Silver Metallic",
+            "Lapis Blue Pearl",
+            "Pure Red"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_suzuki_alto_works",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Blisk Blue Metallic",
+            "Blueish Black Pearl",
+            "Phoenix Red Pearl",
+            "Pure White Pearl",
+            "Steel Silver Metalic"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_toyota_markii_taxi",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "chartered_1",
+            "highway_1",
+            "occupied_1",
+            "reserved_1",
+            "vacant_1"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_toyota_prius",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Barcelona Red Metallic",
+            "Black",
+            "Blizzard Pearl",
+            "Classic Silver Metallic",
+            "Nautical Blue Metallic",
+            "Sea Glass Pearl"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_toyota_vellfire",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Black",
+            "Greyish_Blue_Mica_Metallic",
+            "Silver_Metallic",
+            "White_Pearl_Crystal_Shine"
+          ]
+        },
+        {
+          "carId": "traffic_aegis_ud_quon",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        {
+          "carId": "traffic_audi_a4_jp",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "00_sepang_blue_pearl_effect_br",
+            "01_vegas_yellow_br",
+            "02_misano_red_pearl_br",
+            "03_scuba_blue_metallic_br",
+            "04_floret_silver_metallic_br"
+          ]
+        },
+        {
+          "carId": "traffic_isuzu_flatbed",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "black",
+            "blue",
+            "green",
+            "grey",
+            "red"
+          ]
+        },
+        {
+          "carId": "traffic_isuzu_hauler",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Genki",
+            "black",
+            "blue",
+            "green",
+            "grey"
+          ]
+        },
+        {
+          "carId": "traffic_isuzu_haulerb",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Genki",
+            "black",
+            "blue",
+            "green",
+            "grey"
+          ]
+        },
+        {
+          "carId": "traffic_isuzu_npr",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "Isekai",
+            "black",
+            "blue",
+            "green",
+            "grey"
+          ]
+        },
+        {
+          "carId": "traffic_isuzu_tanker",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "black",
+            "blue",
+            "green",
+            "grey",
+            "red"
+          ]
+        },
+        {
+          "carId": "traffic_nissan_leaf",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "generated",
+            "generated-1",
+            "generated-2",
+            "generated-3",
+            "generated-4"
+          ]
+        },
+        {
+          "carId": "traffic_toyota_camry",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "generated",
+            "generated-1",
+            "generated-10",
+            "generated-2",
+            "generated-4"
+          ]
+        },
+        {
+          "carId": "traffic_toyota_prius",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "generated",
+            "generated-1",
+            "generated-10",
+            "generated-2",
+            "generated-4"
+          ]
+        },
+        {
+          "carId": "traffic_toyota_rav4",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "00_sepang_blue_pearl_effect_br",
+            "01_vegas_yellow_br",
+            "02_misano_red_pearl_br",
+            "03_scuba_blue_metallic_br",
+            "04_floret_silver_metallic_br"
+          ]
+        },
+        {
+          "carId": "traffic_volvo_v70jp",
+          "role": "traffic",
+          "required": true,
+          "skins": [
+            "generated",
+            "generated-1",
+            "generated-2",
+            "generated-3",
+            "generated-4"
+          ]
+        },
+        {
+          "carId": "wm_mazda_rx7_fd_rgo",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "0_yellow_wmps3_anime",
+            "1_silver_manga_cover"
+          ]
+        },
+        {
+          "carId": "wm_nissan_s15",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "0_wmmt",
+            "10_itsdraik_KR4_Sonic_Silver"
+          ]
+        },
+        {
+          "carId": "wm_porsche_911_930",
+          "role": "player",
+          "required": true,
+          "skins": [
+            "0_black"
+          ]
+        }
+      ],
+      "requirements": {
+        "csp": {
+          "required": true,
+          "minimumVersion": "0.1.76",
+          "testedVersion": "0.2.11 b3465"
+        }
+      },
+      "hud": {
+        "delivery": "server-csp-online-script",
+        "version": "4.0.2"
+      },
+      "companionApps": [
+        "srp_board"
+      ]
+    }
+  ],
+  "content": {
+    "cars": [
+      {
+        "id": "art_nissan_gtr_bcnr33_600r",
+        "name": "Nissan Skyline GT-R 600R",
+        "version": "1.8",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "2c662c492f1be2cd9ec93698727cad4b4fb1769d74ce91f5a61a02d215276b83",
+          "uiCarJsonSha256": "057467ebac7c6cb9b417d68ccbf7f610e0e0096cfa0cc0894ef5bd1cb7b25253"
+        }
+      },
+      {
+        "id": "bksy_nissan_skyline_r34_vspec",
+        "name": "BANKSY. Nissan Skyline GT-R R34 V-Spec",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "5513fec4294dd9e95024086e9374fbcabadc8a3b6bdcbbef89ff7d2f1011cdcc",
+          "uiCarJsonSha256": "8af1a1cf6ec7461971d19c687112e5f50047e62d109f80d0eeddfa9bc08775c4"
+        }
+      },
+      {
+        "id": "ddm_honda_civic_fd2",
+        "name": "Honda Civic type R (FD2)",
+        "version": "2.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "8f7724c6897c1340f2854cf5f055d9867fa220ce517637fc63e38dd25e89051a",
+          "uiCarJsonSha256": "1ab55f17da67e41cfb4d7f287866682cb93fa129715ba1856e81b8d3d47d2401"
+        }
+      },
+      {
+        "id": "ddm_nissan_skyline_bnr32",
+        "name": "Nissan Skyline GT-R V•Spec II (R32)",
+        "version": "2.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "d6e1445c5aed67315284360e7da6a34c3d2045a25b9b4c3aa6102973b4606a30",
+          "uiCarJsonSha256": "79889337f773ea371b7ff054f9cd0676b093bfa06817ed884a6620d38e1eac3f"
+        }
+      },
+      {
+        "id": "ddm_subaru_22b",
+        "name": "Subaru Impreza 22B STi-Version",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "45034c01582e41093c2865691b4e102b2f6edf8fce6ff40a93538c93b7aef09c",
+          "uiCarJsonSha256": "fab26273d2cf4f8f629d325ccb0ba73ed340fd290ed7abcc7e4eb4bff508c5f4"
+        }
+      },
+      {
+        "id": "naz_jza80_ridox_modern",
+        "name": "Toyota Supra Ridox  - \"The Spectre\"",
+        "version": "1.3",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "8181480ad60fd5ed69570b9f65fc17e858d78054fe64911ce29276490b24cf74",
+          "uiCarJsonSha256": "f6ed171f7a992e425dcf756b10163a7b0ed72b84111c07b63c2d65b248a5c7e7"
+        }
+      },
+      {
+        "id": "pear_nissan_silvia_s13_wangan",
+        "name": "Nissan Silvia S13 Wangan",
+        "version": "1.3",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "66e0f8dfd5bbcb8387f6be6c65b2e0b66a8e7d28a0ecb4dca71403c923a4c9a1",
+          "uiCarJsonSha256": "cddb04f96227fedbe130d933875bc67b95cf5776ebf475c5215123b232f97171"
+        }
+      },
+      {
+        "id": "rize_efini_rx7_fd3s_keisuke_1",
+        "name": "Mazda ɛ̃fini RX-7 FD3S Type R [Keisuke ver. 1]",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "cce8d9f36449570753a54468b07884c626e9238eb3d5608559513fc654b12af8",
+          "uiCarJsonSha256": "fb1874e3b6b8430cd5fe5dc6b301a33326a7f824ba629360db0b4c18e510c8c4"
+        }
+      },
+      {
+        "id": "sl_toyota_supra_mkiv_ridox",
+        "name": "Toyota Supra MKIV Ridox Body Kit",
+        "version": "4.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "599d540dff72fa34a781d571859420a34ae28d00bae2ee3ce50cbeb9bf75953a",
+          "uiCarJsonSha256": "3cbe9b1a589557be630dfc2b0d32e560ebf3a0247498a4aa984b0bbb2ee15c41"
+        }
+      },
+      {
+        "id": "srp_bcnr33_wangan",
+        "name": "Nissan Skyline GT-R V-Spec (BCNR33) Wangan Spec",
+        "version": "1.2",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "47b09f6d8e7f834489a505d969ccd9010b9b8fa4a2b0e3690cfd8899f6d27cb0",
+          "uiCarJsonSha256": "f1f2ff916482b4330fb32b0e6463fe50c7cd8e75cc2600b96771582ecf439a48"
+        }
+      },
+      {
+        "id": "srp_honda_s2000_legendary",
+        "name": "Honda S2000 (AP2 - Legendary)",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "2146e61f07075704fd30c70f8adedff808580d696b13da789dc81f49fea75fb4",
+          "uiCarJsonSha256": "335cdd946d1cfe8b5ae7f8e6353eca6a006fa5fe3a67ee51b265bc209bf4db31"
+        }
+      },
+      {
+        "id": "srp_toyota_supra_mkiv_interceptor",
+        "name": "Toyota Supra Interceptor",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "c08f2d388b528a773d3f2f3a938dfb5bd20efe4dea91628dcbbb716f726dc93a",
+          "uiCarJsonSha256": "14f8b6d6730e0783eb7535960e6133e6082037ad129db78fef492bea772a25b2"
+        }
+      },
+      {
+        "id": "wm_mazda_rx7_fd_rgo",
+        "name": "Mazda ɛ̃fini RX-7 FD3S [SPEED FACTORY RGO]",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "9b575ebf392f901f7cb7edee3c09466872ff47ec581c0bf4b267c4d228113619",
+          "uiCarJsonSha256": "89a4f7d0e68a7c029e1a87593bd50373a8fa67ee235bfafc56d3a8fd5e9a5608"
+        }
+      },
+      {
+        "id": "wm_nissan_s15",
+        "name": "Nissan Silvia S15 [SPEED FACTORY RGO]",
+        "version": "1.2",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "6c3c09d6bb8511435b84e082f1115a5a427c91d305c4393936d03b4f1c8fa0b7",
+          "uiCarJsonSha256": "04f166a3d2acc8313f5791d61fff4aa83902a639964d96e210f51dc44c493bdd"
+        }
+      },
+      {
+        "id": "bati_e46_nspec54",
+        "name": "BMW M3 (E46) N-SPEC S54",
+        "version": "1.29",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "e77670950ef6ecca718d16b567887e996c7ea5b2bc40d8979d794e7132611105",
+          "uiCarJsonSha256": "265267d01b5bc6de485eacaafbc02a86db416c12312918189ad1fd61f80943d5"
+        }
+      },
+      {
+        "id": "bmw_1m",
+        "name": "bmw_1m",
+        "version": null,
+        "origin": {
+          "kind": "base-game"
+        },
+        "identity": {
+          "dataAcdSha256": "9b9e870010e459116dd76a5e10eeb0cb0e78d78f4173d7caaea9c85c3bd638d9",
+          "uiCarJsonSha256": null
+        }
+      },
+      {
+        "id": "bmw_m3_e92",
+        "name": "bmw_m3_e92",
+        "version": null,
+        "origin": {
+          "kind": "base-game"
+        },
+        "identity": {
+          "dataAcdSha256": "3908184fcf7201fc99ec9f03ba4b8df15927894a9edba7c635e8c56b7c36247c",
+          "uiCarJsonSha256": null
+        }
+      },
+      {
+        "id": "gmp_e60_m5_f10style",
+        "name": "2008 BMW M5 (E60 - Affinity)",
+        "version": "1.4",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "7d2217f99230c196a737a8da4a257cce577e62e11f4e36ba52d7c2233fb43a60",
+          "uiCarJsonSha256": "a63d59d86ece54b929026ee402d539af7bd944555fa1582010311751ee759b72"
+        }
+      },
+      {
+        "id": "p3_mitsubishi_evo8",
+        "name": "Mitsubishi Lancer Evolution VIII MR",
+        "version": null,
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "771f6fb2cdf6bbe85a1e062967fa683df1c1cf1c216ae763c26b8210e9f41bfe",
+          "uiCarJsonSha256": "4f5c43e55f9d1638e5595bc43d28e7898be7cc64389009527744435a23fd70cc"
+        }
+      },
+      {
+        "id": "rize_traffic_mazda_rx8_se3p",
+        "name": "τraffic Japan | Mazda RX-8 SE3P",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "f5d2033bc24d8ba95e36a88fceddf103de7bd12361715b6d30adda874aed7902",
+          "uiCarJsonSha256": "a8e850c1db42d80aff94f978df449c41feafa389394a38ece724ed22e1b9a75f"
+        }
+      },
+      {
+        "id": "rize_traffic_toyota_celica_supra",
+        "name": "τraffic Japan | Toyota Celica Supra MA60",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "a9a8961185c5a385360e29f4ebf91f08bcf7e694d5a8198ce7abe6c8e75551d0",
+          "uiCarJsonSha256": "2adc5dca3be40442d23d333bf824af58003e64025a4379e31b2eb018f4184203"
+        }
+      },
+      {
+        "id": "rize_traffic_toyota_fj_cruiser",
+        "name": "τraffic Japan | Toyota FJ Cruiser GSJ15W",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "e306e1daa8aa3e7eb2126232ee4b085705790cc856b5971f87e03301029b114d",
+          "uiCarJsonSha256": "b4bc5d957abfd8cc59fb1726b9e7ca246174d0ba5ea9d28ff9a2c7bc0d982257"
+        }
+      },
+      {
+        "id": "srp_mitsubishi_evo_5_kai",
+        "name": "Mitsubishi Lancer Evolution V Kai",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "e0a897150c9fa70ce95a6739bca7e50cf951114bf9264491191b00348a882ec9",
+          "uiCarJsonSha256": "258f57b92593a4587132be2225cc300459f410b4ec97aa1e94ef9f35e6e8bc76"
+        }
+      },
+      {
+        "id": "traffic_aegis_airport_bus",
+        "name": "τraffic Japan | Mitsubishi Fuso Aero Queen",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "64a27b7ed8733eb20e56e7232da5bbe57b077614c3a248b04a66302ba4ef07c0",
+          "uiCarJsonSha256": "fa322eb28a56207cd90d3814bea2542551dc83b6dc5f9b863bd3fb58a13b0b50"
+        }
+      },
+      {
+        "id": "traffic_aegis_daihatsu_copen",
+        "name": "τraffic Japan | Daihatsu Copen Cero LA400K",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "590f251a1ce0139d08eec79234696af897f0077a74708e270ee870caa1bed2a0",
+          "uiCarJsonSha256": "2852547aee86eca76775bbe55b417a4c195f80ed58171ecbf31a7dd3db68ffbc"
+        }
+      },
+      {
+        "id": "traffic_aegis_izuzu_npr",
+        "name": "τraffic Japan | Izuzu NPR",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "b80b3f2e16d346fe622bd33da9a8f04656658afc51ad593c1be73862a142a187",
+          "uiCarJsonSha256": "7bc79849099e193166c9799f5f256dc99ffe6a7b5df44758e91d5b502701533c"
+        }
+      },
+      {
+        "id": "traffic_aegis_izuzu_npr_box",
+        "name": "τraffic Japan | Izuzu NPR Box",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "5c7865d773c8c1a4081a0f505255d8669ee9fdf4145cf6c234d136d800d2a957",
+          "uiCarJsonSha256": "5eee2ced49324d2bd9f11663fc0d5efaa2d94b3eacace0f9a55f2e6c03f0e1c0"
+        }
+      },
+      {
+        "id": "traffic_aegis_mazda_cx3",
+        "name": "τraffic Japan | Mazda CX-3 DK5AW",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "2c611e9a720cbb241c380e3d1d1d3ac3ce0f5fc8fa389e9cf497b4e2a576bb59",
+          "uiCarJsonSha256": "1152591a915e82fde68eeb53ef5444488b08f42485de9f10293443e0af41aa03"
+        }
+      },
+      {
+        "id": "traffic_aegis_subaru_levorg",
+        "name": "τraffic Japan | Subaru Levorg VMG 2.0 GT-S EyeSight",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "a76ad97c0f63aae59403aad3ffc988e200598232746dd703174fdc8301ae5076",
+          "uiCarJsonSha256": "13f38bfa72951cb03ae0518f18b0034658950f614d24242562c6ab4627fe75b9"
+        }
+      },
+      {
+        "id": "traffic_aegis_suzuki_alto_works",
+        "name": "τraffic Japan | Suzuki Alto Works HA36S",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "ed0f58a3618ec596d48e40b649e1c5717a64514d9b7fce55d5fbd7f9a83a483f",
+          "uiCarJsonSha256": "cf87d0750e14dfd67964136ca426be6896bec2b91ebd71d40b3aefcb9e2d62cc"
+        }
+      },
+      {
+        "id": "traffic_aegis_toyota_markii_taxi",
+        "name": "τraffic Japan | Toyota Mark II JZX90 Tourer V Taxi",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "b3241103b37daf3c107d914b7daa44f0742a2c8377c4185a1d1a134d4cce3d99",
+          "uiCarJsonSha256": "e57a886091b41363d5620bdfb98e92ad9dd6a3eac90c7e4f68de3026db98eaf3"
+        }
+      },
+      {
+        "id": "traffic_aegis_toyota_prius",
+        "name": "τraffic Japan | Toyota Prius ZVW30",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "5ca8757d48b891608dfc91589d19557cb86df04bc69f2e242642498a7dc51373",
+          "uiCarJsonSha256": "6d8dc46edc03bcbb8ebc6997b32bdd80d2a57154d8f7831ad0653e4ae74f617e"
+        }
+      },
+      {
+        "id": "traffic_aegis_toyota_vellfire",
+        "name": "τraffic Japan | Toyota Vellfire 3.5VL GGH35W",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "7df13fce1bb5a8795fb0561ec50493bb3974b02ce74a4e52a4a743ea018e8c13",
+          "uiCarJsonSha256": "e2ff80a65d40e43292f8ba38c6771c2b36fed345a47e7b92e9209e5c83999893"
+        }
+      },
+      {
+        "id": "traffic_aegis_ud_quon",
+        "name": "τraffic Japan | UD Quon",
+        "version": "1.0",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "00a08446575700e36bd5db9ce3d7dd0f9b7e98f117a586d4cf6e7e522852646a",
+          "uiCarJsonSha256": "4311bad562cb0c09a73e21ff12366047bc49726383e374e58c2bb49f2d99f6d3"
+        }
+      },
+      {
+        "id": "traffic_audi_a4_jp",
+        "name": "τraffic jp - Audi A4 2.0 TFSI S-line",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "7fb12e907f318a291bbef59b95773e4a085558e90a345cdb78e1a7a5f4e4ec34",
+          "uiCarJsonSha256": "c33175daa9ba9d17a17f84b5252bdd0b8ffff7cf4058c6ea78fecf1bd0077fbe"
+        }
+      },
+      {
+        "id": "traffic_isuzu_flatbed",
+        "name": "τraffic jp - Isuzu NPR Flatbed",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "4da801ae126f70ef1f70b19b91e2306279d0879a1cddd7cb4ee69c9284013346",
+          "uiCarJsonSha256": "f54806d148df05d55dd6c924353950a46965f841f9f46437696dd9a5363522d6"
+        }
+      },
+      {
+        "id": "traffic_isuzu_hauler",
+        "name": "τraffic jp - Isuzu NPR Hauler",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "9bcfa45cb139fd8f341c159d71059f8ddc6d43205216bbf947953580bcd0917d",
+          "uiCarJsonSha256": "17ffed601dca3e046e5d66a763b5e72de5de5932ffb1581b6a9644c06849d033"
+        }
+      },
+      {
+        "id": "traffic_isuzu_haulerb",
+        "name": "τraffic jp - Isuzu NPR Hauler Loaded",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "88e887466f9d424b275228b3394e8cf5dbda51b696dcfed3ad5e1b8c95e46cb1",
+          "uiCarJsonSha256": "30ca6f751c3f6a31db46ddf1c886d198495c15b1d3636dac7f9d83e414d76973"
+        }
+      },
+      {
+        "id": "traffic_isuzu_npr",
+        "name": "τraffic jp - Isuzu NPR Truck",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "45428accadb06b6322ca505159f08eacf88cba47b2ab61e9a4329757bd3d1ffb",
+          "uiCarJsonSha256": "5c89cb1014e5ad39e426c06a6529bd665ea2451b3c4449349f08a8c6a9d2fbfc"
+        }
+      },
+      {
+        "id": "traffic_isuzu_tanker",
+        "name": "τraffic jp - Isuzu NPR Tanker",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "82a226aa9c06e4db6355b6ecb936b20209f8f422457455b982a14a3c023a432f",
+          "uiCarJsonSha256": "7abc27196eafdf4bcf02b6e2896296b95b86115acaacccced8cde6f477a14d2f"
+        }
+      },
+      {
+        "id": "traffic_nissan_leaf",
+        "name": "τraffic jp - Nissan Leaf",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "7f624027665fabdd1a60a35832d35501990638416e82e6cf3d2d4e634ff9baf3",
+          "uiCarJsonSha256": "a71312d4f492ff023fcd17870608b80d68bd4c687c1f05d7f41b648063642e1c"
+        }
+      },
+      {
+        "id": "traffic_toyota_camry",
+        "name": "τraffic jp - Toyota Camry",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "3f0c40ea18689db67c4c5b7cdcae8fa883a02b1b273cdfa5aebe3c890bcbe86b",
+          "uiCarJsonSha256": "e5f66b1dfce214eaf282d308c6286346c8122a4816e1849acc9e043fd996304d"
+        }
+      },
+      {
+        "id": "traffic_toyota_prius",
+        "name": "τraffic jp - Toyota Prius",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "d63871415a8d46e341b875ae99e88bf5a7b865b9f38c01ae14fb0410f170d979",
+          "uiCarJsonSha256": "4e9900d2e5a4611226a140db56b14ae2c62032413d967d430b82ba1f3ca51aa3"
+        }
+      },
+      {
+        "id": "traffic_toyota_rav4",
+        "name": "τraffic jp - Toyota Rav4",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "9cfb6bb67172b2dca4e7dba5380557d16e990dfbf7076157d814905e1acf19bd",
+          "uiCarJsonSha256": "1b227e4b9e5d315805f3debc700f72739ba85143972458d9074c236319cc5519"
+        }
+      },
+      {
+        "id": "traffic_volvo_v70jp",
+        "name": "τraffic jp - Volvo V70",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "55b159502d11ffb363718877ec96a22ee2bbaf985d24621553e702f08115ae11",
+          "uiCarJsonSha256": "8ad90bddf4aaba598d3bf2f65512632de7d73c0366b29b927ca0dc38f79b8fe4"
+        }
+      },
+      {
+        "id": "wm_porsche_911_930",
+        "name": "Porsche 911 Turbo (930) Blackbird",
+        "version": "1.1",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_car_pack_3_6"
+        },
+        "identity": {
+          "dataAcdSha256": "a6703d1d3014d17161c4dbb62e5d831ed8d223635197c9fc8517656014537759",
+          "uiCarJsonSha256": "eba657cf000c7de8466e1d8bfd46dad747c84084eec27369f919630d854f18e4"
+        }
+      }
+    ],
+    "tracks": [
+      {
+        "id": "shuto_revival_project_beta",
+        "name": "Shutoko Revival Project",
+        "version": "0.9.3",
+        "origin": {
+          "kind": "archive",
+          "archiveId": "srp_track_0_9_3"
+        },
+        "verify": {
+          "markerFile": "0.9.3 Stable.txt",
+          "markerSha256": "d2fcd4e87a640e5b996dcdc13e1e1e8d4b79262f5204576ce76276d8dcc60731"
+        },
+        "layouts": [
+          {
+            "config": "daishi_pa",
+            "uiTrackJsonSha256": "3e4189a986a49a5bc98dc7e35072060ccd58805e2e07c737094a4baccb681acc"
+          },
+          {
+            "config": "main_layout",
+            "uiTrackJsonSha256": "059ec3c9b6283d167f832f7a904fecc96b9458ab61d238055a7dbe93e10b2a52"
+          }
+        ]
+      }
+    ]
+  },
+  "archives": [
+    {
+      "id": "srp_track_0_9_3",
+      "name": "Shutoko Revival Project 0.9.3 Stable",
+      "fileName": "SRP 0.9.3.7z",
+      "format": "7z",
+      "bytes": 1206051675,
+      "sha256": "6d37e1cf97bcbc2c50353da6711a320f3140adf8ae47807513cf65cca6d5374e",
+      "url": null,
+      "allowedHosts": [],
+      "provider": {
+        "name": "Shutoko Revival Project 0.9.3 Stable",
+        "homepage": "https://shutokorevivalproject.com"
+      },
+      "redistribution": "none"
+    },
+    {
+      "id": "srp_car_pack_3_6",
+      "name": "SRP Car Pack 3.6",
+      "fileName": "SRP_Car_Pack_3.6.7z",
+      "format": "7z",
+      "bytes": 4811088129,
+      "sha256": "9e65839461c1c49c0bb1215761d4728871dd02d1ab1f7e36bc9f7daf033fb93a",
+      "url": null,
+      "allowedHosts": [],
+      "provider": {
+        "name": "SRP Car Pack 3.6",
+        "homepage": "https://shutokorevivalproject.com"
+      },
+      "redistribution": "none"
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "schemaVersion": "1.0.0",
+  "packageId": "srp-mercy-launcher-handoff",
+  "generatedAt": "2026-10-09T21:28:37.100Z",
+  "hashAlgorithm": "sha256",
+  "purpose": "Client-side requirements of the SRP personal Assetto Corsa servers, for Mercy's Launcher integration (Windows phase).",
+  "schema": "SCHEMA/requirements.schema.json",
+  "placeholders": {
+    "publicHost": "PUBLIC_HOST_TBD",
+    "publicHudBaseUrl": "PUBLIC_HUD_BASE_URL_TBD",
+    "releaseHost": "PUBLIC_RELEASE_HOST_TBD",
+    "note": "No public endpoint has been approved or assigned; every one of these must be filled in before release. Private LAN addresses are deliberately absent."
+  },
+  "servers": [
+    {
+      "id": "main",
+      "requirements": {
+        "path": "SERVER_REQUIREMENTS/main.requirements.json",
+        "sha256": "c6bd98092e4bb652e36d1b9f681c0af2212f18a8d707d30b2a8cc12c51f10684",
+        "bytes": 12426
+      },
+      "humanReadable": "SERVER_REQUIREMENTS/main.requirements.md"
+    },
+    {
+      "id": "server2",
+      "requirements": {
+        "path": "SERVER_REQUIREMENTS/server2.requirements.json",
+        "sha256": "b0886192f232bfaa7d2577a2b663600beb126d8d91bf49bb186c9a0cd37a219f",
+        "bytes": 36602
+      },
+      "humanReadable": "SERVER_REQUIREMENTS/server2.requirements.md"
+    }
+  ],
+  "components": [
+    {
+      "id": "ac_base_game",
+      "kind": "external",
+      "required": true,
+      "install": "player-owned"
+    },
+    {
+      "id": "csp",
+      "kind": "external",
+      "required": true,
+      "minimumVersion": "0.1.76",
+      "testedVersion": "0.2.11 b3465",
+      "install": "player-installed (Content Manager)"
+    },
+    {
+      "id": "srp_track_0_9_3",
+      "kind": "content-track",
+      "required": true,
+      "version": "0.9.3",
+      "bundled": false,
+      "source": "CONTENT_INVENTORY/acquisition_sources.json#srp_track_0_9_3",
+      "install": "content-manager-drag"
+    },
+    {
+      "id": "srp_car_pack_3_6",
+      "kind": "content-cars",
+      "required": true,
+      "version": "3.6",
+      "bundled": false,
+      "source": "CONTENT_INVENTORY/acquisition_sources.json#srp_car_pack_3_6",
+      "install": "content-manager-drag"
+    },
+    {
+      "id": "srp_hud",
+      "kind": "server-delivered-script",
+      "required": false,
+      "intendedExperience": true,
+      "version": "4.0.2",
+      "bundled": false,
+      "referenceFiles": [
+        {
+          "path": "HUD/srp_hud.lua",
+          "sha256": "fd863ddeaa7f65a90e140e2ea65d35768fabca35d6fee184fa30d8565a42f8b9",
+          "bytes": 89723
+        },
+        {
+          "path": "HUD/hud_release.json",
+          "sha256": "9c9558ffff96c6fac724660c3c93157bc372d3bbb3f0a4d2ebb9f7a3453c6c3a",
+          "bytes": 990
+        }
+      ],
+      "install": "none (server-delivered)"
+    },
+    {
+      "id": "srp_board",
+      "kind": "csp-lua-app",
+      "required": false,
+      "intendedExperience": true,
+      "version": "1.0.0",
+      "bundled": true,
+      "stampingRequired": true,
+      "files": [
+        {
+          "path": "COMPANION_APPS/srp_board/README.txt",
+          "sha256": "d9c39fe04818fff84f3b21a4ae8f89d76adab7df8e5592b1ab892ff10f0177d4",
+          "bytes": 2216
+        },
+        {
+          "path": "COMPANION_APPS/srp_board/apps/lua/srp_board/icon.png",
+          "sha256": "270b030c3d9e4ae9e128b6b5ff9e034b3ddef753e8957531af5e9057a3bd832e",
+          "bytes": 540
+        },
+        {
+          "path": "COMPANION_APPS/srp_board/apps/lua/srp_board/manifest.ini",
+          "sha256": "b84d14c9e5aa1d9e24b0d52e4de7bd2e1c10bb9e108499b81875e04117ced8fa",
+          "bytes": 843
+        },
+        {
+          "path": "COMPANION_APPS/srp_board/apps/lua/srp_board/srp_board.lua",
+          "sha256": "81adb1c2a1b0b52306813f5f8d4e23a2766b48c7efc288175284d5648c36860a",
+          "bytes": 7898
+        },
+        {
+          "path": "COMPANION_APPS/srp_board/srp_board_release.json",
+          "sha256": "dc959110287b7daacd70c7feecdbe12a3ac3e4a44cf3f95d0fca3b0482a4efb4",
+          "bytes": 3530
+        },
+        {
+          "path": "COMPANION_APPS/srp_board/stamp-srp-board.js",
+          "sha256": "493cccb113e00dcd285ecccf7c251fd3bee31b99d4d02d42c3abdc2f93f27adf",
+          "bytes": 2639
+        }
+      ],
+      "install": "launcher-install-after-stamp",
+      "installDestination": "<Assetto Corsa>\\apps\\lua\\srp_board\\",
+      "packageUrl": {
+        "value": null,
+        "placeholder": "PUBLIC_RELEASE_HOST_TBD/srp_board/1.0.0/srp_board-1.0.0.zip"
+      }
+    }
+  ],
+  "contentInventory": [
+    {
+      "path": "CONTENT_INVENTORY/cars.json",
+      "sha256": "cfe32cb26e5f9cbf928589c8e4694a1de2e23574247ee472504ead17df18ad8a",
+      "bytes": 48236
+    },
+    {
+      "path": "CONTENT_INVENTORY/tracks.json",
+      "sha256": "3fea7ff192fe2fc6a91bfd51638067492cd6eda3d36435f3898211fda47e2c70",
+      "bytes": 1984
+    },
+    {
+      "path": "CONTENT_INVENTORY/acquisition_sources.json",
+      "sha256": "fa32d7e93aeb4ba82e41221fc2a5175f84279cc8f9ee88b1b4fe73d6dcdc2426",
+      "bytes": 3056
+    }
+  ]
+}

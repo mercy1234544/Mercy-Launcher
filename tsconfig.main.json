@@ -15,5 +15,5 @@
     "sourceMap": true,
     "composite": true
   },
-  "include": ["src/main/**/*"]
+  "include": ["src/main/**/*", "src/main/data/**/*.json"]
 }

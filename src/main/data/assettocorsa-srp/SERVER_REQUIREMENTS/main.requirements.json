@@ -1,0 +1,339 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-10-09T21:28:37.100Z",
+  "server": {
+    "id": "main",
+    "displayName": "SRP Daishi PA",
+    "type": "kunos-stock",
+    "engineVersion": "Kunos acServer (steam-install package)",
+    "protected": true,
+    "game": {
+      "udpPort": 9600,
+      "tcpPort": 9600,
+      "httpPort": 8081
+    },
+    "maxPlayers": 14,
+    "ai": {
+      "enabled": false,
+      "trafficCars": 0
+    },
+    "connection": {
+      "publicHost": null,
+      "publicHostPlaceholder": "PUBLIC_HOST_TBD",
+      "publicPort": 9600,
+      "note": "No public address exists yet. Private LAN addresses are intentionally not recorded here."
+    },
+    "passwordRequired": false
+  },
+  "track": {
+    "id": "shuto_revival_project_beta",
+    "layout": "daishi_pa",
+    "layoutName": "Shutoko Revival Project 0.9.3 - Daishi PA",
+    "version": "0.9.3",
+    "requirement": "required-to-join",
+    "source": "srp_track_0_9_3",
+    "installMethod": "content-manager-drag-or-extract-archive",
+    "serverDelivered": false
+  },
+  "cars": [
+    {
+      "id": "art_nissan_gtr_bcnr33_600r",
+      "name": "Nissan Skyline GT-R 600R",
+      "version": "1.8",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "3_Ultimate_Metal_Silver"
+      ],
+      "identity": {
+        "dataAcdSha256": "2c662c492f1be2cd9ec93698727cad4b4fb1769d74ce91f5a61a02d215276b83",
+        "uiCarJsonSha256": "057467ebac7c6cb9b417d68ccbf7f610e0e0096cfa0cc0894ef5bd1cb7b25253",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "bksy_nissan_skyline_r34_vspec",
+      "name": "BANKSY. Nissan Skyline GT-R R34 V-Spec",
+      "version": "1.1",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "00_bayside_blue"
+      ],
+      "identity": {
+        "dataAcdSha256": "5513fec4294dd9e95024086e9374fbcabadc8a3b6bdcbbef89ff7d2f1011cdcc",
+        "uiCarJsonSha256": "8af1a1cf6ec7461971d19c687112e5f50047e62d109f80d0eeddfa9bc08775c4",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "ddm_honda_civic_fd2",
+      "name": "Honda Civic type R (FD2)",
+      "version": "2.0",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "00_championship_white"
+      ],
+      "identity": {
+        "dataAcdSha256": "8f7724c6897c1340f2854cf5f055d9867fa220ce517637fc63e38dd25e89051a",
+        "uiCarJsonSha256": "1ab55f17da67e41cfb4d7f287866682cb93fa129715ba1856e81b8d3d47d2401",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "ddm_nissan_skyline_bnr32",
+      "name": "Nissan Skyline GT-R V•Spec II (R32)",
+      "version": "2.0",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "1_crystal_white"
+      ],
+      "identity": {
+        "dataAcdSha256": "d6e1445c5aed67315284360e7da6a34c3d2045a25b9b4c3aa6102973b4606a30",
+        "uiCarJsonSha256": "79889337f773ea371b7ff054f9cd0676b093bfa06817ed884a6620d38e1eac3f",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "ddm_subaru_22b",
+      "name": "Subaru Impreza 22B STi-Version",
+      "version": "1.0",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "0_sonic_blue_mica"
+      ],
+      "identity": {
+        "dataAcdSha256": "45034c01582e41093c2865691b4e102b2f6edf8fce6ff40a93538c93b7aef09c",
+        "uiCarJsonSha256": "fab26273d2cf4f8f629d325ccb0ba73ed340fd290ed7abcc7e4eb4bff508c5f4",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "naz_jza80_ridox_modern",
+      "name": "Toyota Supra Ridox  - \"The Spectre\"",
+      "version": "1.3",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "01_Soul_Red"
+      ],
+      "identity": {
+        "dataAcdSha256": "8181480ad60fd5ed69570b9f65fc17e858d78054fe64911ce29276490b24cf74",
+        "uiCarJsonSha256": "f6ed171f7a992e425dcf756b10163a7b0ed72b84111c07b63c2d65b248a5c7e7",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "pear_nissan_silvia_s13_wangan",
+      "name": "Nissan Silvia S13 Wangan",
+      "version": "1.3",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "Red"
+      ],
+      "identity": {
+        "dataAcdSha256": "66e0f8dfd5bbcb8387f6be6c65b2e0b66a8e7d28a0ecb4dca71403c923a4c9a1",
+        "uiCarJsonSha256": "cddb04f96227fedbe130d933875bc67b95cf5776ebf475c5215123b232f97171",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "rize_efini_rx7_fd3s_keisuke_1",
+      "name": "Mazda ɛ̃fini RX-7 FD3S Type R [Keisuke ver. 1]",
+      "version": "1.0",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "00_itsdraik_J9_Competition_Yellow_Mica"
+      ],
+      "identity": {
+        "dataAcdSha256": "cce8d9f36449570753a54468b07884c626e9238eb3d5608559513fc654b12af8",
+        "uiCarJsonSha256": "fb1874e3b6b8430cd5fe5dc6b301a33326a7f824ba629360db0b4c18e510c8c4",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "sl_toyota_supra_mkiv_ridox",
+      "name": "Toyota Supra MKIV Ridox Body Kit",
+      "version": "4.0",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "01_scarlet_red"
+      ],
+      "identity": {
+        "dataAcdSha256": "599d540dff72fa34a781d571859420a34ae28d00bae2ee3ce50cbeb9bf75953a",
+        "uiCarJsonSha256": "3cbe9b1a589557be630dfc2b0d32e560ebf3a0247498a4aa984b0bbb2ee15c41",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "srp_bcnr33_wangan",
+      "name": "Nissan Skyline GT-R V-Spec (BCNR33) Wangan Spec",
+      "version": "1.2",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "1_GV1_Black_Pearl"
+      ],
+      "identity": {
+        "dataAcdSha256": "47b09f6d8e7f834489a505d969ccd9010b9b8fa4a2b0e3690cfd8899f6d27cb0",
+        "uiCarJsonSha256": "f1f2ff916482b4330fb32b0e6463fe50c7cd8e75cc2600b96771582ecf439a48",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "srp_honda_s2000_legendary",
+      "name": "Honda S2000 (AP2 - Legendary)",
+      "version": "1.0",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "Apex_Blue"
+      ],
+      "identity": {
+        "dataAcdSha256": "2146e61f07075704fd30c70f8adedff808580d696b13da789dc81f49fea75fb4",
+        "uiCarJsonSha256": "335cdd946d1cfe8b5ae7f8e6353eca6a006fa5fe3a67ee51b265bc209bf4db31",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "srp_toyota_supra_mkiv_interceptor",
+      "name": "Toyota Supra Interceptor",
+      "version": "1.1",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "ichiban"
+      ],
+      "identity": {
+        "dataAcdSha256": "c08f2d388b528a773d3f2f3a938dfb5bd20efe4dea91628dcbbb716f726dc93a",
+        "uiCarJsonSha256": "14f8b6d6730e0783eb7535960e6133e6082037ad129db78fef492bea772a25b2",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "wm_mazda_rx7_fd_rgo",
+      "name": "Mazda ɛ̃fini RX-7 FD3S [SPEED FACTORY RGO]",
+      "version": "1.1",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "0_yellow_wmps3_anime"
+      ],
+      "identity": {
+        "dataAcdSha256": "9b575ebf392f901f7cb7edee3c09466872ff47ec581c0bf4b267c4d228113619",
+        "uiCarJsonSha256": "89a4f7d0e68a7c029e1a87593bd50373a8fa67ee235bfafc56d3a8fd5e9a5608",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    },
+    {
+      "id": "wm_nissan_s15",
+      "name": "Nissan Silvia S15 [SPEED FACTORY RGO]",
+      "version": "1.2",
+      "role": "player",
+      "requirement": "required-to-join",
+      "source": "srp_car_pack_3_6",
+      "installMethod": "content-manager-drag-or-extract-pack",
+      "skinsPinnedByEntryList": [
+        "0_wmmt"
+      ],
+      "identity": {
+        "dataAcdSha256": "6c3c09d6bb8511435b84e082f1115a5a427c91d305c4393936d03b4f1c8fa0b7",
+        "uiCarJsonSha256": "04f166a3d2acc8313f5791d61fff4aa83902a639964d96e210f51dc44c493bdd",
+        "scope": "server-copy"
+      },
+      "verification": "server-copy-hashed"
+    }
+  ],
+  "skins": {
+    "policy": "Entry-list skins are folders inside the car packs (listed per car as skinsPinnedByEntryList); no extra skin download exists. A missing pinned skin makes AC fall back to a default skin.",
+    "separatePackagesNeeded": false
+  },
+  "csp": {
+    "required": true,
+    "minimumVersion": "0.1.76",
+    "minimumVersionBasis": "documented minimum for server-delivered online scripts and for the weather/time features this server uses (progression/docs/HUD_DELIVERY.md); the SRP track's own minimum is not documented",
+    "testedVersion": "0.2.11 b3465",
+    "testedBasis": "Windows custom_shaders_patch.log, 2026-10-08 (one machine)",
+    "verified": "tested-version-only"
+  },
+  "hud": {
+    "delivery": "none",
+    "enabledOnServer": false,
+    "version": "4.0.2",
+    "protocol": 1,
+    "cspSection": "SCRIPT_11-srp_hud.lua",
+    "requirement": "not-applicable",
+    "serverDelivered": false,
+    "playerInstall": false,
+    "progressionEnabled": false,
+    "note": "The stock Kunos engine sends no CSP extra options, so this server cannot deliver the HUD.",
+    "deliveredVersionAnnouncedByServer": null,
+    "verification": "n/a"
+  },
+  "companionApps": [],
+  "optional": [],
+  "serverOnly": [],
+  "components": [
+    "ac_base_game",
+    "csp",
+    "srp_track_0_9_3",
+    "srp_car_pack_3_6"
+  ],
+  "installInstructions": [
+    "Install Assetto Corsa (Steam) and Custom Shaders Patch (Content Manager can do both updates).",
+    "Install the Shutoko Revival Project 0.9.3 Stable track into content\\tracks\\shuto_revival_project_beta (drag the archive onto Content Manager).",
+    "Install SRP Car Pack 3.6 (drag onto Content Manager, or extract into the Assetto Corsa folder) - it supplies 14 of this server's 14 cars.",
+    "No DLC is required.",
+    "Join the server on TCP/UDP 9600 (public host: to be assigned)."
+  ],
+  "updateStrategy": {
+    "content": "Never overwrite player content silently. Compare the track marker and car ui_car.json versions; offer the official source when they differ.",
+    "hud": "Automatic: players always receive the version the progression service serves at join.",
+    "companionApp": "Atomic folder replace after version comparison (see srp_board_release.json)."
+  }
+}

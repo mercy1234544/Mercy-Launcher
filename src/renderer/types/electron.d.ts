@@ -206,6 +206,39 @@ interface ElectronAPI {
       portAvailable: boolean; portError?: string;
     } | null>;
     ensureRuntimeFilesPresent: (id: string) => Promise<{ success: boolean; error?: string }>;
+    // Mercy's Servers (player side)
+    listSrpServers: () => Promise<AcMercyServerProfile[]>;
+    checkSrpRequirements: (serverId: string, options?: { deep?: boolean }) => Promise<{ success: true; report: AcRequirementsReport } | { success: false; error: string }>;
+    planSrpInstall: (serverId: string) => Promise<{ success: true; plan: AcInstallPlan } | { success: false; error: string }>;
+    installSrpContent: (serverId: string, approvedIds: string[], inputs?: { trackArchivePath?: string; carPackArchivePath?: string; archivePaths?: Record<string, string>; trackArchivePaths?: Record<string, string> }) => Promise<{ success: true; result: AcInstallResult } | { success: false; error: string }>;
+    cancelSrpInstall: () => Promise<boolean>;
+    isSrpInstalling: () => Promise<boolean>;
+    srpStatus: (serverId: string, force?: boolean) => Promise<{ success: true; status: AcServerLiveStatus } | { success: false; error: string }>;
+    srpJoinStatus: (serverId: string) => Promise<{ success: true; join: AcJoinStatus } | { success: false; error: string }>;
+    srpJoin: (serverId: string) => Promise<{ success: boolean; error?: string; note?: string }>;
+    getSrpEndpoints: (serverId: string) => Promise<{ success: true; settings: AcLocalEndpoints } | { success: false; error: string }>;
+    setSrpEndpoints: (serverId: string, patch: Partial<AcLocalEndpoints>) => Promise<{ success: boolean; error?: string }>;
+    srpDiagnostics: () => Promise<{ success: true; diagnostics: AcDiagnostics } | { success: false; error: string }>;
+    setSrpAcRoot: (dir: string | null) => Promise<{ success: boolean; error?: string }>;
+    pickSrpArchive: () => Promise<string | null>;
+    pickSrpFolder: () => Promise<string | null>;
+    revealSrpBackup: (target: string) => Promise<boolean>;
+    srpStorage: () => Promise<{ success: true; storage: AcStorageInfo } | { success: false; error: string }>;
+    deleteSrpDownloads: () => Promise<{ success: boolean; freedBytes: number; error?: string }>;
+    deleteSrpBackup: (id: string) => Promise<{ success: boolean; freedBytes: number; error?: string }>;
+    validateSrpTrackArchive: (archivePath: string, trackId?: string) => Promise<{ success: true; validation: AcTrackValidation } | { success: false; error: string }>;
+    // server catalog
+    catalogStatus: () => Promise<{ success: true; status: AcCatalogStatus } | { success: false; error: string }>;
+    refreshCatalog: (reason?: 'manual' | 'section-open') => Promise<{ success: true; result: AcCatalogSyncResult; status: AcCatalogStatus } | { success: false; error: string }>;
+    getCatalogSettings: () => Promise<{ success: true; settings: AcCatalogSettings } | { success: false; error: string }>;
+    setCatalogSettings: (patch: Partial<AcCatalogSettings>) => Promise<{ success: true; settings: AcCatalogSettings; errors: string[]; status: AcCatalogStatus } | { success: false; error: string }>;
+    resetCatalog: () => Promise<{ success: true; status: AcCatalogStatus } | { success: false; error: string }>;
+    srpContentStatus: (serverId: string) => Promise<{ success: true; content: AcContentStatus } | { success: false; error: string }>;
+    srpReadiness: (serverId: string) => Promise<{ success: true; readiness: AcReadiness; content: AcContentStatus } | { success: false; error: string }>;
+    onCatalogEvent: (callback: (e: { type: 'status' | 'changed'; status: AcCatalogStatus; diff?: { changed: boolean; summary: string[]; serverIds: string[]; firstSync: boolean } }) => void) => () => void;
+    onCatalogAutoInstall: (callback: (e: { serverId: string; phase: 'started' | 'done'; itemIds?: string[]; success?: boolean; error?: string }) => void) => () => void;
+    testSrpEndpoint: (serverId: string, scope: 'lan' | 'public') => Promise<{ success: true; test: AcEndpointTest } | { success: false; error: string }>;
+    onSrpInstallProgress: (callback: (p: AcInstallProgress) => void) => () => void;
   };
 
   games: {
@@ -631,6 +664,98 @@ declare global {
     absAllowed?: 0 | 1 | 2; tcAllowed?: 0 | 1 | 2;
     stabilityAllowed?: boolean; autoclutchAllowed?: boolean; tyreBlanketsAllowed?: boolean;
     legalTyres?: string; sunAngle?: number; weatherGraphics?: string; ambientTemp?: number; roadTemp?: number;
+  }
+  // Read-only SRP client requirements check (AcRequirementsChecker.ts).
+  type AcCheckStatus = 'pass' | 'warn' | 'fail' | 'unknown' | 'info';
+  interface AcCheckItem { id: string; label: string; status: AcCheckStatus; detail: string; evidence?: Record<string, unknown>; }
+  interface AcRequirementsReport {
+    schemaVersion: string; serverId: string; serverName: string; acRoot: string | null; checkedAt: string; deep: boolean;
+    sections: Record<'install' | 'csp' | 'track' | 'cars' | 'companion' | 'conflicts', AcCheckItem[]>;
+    summary: { pass: number; warn: number; fail: number; unknown: number; info: number; readyToJoin: boolean; incomplete: boolean; blockers: string[] };
+  }
+  interface AcCatalogStatus {
+    configured: boolean; source: 'catalog' | 'builtin'; syncing: boolean;
+    environment: 'production' | 'development' | null; catalogId: string | null; revision: number | null;
+    generatedAt: string | null; expiresAt: string | null; keyId: string | null; signatureVerified: boolean; unsignedDev: boolean;
+    lastSuccessAt: string | null; lastAttemptAt: string | null; nextAttemptAt: string | null; failures: number;
+    lastError: { code: string; message: string; at: string } | null;
+    stale: boolean; expired: boolean;
+    lastChange: { at: string; summary: string[]; serverIds: string[] } | null;
+    notices: string[]; installsAllowed: boolean; installBlockedReason: string | null; autoInstallAllowed: boolean;
+  }
+  interface AcCatalogSyncResult {
+    outcome: 'updated' | 'unchanged' | 'rejected' | 'unavailable' | 'skipped' | 'unconfigured'; changed: boolean;
+    diff?: { changed: boolean; summary: string[]; serverIds: string[]; firstSync: boolean };
+    error?: { code: string; message: string }; skippedBecause?: 'rate-limit' | 'backoff' | 'in-flight' | 'debounced'; revision?: number;
+  }
+  interface AcCatalogSettings {
+    baseUrl: string | null; trustedKeys: { keyId: string; publicKey: string }[]; allowUnsignedDev: boolean; intervalMinutes: number;
+    installMode: 'review' | 'auto'; autoUpdateExisting: boolean; maxAutoDownloadBytes: number; autoServers: string[];
+  }
+  interface AcContentRow {
+    id: string; kind: 'game' | 'csp' | 'car' | 'track' | 'layout' | 'app'; name: string; required: boolean;
+    state: 'installed' | 'missing' | 'outdated' | 'incompatible' | 'manual' | 'unknown'; detail: string;
+    planItemId?: string; action?: 'install' | 'update' | 'repair' | 'manual'; blocked?: string;
+  }
+  interface AcContentStatus {
+    serverId: string; rows: AcContentRow[];
+    counts: { installed: number; missing: number; outdated: number; incompatible: number; manual: number; unknown: number };
+    requiredNotReady: number;
+  }
+  interface AcReadiness {
+    serverId: string; readyToLaunch: boolean;
+    steps: { id: 'catalog' | 'install' | 'content' | 'prerequisites' | 'endpoint' | 'join'; label: string; state: 'done' | 'todo' | 'warn' | 'blocked' | 'unknown'; detail: string }[];
+    facts: { catalogAvailable: boolean; contentReady: boolean; gamePort: 'untested' | 'reachable' | 'unreachable' | 'unconfigured'; infoPage: 'answered' | 'no-answer' | 'unconfigured' | 'unchecked'; joinVerified: false };
+  }
+  interface AcMercyServerProfile {
+    id: string; name: string; engine: string; purpose: string; layoutName: string; trackVersion: string;
+    maxPlayers: number | null; aiTraffic: number | null;
+    requiredContent: { id: string; name: string; required: boolean; detail?: string }[];
+    hud: { delivered: boolean; version: string }; companionApp: boolean;
+    description?: string | null; serverState?: 'active' | 'maintenance'; fromCatalog?: boolean;
+    tracks?: { id: string; name: string; layouts: string[] }[];
+    endpoint: { publicConfigured: boolean; publicSource: 'release' | 'local-override' | 'none'; lanConfigured: boolean; problems: string[] };
+  }
+  interface AcPlanItem {
+    id: string; kind: 'car' | 'car-skin' | 'track' | 'companion' | 'conflict' | 'external'; label: string;
+    action: 'install' | 'repair' | 'update' | 'move-to-backup' | 'manual'; destructive: boolean; optional: boolean; reason: string;
+    blocked?: string; manualSteps?: string[]; needsLocalFile?: boolean;
+  }
+  interface AcInstallPlan {
+    serverId: string; acRoot: string | null; items: AcPlanItem[];
+    downloads: { sourceId: string; name: string; url: string; bytes: number | null; sha256: string | null; itemIds: string[] }[];
+    csp: { status: 'ok' | 'missing' | 'too-old' | 'unknown'; message: string };
+    archiveTool: 'none' | '7z' | 'bsdtar';
+    summary: { total: number; automatic: number; manual: number; blocked: number; destructive: number };
+    warnings: string[];
+  }
+  interface AcInstallProgress { serverId?: string; phase: string; message: string; itemId?: string; percent?: number; received?: number; total?: number | null }
+  interface AcInstallResult {
+    success: boolean; cancelled?: boolean;
+    groups: { group: string; ok: boolean; itemIds: string[]; error?: string; rolledBack?: boolean; backupDir?: string; notes: string[] }[];
+    skipped: { id: string; reason: string }[]; report: AcRequirementsReport | null;
+  }
+  interface AcServerLiveStatus { state: 'online' | 'offline' | 'unconfigured'; via?: 'lan' | 'public'; players?: number; maxPlayers?: number; reason: string; checkedAt?: string }
+  interface AcJoinStatus { canJoin: boolean; blockers: string[]; via: 'lan' | 'public' | null; port: number | null; reason: string; unverified: true }
+  interface AcStorageInfo {
+    downloads: { dir: string; totalBytes: number; files: { name: string; bytes: number }[] };
+    backups: { id: string; path: string; createdAt: string | null; bytes: number; items: string[]; inProgress: boolean }[];
+  }
+  interface AcTrackValidation { ok: boolean; summary: string; checks: { id: string; ok: boolean; label: string; detail: string }[]; identicalToOwnersCopy: boolean | null; fileName: string }
+  interface AcEndpointTest {
+    configured: boolean; message?: string;
+    diagnosis?: { scope: 'lan' | 'public'; reachable: boolean; hints: string[]; checks: { id: string; label: string; state: 'pass' | 'fail' | 'warn' | 'skipped' | 'info'; detail: string }[] };
+  }
+  interface AcLocalEndpoints { lanHost: string | null; publicHostOverride: string | null; publicTcpPortOverride: number | null; publicHttpPortOverride: number | null }
+  interface AcDiagnostics {
+    acRoot: string | null; acRootSource: 'manual' | 'detected' | 'none'; documentsDir: string; documentsExists: boolean;
+    archiveTool: 'none' | '7z' | 'bsdtar'; platform: string; contentManager: { protocolHandler: boolean };
+    csp: { installed: boolean; version: string | null; build: number | null; source: string };
+    content: { cars: number; tracks: number }; luaApps: string[];
+    srpBoard: { installed: boolean; version: string | null; stamped: { kind: string; port: number }[] | null; coverage?: { serverId: string; public: boolean | null; lan: boolean | null }[] } | null;
+    catalog?: AcCatalogStatus;
+    srpHudConflict: boolean; freeGb: number | null; interruptedInstalls: string[]; cspLogSrpLines: string[]; installLog: string[];
+    endpoints: { serverId: string; publicConfigured: boolean; publicSource: string; lanConfigured: boolean; problems: string[] }[];
   }
   interface AcCarInfo { id: string; name: string; brand: string; tags: string[]; skins: string[]; valid: boolean; }
   interface AcTrackLayoutInfo { layout: string; name: string; }

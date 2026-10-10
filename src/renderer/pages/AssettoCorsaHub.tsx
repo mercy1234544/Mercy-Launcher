@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { FlagTriangleRight, PlusCircle, FolderInput, Server, Zap, ArrowRight, ArrowLeft, Loader2, X, FolderOpen, CheckCircle2, AlertTriangle, Package } from 'lucide-react';
+import { FlagTriangleRight, PlusCircle, FolderInput, Server, Zap, ArrowRight, ArrowLeft, Loader2, X, FolderOpen, CheckCircle2, AlertTriangle, Package, Globe2 } from 'lucide-react';
 import { useAssettoCorsaStore } from '../stores/useAssettoCorsaStore';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
+import AcSectionNav from '../components/AcSectionNav';
 import toast from 'react-hot-toast';
 
 const STATUS_DOT: Record<string, string> = {
@@ -35,12 +36,19 @@ export default function AssettoCorsaHub() {
         title="Assetto Corsa"
         subtitle="Create and manage your Assetto Corsa dedicated servers — launched through Content Manager"
       />
+      <AcSectionNav />
+
+      <Panel padding="sm" className="flex items-center gap-3 text-xs text-surface-400">
+        <Server size={15} className="text-rose-300 shrink-0" />
+        <p className="flex-1"><span className="font-semibold text-surface-200">My Servers are servers you host yourself</span> — you create, configure, start and stop them. Looking to just play? <span className="font-semibold text-surface-200">Mercy's Servers</span> are the official ones: check your install, get what's missing and join.</p>
+        <button onClick={() => navigate('/mercy-servers/assettocorsa')} className="text-primary-300 hover:text-primary-200 font-semibold flex items-center gap-1 shrink-0"><Globe2 size={12} /> Mercy's Servers <ArrowRight size={12} /></button>
+      </Panel>
 
       <div className="grid grid-cols-2 gap-4">
         <Panel>
           <div className="w-11 h-11 rounded-xl border flex items-center justify-center mb-4 bg-rose-600/20 text-rose-400 border-rose-500/20"><Server size={19} /></div>
           <p className="text-3xl font-extrabold text-surface-100 tracking-tight">{servers.length}</p>
-          <p className="text-xs text-surface-500 mt-0.5">Total Servers</p>
+          <p className="text-xs text-surface-500 mt-0.5">Servers You Host</p>
         </Panel>
         <Panel>
           <div className="w-11 h-11 rounded-xl border flex items-center justify-center mb-4 bg-purple-600/20 text-purple-400 border-purple-500/20"><Zap size={19} /></div>

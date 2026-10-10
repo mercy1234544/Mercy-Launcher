@@ -4,6 +4,7 @@ import { Globe2, ArrowLeft, Users, Gauge, Package, LogIn } from 'lucide-react';
 import type { MercyServer } from '../types/mercyServer';
 import { Panel } from '../components/ui';
 import { GAMES, getGame } from '../config/games';
+import AssettoCorsaMercyServers from './AssettoCorsaMercyServers';
 
 // Mercy's Servers — official/public servers Mercy will eventually operate,
 // separate from a user's own servers (managed via each game's hub). This is
@@ -22,7 +23,14 @@ const PLANNED = [
   'Required content, checked automatically', 'Join Server', 'Download & Join, when content is missing',
 ];
 
+// Assetto Corsa has real official servers (verified requirements package) with its own full experience;
+// every other game keeps the honest "Coming Soon" page below, completely unchanged.
 export default function MercyServers() {
+  const { game } = useParams<{ game: string }>();
+  return game === 'assettocorsa' ? <AssettoCorsaMercyServers /> : <GenericMercyServers />;
+}
+
+function GenericMercyServers() {
   const { game } = useParams<{ game: string }>();
   const navigate = useNavigate();
   const meta = getGame(game) || GAMES[0];

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Panel, SectionHeading, Toggle, EmptyState } from '../components/ui';
 import { launchGameFor } from '../lib/launchGame';
+import AcSectionNav from '../components/AcSectionNav';
 import toast from 'react-hot-toast';
 
 const STATUS_META: Record<string, { label: string; dot: string; text: string }> = {
@@ -146,6 +147,7 @@ export default function AssettoCorsaServerPanel() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-6 space-y-5 max-w-5xl mx-auto pb-16">
+      <AcSectionNav />
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/assetto-corsa')} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors"><ArrowLeft size={16} /></button>
         <SectionHeading

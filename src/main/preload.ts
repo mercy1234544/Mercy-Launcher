@@ -174,6 +174,51 @@ const electronAPI = {
     setRuntimePath: (dirPath: string) => ipcRenderer.invoke('assettocorsa:setRuntimePath', dirPath),
     getServerReadiness: (id: string) => ipcRenderer.invoke('assettocorsa:getServerReadiness', id),
     ensureRuntimeFilesPresent: (id: string) => ipcRenderer.invoke('assettocorsa:ensureRuntimeFilesPresent', id),
+    // Mercy's Servers (player side)
+    listSrpServers: () => ipcRenderer.invoke('assettocorsa:srp:listServers'),
+    checkSrpRequirements: (serverId: string, options?: { deep?: boolean }) => ipcRenderer.invoke('assettocorsa:srp:check', serverId, options),
+    planSrpInstall: (serverId: string) => ipcRenderer.invoke('assettocorsa:srp:plan', serverId),
+    installSrpContent: (serverId: string, approvedIds: string[], inputs?: { trackArchivePath?: string; carPackArchivePath?: string; archivePaths?: Record<string, string>; trackArchivePaths?: Record<string, string> }) => ipcRenderer.invoke('assettocorsa:srp:install', serverId, approvedIds, inputs),
+    cancelSrpInstall: () => ipcRenderer.invoke('assettocorsa:srp:cancelInstall'),
+    isSrpInstalling: () => ipcRenderer.invoke('assettocorsa:srp:isInstalling'),
+    srpStatus: (serverId: string, force?: boolean) => ipcRenderer.invoke('assettocorsa:srp:status', serverId, force),
+    srpJoinStatus: (serverId: string) => ipcRenderer.invoke('assettocorsa:srp:joinStatus', serverId),
+    srpJoin: (serverId: string) => ipcRenderer.invoke('assettocorsa:srp:join', serverId),
+    getSrpEndpoints: (serverId: string) => ipcRenderer.invoke('assettocorsa:srp:getEndpoints', serverId),
+    setSrpEndpoints: (serverId: string, patch: Record<string, unknown>) => ipcRenderer.invoke('assettocorsa:srp:setEndpoints', serverId, patch),
+    srpDiagnostics: () => ipcRenderer.invoke('assettocorsa:srp:diagnostics'),
+    setSrpAcRoot: (dir: string | null) => ipcRenderer.invoke('assettocorsa:srp:setAcRoot', dir),
+    pickSrpArchive: () => ipcRenderer.invoke('assettocorsa:srp:pickArchive'),
+    pickSrpFolder: () => ipcRenderer.invoke('assettocorsa:srp:pickFolder'),
+    revealSrpBackup: (target: string) => ipcRenderer.invoke('assettocorsa:srp:revealBackup', target),
+    srpStorage: () => ipcRenderer.invoke('assettocorsa:srp:storage'),
+    deleteSrpDownloads: () => ipcRenderer.invoke('assettocorsa:srp:deleteDownloads'),
+    deleteSrpBackup: (id: string) => ipcRenderer.invoke('assettocorsa:srp:deleteBackup', id),
+    validateSrpTrackArchive: (archivePath: string, trackId?: string) => ipcRenderer.invoke('assettocorsa:srp:validateTrackArchive', archivePath, trackId),
+    // server catalog
+    catalogStatus: () => ipcRenderer.invoke('assettocorsa:catalog:status'),
+    refreshCatalog: (reason?: 'manual' | 'section-open') => ipcRenderer.invoke('assettocorsa:catalog:refresh', reason),
+    getCatalogSettings: () => ipcRenderer.invoke('assettocorsa:catalog:getSettings'),
+    setCatalogSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('assettocorsa:catalog:setSettings', patch),
+    resetCatalog: () => ipcRenderer.invoke('assettocorsa:catalog:reset'),
+    srpContentStatus: (serverId: string) => ipcRenderer.invoke('assettocorsa:catalog:contentStatus', serverId),
+    srpReadiness: (serverId: string) => ipcRenderer.invoke('assettocorsa:catalog:readiness', serverId),
+    onCatalogEvent: (callback: (e: any) => void) => {
+      const handler = (_: unknown, e: any) => callback(e);
+      ipcRenderer.on('assettocorsa:catalog:event', handler);
+      return () => { ipcRenderer.removeListener('assettocorsa:catalog:event', handler); };
+    },
+    onCatalogAutoInstall: (callback: (e: any) => void) => {
+      const handler = (_: unknown, e: any) => callback(e);
+      ipcRenderer.on('assettocorsa:catalog:auto-install', handler);
+      return () => { ipcRenderer.removeListener('assettocorsa:catalog:auto-install', handler); };
+    },
+    testSrpEndpoint: (serverId: string, scope: 'lan' | 'public') => ipcRenderer.invoke('assettocorsa:srp:testEndpoint', serverId, scope),
+    onSrpInstallProgress: (callback: (p: any) => void) => {
+      const handler = (_: unknown, p: any) => callback(p);
+      ipcRenderer.on('assettocorsa:install:progress', handler);
+      return () => { ipcRenderer.removeListener('assettocorsa:install:progress', handler); };
+    },
   },
 
   games: {

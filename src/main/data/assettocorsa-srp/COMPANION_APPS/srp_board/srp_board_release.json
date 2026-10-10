@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "1.0.0",
+  "component": "srp_board",
+  "name": "SRP Board",
+  "version": "1.0.0",
+  "kind": "csp-lua-app",
+  "clientSide": true,
+  "serverDelivered": false,
+  "purpose": "Hides the bottom F9 position strip (\"1 TRA / 2 TRF ...\") only while connected to a listed SRP server, and restores the player's own setting on leave. Draws nothing. The HUD itself stays server-delivered.",
+  "requires": [
+    "Custom Shaders Patch with Lua apps (observed working on CSP v0.2.11 b3465)",
+    "ac.accessOverlayLeaderboardParams available to Lua apps (observed available on CSP v0.2.11 b3465)"
+  ],
+  "installDestination": "<Assetto Corsa install>\\apps\\lua\\srp_board\\",
+  "installFolderInPackage": "apps/lua/srp_board",
+  "files": [
+    {
+      "path": "apps/lua/srp_board/manifest.ini",
+      "sha256": "b84d14c9e5aa1d9e24b0d52e4de7bd2e1c10bb9e108499b81875e04117ced8fa",
+      "template": false
+    },
+    {
+      "path": "apps/lua/srp_board/srp_board.lua",
+      "sha256": "81adb1c2a1b0b52306813f5f8d4e23a2766b48c7efc288175284d5648c36860a",
+      "template": true
+    },
+    {
+      "path": "apps/lua/srp_board/icon.png",
+      "sha256": "270b030c3d9e4ae9e128b6b5ff9e034b3ddef753e8957531af5e9057a3bd832e",
+      "template": false
+    }
+  ],
+  "stamping": {
+    "required": true,
+    "why": "The shipped srp_board.lua has an EMPTY server list and therefore does nothing (fails closed). The launcher must stamp the real server list before install.",
+    "file": "srp_board.lua",
+    "line": "local SERVERS = { }",
+    "replaceWith": "local SERVERS = { '<host>:<tcpPort>'[, '<host>:<tcpPort>'...] }",
+    "entryFormat": "<host>:<TCP_PORT as the CLIENT connects>, lowercase; host matches ac.getServerIP(), port matches ac.getServerPortTCP()",
+    "hostRegex": "^[A-Za-z0-9.\\-]{1,253}:\\d{1,5}$",
+    "tool": "stamp-srp-board.js (node, no dependencies); the same rule as progression/scripts/build-hud-pack.js --board-app",
+    "testVector": {
+      "servers": [
+        "example.invalid:9650"
+      ],
+      "stampedSrpBoardLuaSha256": "7e1dbd6bc0d9c48a56e2e98f8ea04cc027fa009c5cb561dfd717dbc09e8c6b3e"
+    },
+    "serverMatchPlaceholders": {
+      "publicHost": "PUBLIC_HOST_TBD",
+      "note": "No public address exists yet; do not stamp a private LAN address into a release build."
+    }
+  },
+  "package": {
+    "urlStatus": "placeholder",
+    "url": null,
+    "urlPlaceholder": "PUBLIC_RELEASE_HOST_TBD/srp_board/1.0.0/srp_board-1.0.0.zip",
+    "note": "no approved public download endpoint exists yet"
+  },
+  "updateStrategy": "Compare installed manifest.ini VERSION (and the sha256 of the template-equivalent file) with this release; replace the whole folder atomically (write to apps/lua/srp_board.new, then rename), re-stamp, keep nothing else. Never delete it while the game is running; ask the player for one clean game start first if a crash happened on the server (the app restores their F9 setting at next start).",
+  "uninstall": "Delete the folder. If the game crashed while the strip was hidden, start the game once first (the marker srp_board_restore_v1 in ac.storage restores the setting).",
+  "verificationStatus": {
+    "mockTests": "progression/tests/board-app.test.js (48 checks, mock CSP)",
+    "inGame": "Windows log 2026-10-08 (CSP v0.2.11 b3465) shows \"[SRP Board] v1.0.0 loaded\", \"accessOverlayLeaderboardParams is available\" and \"SRP server: strip was mode 3, hiding it\". NOT seen in that log: the restore on leaving the server, and a visual confirmation that the strip is gone."
+  }
+}

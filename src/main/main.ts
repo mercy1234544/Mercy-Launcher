@@ -19,6 +19,7 @@ import { SettingsManager } from './services/SettingsManager';
 import { MinecraftManager } from './services/MinecraftManager';
 import { AssettoCorsaManager } from './services/AssettoCorsaManager';
 import { GameScanner } from './services/GameScanner';
+import { AcPlayerService } from './services/ac/playerService';
 import { MercyCredentialStore } from './services/MercyCredentialStore';
 import { ConnectionNegotiator } from './services/connection/ConnectionNegotiator';
 import { RelayConnectionManager } from './services/connection/RelayConnectionManager';
@@ -80,6 +81,7 @@ let settingsManager: SettingsManager;
 let minecraftManager: MinecraftManager;
 let assettoCorsaManager: AssettoCorsaManager;
 let gameScanner: GameScanner;
+let acPlayerService: AcPlayerService;
 let mercyCredentialStore: MercyCredentialStore;
 let minecraftMarketplace: MinecraftMarketplace;
 let bedrockMarketplace: BedrockMarketplace;
@@ -176,6 +178,23 @@ function initializeServices() {
   minecraftManager = new MinecraftManager(userDataPath);
   assettoCorsaManager = new AssettoCorsaManager(userDataPath);
   gameScanner = new GameScanner(userDataPath);
+  acPlayerService = new AcPlayerService({
+    userDataPath,
+    detectAcRoot: async () => {
+      let games = await gameScanner.getCached();
+      if (!games.some((g) => g.mercyGameId === 'assettocorsa' && g.installPath)) games = await gameScanner.scan();
+      const ac = games.find((g) => g.mercyGameId === 'assettocorsa' && g.installPath);
+      if (ac?.installPath) return ac.installPath;
+      const contentRoot = assettoCorsaManager.detectDefaultContentRoot();
+      return contentRoot ? path.dirname(contentRoot) : null;
+    },
+    documentsAcDir: () => path.join(app.getPath('documents'), 'Assetto Corsa'),
+    broadcast: (channel, data) => mainWindow?.webContents.send(channel, data),
+    isContentManagerAvailable: () => !!app.getApplicationNameForProtocol('acmanager://race/online/join'),
+    openExternal: (url) => shell.openExternal(url),
+  });
+  // Fetch the server catalog at startup (a no-op until the owner configures an address) and keep it fresh in the background.
+  acPlayerService.startCatalog();
   mercyCredentialStore = new MercyCredentialStore(userDataPath, safeStorage);
   minecraftMarketplace = new MinecraftMarketplace();
   bedrockMarketplace = new BedrockMarketplace(userDataPath);
@@ -448,6 +467,71 @@ function registerIpcHandlers() {
   ipcMain.handle('assettocorsa:setRuntimePath', (_, dirPath: string) => assettoCorsaManager.setRuntimePath(dirPath));
   ipcMain.handle('assettocorsa:getServerReadiness', (_, id: string) => assettoCorsaManager.getServerReadiness(id));
   ipcMain.handle('assettocorsa:ensureRuntimeFilesPresent', (_, id: string) => assettoCorsaManager.ensureRuntimeFilesPresent(id));
+
+  // Mercy's Servers — the PLAYER side of Assetto Corsa (requirements check, content install, endpoints,
+  // status, join, diagnostics). Everything above this block is the dedicated-server HOST side. See
+  // services/ac/playerService.ts. None of these handlers starts, stops or reconfigures any server.
+  const acSafe = async <T,>(fn: () => Promise<T> | T) => {
+    try { return { success: true as const, ...(await fn() as object) }; }
+    catch (err: any) { return { success: false as const, error: err?.message || 'Operation failed' }; }
+  };
+  ipcMain.handle('assettocorsa:srp:listServers', () => acPlayerService.listServers());
+  ipcMain.handle('assettocorsa:srp:check', (_, serverId: string, options?: { deep?: boolean }) => acSafe(async () => ({ report: await acPlayerService.check(serverId, options) })));
+  ipcMain.handle('assettocorsa:srp:plan', (_, serverId: string) => acSafe(async () => ({ plan: await acPlayerService.plan(serverId) })));
+  // The renderer may only name archives by path; anything else in `inputs` is dropped before it reaches the installer.
+  const cleanInstallInputs = (raw: any) => {
+    const str = (v: unknown) => (typeof v === 'string' && v.length > 0 && v.length < 1024 ? v : undefined);
+    const rec = (v: unknown) => { if (!v || typeof v !== 'object') return undefined; const o: Record<string, string> = {}; for (const [k, x] of Object.entries(v as Record<string, unknown>)) if (typeof x === 'string' && x.length < 1024 && /^[A-Za-z0-9._:-]{1,100}$/.test(k)) o[k] = x; return Object.keys(o).length ? o : undefined; };
+    return { trackArchivePath: str(raw?.trackArchivePath), carPackArchivePath: str(raw?.carPackArchivePath), archivePaths: rec(raw?.archivePaths), trackArchivePaths: rec(raw?.trackArchivePaths) };
+  };
+  ipcMain.handle('assettocorsa:srp:install', (_, serverId: string, approvedIds: string[], inputs?: unknown) => acSafe(async () => ({ result: await acPlayerService.install(serverId, Array.isArray(approvedIds) ? approvedIds.filter((x) => typeof x === 'string') : [], cleanInstallInputs(inputs)) })));
+  ipcMain.handle('assettocorsa:srp:cancelInstall', () => acPlayerService.cancelInstall());
+  ipcMain.handle('assettocorsa:srp:isInstalling', () => acPlayerService.isInstalling());
+  ipcMain.handle('assettocorsa:srp:status', (_, serverId: string, force?: boolean) => acSafe(async () => ({ status: await acPlayerService.status(serverId, !!force) })));
+  ipcMain.handle('assettocorsa:srp:joinStatus', (_, serverId: string) => acSafe(async () => ({ join: await acPlayerService.joinStatus(serverId) })));
+  ipcMain.handle('assettocorsa:srp:join', (_, serverId: string) => acPlayerService.join(serverId).catch((e: any) => ({ success: false, error: e?.message || 'Could not start the join.' })));
+  ipcMain.handle('assettocorsa:srp:getEndpoints', (_, serverId: string) => acSafe(() => ({ settings: acPlayerService.getLocalEndpoints(serverId) })));
+  ipcMain.handle('assettocorsa:srp:setEndpoints', (_, serverId: string, patch: Record<string, unknown>) => acSafe(() => {
+    const r = acPlayerService.setLocalEndpoints(serverId, patch as any);
+    if (!r.success) throw new Error(r.error);
+    return {};
+  }));
+  ipcMain.handle('assettocorsa:srp:diagnostics', () => acSafe(async () => ({ diagnostics: await acPlayerService.diagnostics() })));
+  ipcMain.handle('assettocorsa:srp:setAcRoot', (_, dir: string | null) => acPlayerService.setAcRootOverride(dir));
+  ipcMain.handle('assettocorsa:srp:pickArchive', async () => {
+    const r = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], filters: [{ name: 'Archives', extensions: ['7z', 'zip'] }, { name: 'All files', extensions: ['*'] }] });
+    return r.canceled ? null : r.filePaths[0];
+  });
+  ipcMain.handle('assettocorsa:srp:pickFolder', async () => {
+    const r = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory'] });
+    return r.canceled ? null : r.filePaths[0];
+  });
+  ipcMain.handle('assettocorsa:srp:storage', () => acSafe(async () => ({ storage: await acPlayerService.storageInfo() })));
+  ipcMain.handle('assettocorsa:srp:deleteDownloads', () => acPlayerService.deleteDownloads());
+  ipcMain.handle('assettocorsa:srp:deleteBackup', (_, id: string) => acPlayerService.deleteBackup(id));
+  ipcMain.handle('assettocorsa:srp:validateTrackArchive', (_, archivePath: string, trackId?: string) => acSafe(async () => ({ validation: await acPlayerService.validateTrackArchive(String(archivePath), typeof trackId === 'string' ? trackId : undefined) })));
+  // Server catalog (signed, synced). The renderer may only ask for a manual or section-open refresh; startup/periodic are main-only.
+  ipcMain.handle('assettocorsa:catalog:status', () => acSafe(() => ({ status: acPlayerService.catalogStatus() })));
+  ipcMain.handle('assettocorsa:catalog:refresh', (_, reason?: string) => acSafe(async () => ({ result: await acPlayerService.refreshCatalog(reason === 'section-open' ? 'section-open' : 'manual'), status: acPlayerService.catalogStatus() })));
+  ipcMain.handle('assettocorsa:catalog:getSettings', () => acSafe(() => ({ settings: acPlayerService.getCatalogSettings() })));
+  ipcMain.handle('assettocorsa:catalog:setSettings', (_, patch: Record<string, unknown>) => acSafe(() => {
+    const r = acPlayerService.setCatalogSettings(patch && typeof patch === 'object' ? patch : {});
+    return { settings: r.settings, errors: r.errors, status: acPlayerService.catalogStatus() };
+  }));
+  ipcMain.handle('assettocorsa:catalog:reset', () => acSafe(() => ({ status: acPlayerService.resetCatalog() })));
+  ipcMain.handle('assettocorsa:catalog:contentStatus', (_, serverId: string) => acSafe(async () => ({ content: await acPlayerService.contentStatus(serverId) })));
+  ipcMain.handle('assettocorsa:catalog:readiness', (_, serverId: string) => acSafe(async () => { const content = await acPlayerService.contentStatus(serverId); return { content, readiness: await acPlayerService.readiness(serverId, content) }; }));
+  ipcMain.handle('assettocorsa:srp:testEndpoint', (_, serverId: string, scope: 'lan' | 'public') => acSafe(async () => ({ test: await acPlayerService.testEndpoint(serverId, scope === 'lan' ? 'lan' : 'public') })));
+  // Reveal a backup the installer made — only paths inside the game's own .mercy-backups folder.
+  ipcMain.handle('assettocorsa:srp:revealBackup', async (_, target: string) => {
+    const { root } = await acPlayerService.resolveAcRoot();
+    if (!root || typeof target !== 'string') return false;
+    const allowed = path.resolve(root, 'content', '.mercy-backups') + path.sep;
+    const resolved = path.resolve(target);
+    if (!(resolved + path.sep).startsWith(allowed)) return false;
+    shell.showItemInFolder(resolved);
+    return true;
+  });
 
   // Game Library — real, read-only game detection (see GameScanner.ts's own header comment).
   ipcMain.handle('games:scan', () => gameScanner.scan());

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0.0",
+  "note": "RELEASE-FACING DEFAULTS for the server-catalog sync. Nothing is invented: baseUrl stays null (no catalog) and trustedKeys stays empty until the owner supplies the real https address of the published catalog and the PUBLIC Ed25519 signing key (never the private key). Only a public https address may be written here — a private/LAN address is rejected by test/assettocorsa/catalog-docs.test.js. Players can still override both in Setup & Diagnostics.",
+  "baseUrl": null,
+  "trustedKeys": []
+}

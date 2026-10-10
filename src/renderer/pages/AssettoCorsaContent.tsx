@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Package, Car, Map as MapIcon, FolderOpen, Upload, Loader2, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { Panel, SectionHeading, EmptyState } from '../components/ui';
+import AcSectionNav from '../components/AcSectionNav';
 import toast from 'react-hot-toast';
 
 type Tab = 'cars' | 'tracks';
@@ -69,6 +70,7 @@ export default function AssettoCorsaContent() {
         <button onClick={() => navigate('/assetto-corsa')} className="p-2 rounded-lg text-surface-500 hover:text-surface-100 hover:bg-overlay-6 transition-colors"><ArrowLeft size={16} /></button>
         <SectionHeading icon={Package} iconClass="bg-blue-500/15 border-blue-500/25 text-blue-300" title="Content Library" subtitle="Cars and tracks you already have installed" />
       </div>
+      <AcSectionNav />
 
       <Panel className="flex items-center gap-3">
         <FolderOpen size={16} className="text-surface-500 shrink-0" />
