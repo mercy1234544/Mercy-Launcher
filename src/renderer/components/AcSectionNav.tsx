@@ -1,14 +1,13 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Server, Globe2, Wrench } from 'lucide-react';
+import { Globe2, Wrench } from 'lucide-react';
 
-// The one navigation strip shared by every Assetto Corsa page, so the three halves of the game's area
-// read as ONE section instead of unrelated pages:
-//   My Servers          — dedicated servers YOU host and manage (create, import, start/stop, content library)
-//   Mercy's Servers     — OFFICIAL servers run by Mercy that you join (requirements check, install, join)
-//   Setup & Diagnostics — your game install, CSP, companion app, connection endpoints, troubleshooting
+// The navigation strip shared by every Assetto Corsa page:
+//   Mercy's Servers     — OFFICIAL servers run by Mercy that you join (status, missing content, Join)
+//   Setup & Diagnostics — your game install, server catalog, CSP, connection endpoints, troubleshooting
+// There is deliberately no "My Servers" tab here: hosting your own server stays reachable from the game's card on
+// Home (the /assetto-corsa pages and routes are unchanged), but it no longer competes with the server browser.
 export const AC_NAV_TABS = [
-  { id: 'my', label: 'My Servers', hint: 'Servers you host', path: '/assetto-corsa', icon: Server, match: (p: string) => p.startsWith('/assetto-corsa') && !p.startsWith('/assetto-corsa/setup') },
   { id: 'mercy', label: "Mercy's Servers", hint: 'Official servers you join', path: '/mercy-servers/assettocorsa', icon: Globe2, match: (p: string) => p.startsWith('/mercy-servers/assettocorsa') },
   { id: 'setup', label: 'Setup & Diagnostics', hint: 'Your game install & troubleshooting', path: '/assetto-corsa/setup', icon: Wrench, match: (p: string) => p.startsWith('/assetto-corsa/setup') },
 ] as const;

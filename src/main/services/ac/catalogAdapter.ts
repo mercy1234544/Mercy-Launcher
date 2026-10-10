@@ -76,8 +76,11 @@ export function catalogToBundle(cat: AcCatalog, base: SrpBundle): AdaptedCatalog
     serverStatus[s.id] = s.status ?? 'active';
     if (s.status === 'retired') continue;
     const pub = s.connection.public; const lan = s.connection.lan;
-    const gamePort = pub?.gamePort ?? s.connection.ports?.gamePort ?? lan?.gamePort;
-    const httpPort = pub?.httpPort ?? s.connection.ports?.httpPort ?? lan?.httpPort;
+    // Ports come from the catalog. If it gives none (no public endpoint and no connection.ports), the PORTS the owner
+    // shipped in the launcher's own package for the same server id are kept — never a host, never an address.
+    const builtinGame = base.servers.find((x) => x.server.id === s.id)?.server.game;
+    const gamePort = pub?.gamePort ?? s.connection.ports?.gamePort ?? lan?.gamePort ?? builtinGame?.tcpPort;
+    const httpPort = pub?.httpPort ?? s.connection.ports?.httpPort ?? lan?.httpPort ?? builtinGame?.httpPort;
     release.servers[s.id] = { host: pub?.host ?? null, tcpPort: pub?.gamePort ?? null, httpPort: pub?.httpPort ?? null };
     if (cat.catalog.environment === 'development' && lan) lanDefaults[s.id] = { host: lan.host };
 

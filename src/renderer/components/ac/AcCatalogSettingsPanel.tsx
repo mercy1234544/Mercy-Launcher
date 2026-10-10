@@ -20,12 +20,14 @@ export default function AcCatalogSettingsPanel({ onChanged }: { onChanged: () =>
   const [busy, setBusy] = useState<'save' | 'refresh' | 'reset' | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [servers, setServers] = useState<AcMercyServerProfile[]>([]);
 
   const apply = (s: AcCatalogSettings) => { setSettings(s); setUrl(s.baseUrl ?? ''); setKeys(s.trustedKeys); };
   const load = useCallback(async () => {
     const [c, st] = await Promise.all([api.getCatalogSettings(), api.catalogStatus()]);
     if (c.success) apply(c.settings);
     if (st.success) setStatus(st.status);
+    try { setServers(await api.listSrpServers()); } catch { /* the list is optional here */ }
   }, []);
   useEffect(() => { load(); const off = api.onCatalogEvent((e) => setStatus(e.status)); const t = setInterval(() => setNow(Date.now()), 30_000); return () => { off(); clearInterval(t); }; }, [load]);
 
@@ -103,11 +105,22 @@ export default function AcCatalogSettingsPanel({ onChanged }: { onChanged: () =>
             <label key={m} className={`flex items-start gap-3 p-2.5 rounded-xl border cursor-pointer ${settings.installMode === m ? 'border-primary-500/30 bg-primary-500/5' : 'border-overlay-6 hover:bg-overlay-4'}`}>
               <input type="radio" name="install-mode" className="mt-0.5 accent-primary-500" checked={settings.installMode === m} onChange={() => save({ installMode: m }, true)} />
               <span><span className="text-xs font-semibold text-surface-100">{m === 'review' ? 'Review before install (default)' : 'Install automatically'}</span>
-                <span className="block text-[11px] text-surface-400 mt-0.5">{m === 'review' ? 'Metadata updates on its own; content only installs after you approve it.' : 'For servers you mark "keep ready" on their card.'}</span></span>
+                <span className="block text-[11px] text-surface-400 mt-0.5">{m === 'review' ? 'Metadata updates on its own; content only installs after you approve it.' : 'For the servers you tick below.'}</span></span>
             </label>
           ))}
         </div>
         <p className="text-[11px] text-surface-400" data-testid="install-mode-explanation">{installModeExplanation(settings.installMode, settings.autoUpdateExisting, settings.maxAutoDownloadBytes)}</p>
+        {settings.installMode === 'auto' && servers.length > 0 && (
+          <div className="space-y-1.5" data-testid="keep-ready-list">
+            <p className="text-[11px] text-surface-400">Keep these servers ready automatically (nothing is installed for a server you leave unticked):</p>
+            {servers.map((sv) => (
+              <label key={sv.id} className="flex items-center gap-2 text-[11px] text-surface-300 cursor-pointer">
+                <input type="checkbox" className="accent-primary-500" checked={settings.autoServers.includes(sv.id)}
+                  onChange={(e) => save({ autoServers: e.target.checked ? [...settings.autoServers, sv.id] : settings.autoServers.filter((x) => x !== sv.id) }, true)} /> {sv.name}
+              </label>
+            ))}
+          </div>
+        )}
         {settings.installMode === 'auto' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="flex items-start gap-2 text-[11px] text-surface-300"><input type="checkbox" className="mt-0.5 accent-primary-500" checked={settings.autoUpdateExisting} onChange={(e) => save({ autoUpdateExisting: e.target.checked }, true)} /> Also update content I already have (a backup is always kept)</label>

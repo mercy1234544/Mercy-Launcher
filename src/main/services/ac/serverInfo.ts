@@ -14,6 +14,10 @@ export interface ServerInfoResult {
   players?: number;
   maxPlayers?: number;
   name?: string;
+  /** What the server itself says it is running / listening on (from its own /INFO page). */
+  track?: string;
+  tcpPort?: number;
+  udpPort?: number;
   reason?: string;
 }
 
@@ -31,7 +35,7 @@ export function probeServerInfo(host: string, httpPort: number, timeoutMs = 3000
           try {
             const j = JSON.parse(Buffer.concat(chunks).toString('utf8'));
             const players = Number(j.clients); const max = Number(j.maxclients);
-            finish({ online: true, players: Number.isFinite(players) ? players : undefined, maxPlayers: Number.isFinite(max) ? max : undefined, name: typeof j.name === 'string' ? j.name : undefined });
+            finish({ online: true, players: Number.isFinite(players) ? players : undefined, maxPlayers: Number.isFinite(max) ? max : undefined, name: typeof j.name === 'string' ? j.name : undefined, track: typeof j.track === 'string' ? j.track : undefined, tcpPort: Number.isInteger(j.tport) ? j.tport : undefined, udpPort: Number.isInteger(j.port) ? j.port : undefined });
           } catch { finish({ online: false, reason: 'The server answered, but not with a readable status page.' }); }
         });
         res.on('error', () => finish({ online: false, reason: 'The connection was interrupted.' }));

@@ -191,6 +191,14 @@ function initializeServices() {
     documentsAcDir: () => path.join(app.getPath('documents'), 'Assetto Corsa'),
     broadcast: (channel, data) => mainWindow?.webContents.send(channel, data),
     isContentManagerAvailable: () => !!app.getApplicationNameForProtocol('acmanager://race/online/join'),
+    // The real file Windows runs for acmanager:// links (read from the registry), so a stale registration is detected.
+    contentManagerExe: () => {
+      try {
+        const out = require('child_process').execFileSync('reg', ['query', 'HKCU\\Software\\Classes\\acmanager\\shell\\open\\command', '/ve'], { encoding: 'utf8', windowsHide: true, timeout: 3000 }) as string;
+        const m = /"([^"]+)"/.exec(out);
+        return m ? m[1] : null;
+      } catch { return null; }
+    },
     openExternal: (url) => shell.openExternal(url),
   });
   // Fetch the server catalog at startup (a no-op until the owner configures an address) and keep it fresh in the background.
@@ -489,7 +497,9 @@ function registerIpcHandlers() {
   ipcMain.handle('assettocorsa:srp:isInstalling', () => acPlayerService.isInstalling());
   ipcMain.handle('assettocorsa:srp:status', (_, serverId: string, force?: boolean) => acSafe(async () => ({ status: await acPlayerService.status(serverId, !!force) })));
   ipcMain.handle('assettocorsa:srp:joinStatus', (_, serverId: string) => acSafe(async () => ({ join: await acPlayerService.joinStatus(serverId) })));
-  ipcMain.handle('assettocorsa:srp:join', (_, serverId: string) => acPlayerService.join(serverId).catch((e: any) => ({ success: false, error: e?.message || 'Could not start the join.' })));
+  ipcMain.handle('assettocorsa:srp:join', (_, serverId: string) => acPlayerService.join(serverId).catch((e: any) => ({ success: false, stage: 'blocked' as const, error: e?.message || 'Could not start the join.', check: null })));
+  ipcMain.handle('assettocorsa:srp:joinCheck', (_, serverId: string) => acSafe(async () => ({ check: await acPlayerService.joinCheck(serverId) })));
+  ipcMain.handle('assettocorsa:srp:adoptCatalogHost', () => acSafe(async () => ({ adopt: await acPlayerService.adoptCatalogHost() })));
   ipcMain.handle('assettocorsa:srp:getEndpoints', (_, serverId: string) => acSafe(() => ({ settings: acPlayerService.getLocalEndpoints(serverId) })));
   ipcMain.handle('assettocorsa:srp:setEndpoints', (_, serverId: string, patch: Record<string, unknown>) => acSafe(() => {
     const r = acPlayerService.setLocalEndpoints(serverId, patch as any);

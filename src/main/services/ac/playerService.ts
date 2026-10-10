@@ -18,7 +18,9 @@ import { buildInstallPlan, executeInstall, listInterruptedInstalls, type Install
 import { findArchiveTool } from './archive';
 import { probeServerInfo, type ServerInfoResult } from './serverInfo';
 import { validateTrackArchive, type TrackArchiveValidation } from './trackValidation';
-import { diagnoseEndpoint, type DiagnoseDeps, type EndpointDiagnosis } from './endpointDiagnostics';
+import { defaultTcpProbe, diagnoseEndpoint, type DiagnoseDeps, type EndpointDiagnosis } from './endpointDiagnostics';
+import { buildJoinCheck, identityMatches, type JoinCheck } from './joinCheck';
+import { checkBaseUrl } from './catalogClient';
 import { CatalogSettingsStore, CatalogSync, type CatalogEvent, type CatalogSettings, type CatalogStatus, type SyncReason, type SyncResult } from './catalogSync';
 import type { Transport } from './catalogClient';
 import type { AdaptedCatalog } from './catalogAdapter';
@@ -32,6 +34,10 @@ export interface PlayerServiceDeps {
   documentsAcDir: () => string;
   broadcast: (channel: string, data: unknown) => void;
   isContentManagerAvailable: () => boolean;
+  /** Where Windows says Content Manager lives (the acmanager:// handler's executable), or null. Used to prove the launch path is real. */
+  contentManagerExe?: () => string | null;
+  /** Tests: replace the real TCP connect used to test a server's game port. */
+  tcpProbe?: (host: string, port: number, timeoutMs: number) => Promise<{ ok: boolean; code?: string }>;
   openExternal: (url: string) => Promise<void>;
   bundle?: SrpBundle;
   release?: ReleaseEndpointsFile;
@@ -271,17 +277,82 @@ export class AcPlayerService {
     return { canJoin: blockers.length === 0, blockers, via: choice.endpoint?.scope ?? null, port: choice.endpoint?.tcpPort ?? null, reason: choice.reason, unverified: true };
   }
 
-  /** Re-validates everything, then hands the join link to Content Manager. Never claims the connection succeeded. */
-  async join(id: string): Promise<{ success: boolean; error?: string; note?: string }> {
-    const js = await this.joinStatus(id);
-    if (!js.canJoin) return { success: false, error: js.blockers[0] ?? 'Not ready to join.' };
+  /**
+   * The full, fact-based answer to "can I join this server now?": address, the server's own status page (and that it
+   * is the RIGHT server), a TCP test of its game port, Assetto Corsa, Content Manager, CSP and the required content.
+   * Returns ONE of ready / missing / unavailable plus the exact reasons. Nothing here changes anything.
+   */
+  async joinCheck(id: string): Promise<JoinCheck> { return (await this.runJoinCheck(id)).check; }
+
+  private async runJoinCheck(id: string): Promise<{ check: JoinCheck; endpoint: AcEndpoint | null }> {
+    const s = this.server(id);
     const ep = this.endpointsFor(id);
-    const lanOk = ep.lan ? (await (this.deps.probe ?? probeServerInfo)(ep.lan.host, ep.lan.httpPort, 1500)).online : null;
-    const choice = chooseJoinEndpoint(ep, lanOk);
-    if (!choice.endpoint) return { success: false, error: choice.reason };
-    this.log(`join requested for ${id} via ${choice.endpoint.scope} endpoint (port ${choice.endpoint.tcpPort})`, [ep.lan?.host, ep.public?.host]);
-    await this.deps.openExternal(buildJoinUrl(choice.endpoint));
-    return { success: true, note: 'The join request was handed to Content Manager. Whether the connection succeeds has not been verified by Mercy Launcher.' };
+    const probe = this.deps.probe ?? probeServerInfo;
+    const tcpProbe = this.deps.tcpProbe ?? defaultTcpProbe;
+    const lanReachable = ep.lan ? (await probe(ep.lan.host, ep.lan.httpPort, 1500)).online : null;
+    const choice = chooseJoinEndpoint(ep, lanReachable);
+    const chosen = choice.endpoint;
+    const [info, tcp] = chosen ? await Promise.all([probe(chosen.host, chosen.httpPort, 3000), tcpProbe(chosen.host, chosen.tcpPort, 3000)]) : [null, null];
+    const content = await this.contentStatus(id);
+    const exe = this.deps.contentManagerExe?.() ?? null;
+    const base = checkBaseUrl(this.catalogSettings.get().baseUrl);
+    const catalogHostIsPrivate = base.ok && base.privateHost && classifyHost(new URL(base.base).hostname) === 'private-lan';
+    const check = buildJoinCheck({
+      serverId: id, serverName: s.server.displayName, expectedTrack: { trackId: s.track.id, layout: s.track.layout },
+      content, endpoints: ep, chosen, chosenReason: choice.reason, info, tcp,
+      contentManager: { available: this.deps.isContentManagerAvailable(), exePath: exe, exeExists: exe ? fs.existsSync(exe) : null },
+      source: this.sync.usingCatalog() ? 'catalog' : 'builtin', catalogHostIsPrivate, portsKnown: !!s.server.game,
+    });
+    return { check, endpoint: chosen };
+  }
+
+  /**
+   * Hands the join link to Content Manager, but only after a fresh joinCheck says Ready. The result says exactly how far it
+   * got: 'blocked' (a check failed; nothing was launched), 'launch' (the hand-off itself failed) or 'handed-off' (the OS
+   * accepted the link). It never claims the game connected: that is not observable from here.
+   */
+  async join(id: string): Promise<{ success: boolean; stage: 'blocked' | 'launch' | 'handed-off'; error?: string; note?: string; check: JoinCheck }> {
+    const { check, endpoint } = await this.runJoinCheck(id);
+    if (!check.canJoin || !endpoint) {
+      const first = check.issues.find((x) => x.severity === 'blocker');
+      return { success: false, stage: 'blocked', error: first ? `${first.title}. ${first.detail}` : 'Not ready to join.', check };
+    }
+    const hosts = [endpoint.host, this.endpointsFor(id).lan?.host, this.endpointsFor(id).public?.host];
+    this.log(`join requested for ${id} via ${endpoint.scope} endpoint (http port ${endpoint.httpPort})`, hosts);
+    try { await this.deps.openExternal(buildJoinUrl(endpoint)); }
+    catch (e: any) {
+      this.log(`join hand-off failed for ${id}: ${e?.message ?? 'unknown error'}`, hosts);
+      return { success: false, stage: 'launch', error: `Content Manager could not be opened (${redactForLog(String(e?.message ?? 'unknown error'), hosts)}). Check that Content Manager still starts, then try again.`, check };
+    }
+    this.log(`join link handed to Content Manager for ${id}`, hosts);
+    return { success: true, stage: 'handed-off', note: 'The join request was handed to Content Manager, which should open and start the game. Mercy Launcher cannot see whether the connection then succeeds.', check };
+  }
+
+  /**
+   * For the owner at home: the catalog is served from a private address, on the same machine as the game servers. This
+   * tries that address for every server that has no address yet, and keeps it (as THIS PC's LAN address only) ONLY where
+   * the server's own status page answers there AND names the expected server. Nothing is invented or published.
+   */
+  async adoptCatalogHost(): Promise<{ host: boolean; results: { serverId: string; name: string; adopted: boolean; reason: string }[] }> {
+    const base = checkBaseUrl(this.catalogSettings.get().baseUrl);
+    const results: { serverId: string; name: string; adopted: boolean; reason: string }[] = [];
+    if (!base.ok || !base.privateHost) return { host: false, results };
+    const host = new URL(base.base).hostname;
+    if (classifyHost(host) !== 'private-lan') return { host: false, results };
+    const probe = this.deps.probe ?? probeServerInfo;
+    for (const s of this.bundle.servers) {
+      const id = s.server.id; const name = s.server.displayName;
+      const cur = this.endpointsFor(id);
+      if (cur.public || cur.lan) { results.push({ serverId: id, name, adopted: false, reason: 'Already has an address.' }); continue; }
+      if (!s.server.game) { results.push({ serverId: id, name, adopted: false, reason: 'The catalog gives no ports for this server.' }); continue; }
+      const info = await probe(host, s.server.game.httpPort, 3000);
+      if (!info.online) { results.push({ serverId: id, name, adopted: false, reason: 'Nothing answered there for this server.' }); continue; }
+      if (identityMatches(info.name, name) !== 'match') { results.push({ serverId: id, name, adopted: false, reason: 'Something answered, but not this server, so it was not used.' }); continue; }
+      const r = this.setLocalEndpoints(id, { lanHost: host });
+      results.push({ serverId: id, name, adopted: r.success, reason: r.success ? 'Connected over your home network.' : (r.error ?? 'Could not save.') });
+    }
+    this.statusCache.clear();
+    return { host: true, results };
   }
 
   // ── server catalog (signed, synced) ──────────────────────────────────────────

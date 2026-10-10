@@ -6,6 +6,8 @@ import toast from 'react-hot-toast';
 import { Panel, SectionHeading } from '../components/ui';
 import AcSectionNav from '../components/AcSectionNav';
 import AcCatalogSettingsPanel from '../components/ac/AcCatalogSettingsPanel';
+import AcReadinessPanel from '../components/ac/AcReadinessPanel';
+import AcRequirementsPanel from '../components/ac/AcRequirementsPanel';
 import { summarizeReport, TONE_CLASSES } from '../lib/acMercyView';
 
 function Row({ label, value, tone }: { label: string; value: React.ReactNode; tone?: 'good' | 'warn' | 'bad' | 'neutral' }) {
@@ -134,6 +136,7 @@ export default function AssettoCorsaSetup() {
   const [profiles, setProfiles] = useState<AcMercyServerProfile[]>([]);
   const [reports, setReports] = useState<Record<string, AcRequirementsReport | null>>({});
   const [loading, setLoading] = useState(true);
+  const [openDetail, setOpenDetail] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -188,14 +191,23 @@ export default function AssettoCorsaSetup() {
 
         <Panel>
           <h2 className="text-sm font-bold text-surface-100 mb-1">Content verification</h2>
-          <p className="text-[11px] text-surface-500 mb-2">A read-only check of your install against each official server (the same one the server cards run). Open a server for the full report and its fixes.</p>
+          <p className="text-[11px] text-surface-500 mb-2">A read-only check of your install against each official server. Technical detail lives here; the server list shows only what you need to join.</p>
           {profiles.map((p) => {
             const s = summarizeReport(reports[p.id] ?? null);
             return (
-              <div key={p.id} className="flex items-center gap-3 py-2 border-b border-overlay-6 last:border-0">
-                <p className="text-xs font-semibold text-surface-100 w-40 shrink-0">{p.name}</p>
-                <span className={`text-[11px] px-2.5 py-0.5 rounded-full border ${TONE_CLASSES[s.tone].chip}`}>{s.headline}</span>
-                <button onClick={() => navigate('/mercy-servers/assettocorsa')} className="ml-auto text-[11px] text-primary-300 hover:text-primary-200">Open</button>
+              <div key={p.id} className="py-2 border-b border-overlay-6 last:border-0" data-testid={`verification-${p.id}`}>
+                <div className="flex items-center gap-3">
+                  <p className="text-xs font-semibold text-surface-100 w-40 shrink-0">{p.name}</p>
+                  <span className={`text-[11px] px-2.5 py-0.5 rounded-full border ${TONE_CLASSES[s.tone].chip}`}>{s.headline}</span>
+                  <button onClick={() => setOpenDetail((v) => (v === p.id ? null : p.id))} className="ml-auto text-[11px] text-surface-400 hover:text-surface-100" aria-expanded={openDetail === p.id}>{openDetail === p.id ? 'Hide full report' : 'Full report'}</button>
+                  <button onClick={() => navigate('/mercy-servers/assettocorsa')} className="text-[11px] text-primary-300 hover:text-primary-200">Open</button>
+                </div>
+                {openDetail === p.id && (
+                  <div className="mt-3 space-y-4 pl-1" data-testid="full-report">
+                    <AcReadinessPanel serverId={p.id} />
+                    {reports[p.id] && <AcRequirementsPanel report={reports[p.id]!} plan={null} onAction={() => undefined} />}
+                  </div>
+                )}
               </div>
             );
           })}

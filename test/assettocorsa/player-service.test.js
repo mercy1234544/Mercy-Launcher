@@ -39,7 +39,8 @@ const LAN = '192.168.55.10', PUB = 'play.example.com';
   const mkSvc = (fx, over = {}) => new AcPlayerService({
     userDataPath: tmp('ud-'), detectAcRoot: async () => fx.ac, documentsAcDir: () => fx.docs, bundle, release,
     broadcast: (c, d) => calls.broadcast.push([c, d]), isContentManagerAvailable: () => true, openExternal: async (u) => { calls.opened.push(u); },
-    probe: async (h, p) => { calls.probe.push([h, p]); return { online: true, checkedAt: new Date().toISOString(), players: 5, maxPlayers: 32, name: 'x' }; },
+    probe: async (h, p) => { calls.probe.push([h, p]); return { online: true, checkedAt: new Date().toISOString(), players: 5, maxPlayers: 32, name: 'Fixture Traffic' }; },
+    tcpProbe: async () => ({ ok: true }),
     isGameRunning: async () => false, allowLoopbackHttp: true, resolver: async () => ['203.0.113.7'], ...over });
 
   // ── join gating ───────────────────────────────────────────────────────────
@@ -48,7 +49,7 @@ const LAN = '192.168.55.10', PUB = 'play.example.com';
   ok('JOIN: all requirements met + a public endpoint + Content Manager present → can join, and it is flagged unverified', jsA.canJoin === true && jsA.via === 'public' && jsA.port === 9650 && jsA.unverified === true);
   calls.opened.length = 0;
   const joinA = await svcA.join('t2');
-  ok('JOIN: hands exactly one acmanager:// link (public host + the server\'s HTTP port) to Content Manager and does NOT claim the connection worked', joinA.success && calls.opened.length === 1 && calls.opened[0] === `acmanager://race/online/join?ip=${PUB}&httpPort=8090` && /has not been verified/.test(joinA.note));
+  ok('JOIN: hands exactly one acmanager:// link (public host + the server\'s HTTP port) to Content Manager and does NOT claim the connection worked', joinA.success && calls.opened.length === 1 && calls.opened[0] === `acmanager://race/online/join?ip=${PUB}&httpPort=8090` && /cannot see whether the connection then succeeds/.test(joinA.note) && joinA.stage === 'handed-off');
 
   const fxB = ready(); fs.rmSync(path.join(fxB.ac, 'content', 'cars', 'car_b'), { recursive: true });
   calls.opened.length = 0; const svcB = mkSvc(fxB);

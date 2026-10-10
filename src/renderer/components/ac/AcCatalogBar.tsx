@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Loader2, CloudOff, Cloud, AlertTriangle, ListChecks, X, ShieldCheck, Settings2 } from 'lucide-react';
+import { RefreshCw, Loader2, AlertTriangle, ListChecks, X, CheckCircle2, Info } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { Panel } from '../ui';
-import { catalogBar, catalogErrorHelp, TONE_CLASSES } from '../../lib/acMercyView';
+import { catalogErrorHelp, relativeTime, TONE_CLASSES } from '../../lib/acMercyView';
+import { stripView } from '../../lib/acJoinView';
 
 interface Props {
   /** Called when the catalog contents changed (servers added/removed/updated) so the page can reload its list. */
@@ -12,27 +12,21 @@ interface Props {
   refreshOnOpen?: boolean;
 }
 
-// Where the server list came from and how fresh it is: the last successful sync, any problem, what changed, and a
-// manual Refresh. It never hides a failure behind old data — if the list is stale, built-in or expired it says so.
+// The slim line above the server list: how fresh the list is, a Refresh button, and a link to Setup only when something
+// needs fixing. Signature, key and address details live in Setup & Diagnostics; failures are never hidden behind old data.
 export default function AcCatalogBar({ onCatalogChanged, refreshOnOpen }: Props) {
   const api = window.electronAPI.assettoCorsa;
   const navigate = useNavigate();
   const [status, setStatus] = useState<AcCatalogStatus | null>(null);
-  const [settings, setSettings] = useState<AcCatalogSettings | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
   const [changes, setChanges] = useState<string[]>([]);
   const [autoNote, setAutoNote] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
   const changed = useRef(onCatalogChanged);
   changed.current = onCatalogChanged;
 
-  const load = useCallback(async () => {
-    try {
-      const [s, c] = await Promise.all([api.catalogStatus(), api.getCatalogSettings()]);
-      if (s.success) setStatus(s.status);
-      if (c.success) setSettings(c.settings);
-    } catch { /* the bar is informational; the list below still works */ }
-  }, []);
+  const load = useCallback(async () => { try { const s = await api.catalogStatus(); if (s.success) setStatus(s.status); } catch { /* informational only */ } }, []);
 
   useEffect(() => {
     load();
@@ -60,48 +54,41 @@ export default function AcCatalogBar({ onCatalogChanged, refreshOnOpen }: Props)
       if (!r.success) { toast.error(r.error); return; }
       setStatus(r.status);
       const o = r.result;
-      if (o.outcome === 'updated') toast.success(o.changed ? 'Server catalog updated.' : 'Server catalog refreshed.');
+      if (o.outcome === 'updated') toast.success(o.changed ? 'Server list updated.' : 'Server list refreshed.');
       else if (o.outcome === 'unchanged') toast.success('Already up to date.');
-      else if (o.outcome === 'unconfigured') toast('No catalog address is set yet. Add it in Setup & Diagnostics.');
-      else if (o.outcome === 'skipped') toast('Just refreshed — try again in a moment.');
-      else toast.error(o.error?.message ?? 'Could not refresh the catalog.');
-    } catch (e: any) { toast.error(e?.message || 'Could not refresh the catalog.'); }
+      else if (o.outcome === 'unconfigured') toast('The live server list is not set up yet.');
+      else if (o.outcome === 'skipped') toast('Just refreshed. Try again in a moment.');
+      else toast.error(o.error?.message ?? 'Could not refresh the server list.');
+    } catch (e: any) { toast.error(e?.message || 'Could not refresh the server list.'); }
     finally { setRefreshing(false); }
   };
 
-  const v = catalogBar(status, now, settings);
-  const Icon = !status || !status.configured || status.source === 'builtin' ? CloudOff : v.tone === 'good' ? Cloud : AlertTriangle;
+  const v = stripView(status, (iso) => relativeTime(iso, now));
+  const help = catalogErrorHelp(status?.lastError);
+  const Icon = v.tone === 'good' ? CheckCircle2 : v.tone === 'neutral' ? Info : AlertTriangle;
+  const unsafe = status?.environment === 'development' || status?.unsignedDev;
   return (
-    <Panel padding="sm" className="space-y-2" data-testid="catalog-bar">
-      <div className="flex items-center gap-3 flex-wrap">
-        <Icon size={15} className={`${TONE_CLASSES[v.tone].text} shrink-0`} />
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold text-surface-100 flex items-center gap-2 flex-wrap">
-            {v.title}
-            {v.badges.map((b) => <span key={b.label} title={b.title} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${TONE_CLASSES[b.tone].chip}`}>{b.label === 'Signature verified' ? <span className="inline-flex items-center gap-1"><ShieldCheck size={10} />{b.label}</span> : b.label}</span>)}
-          </p>
-          <p className="text-[11px] text-surface-400">{v.detail}</p>
-        </div>
-        <button onClick={() => navigate('/assetto-corsa/setup', { state: { focus: 'catalog' } })} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5" data-testid="open-catalog-settings" title="Catalog address and trusted signing keys">
-          <Settings2 size={12} /> {status?.configured ? 'Catalog settings' : 'Set up catalog'}
-        </button>
-        {v.canRefresh && (
-          <button onClick={refresh} disabled={refreshing || !!status?.syncing} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-50">
+    <div className="space-y-2" data-testid="catalog-bar">
+      <div className="flex items-center gap-2.5 flex-wrap rounded-xl border border-overlay-6 bg-surface-900/40 px-3 py-2">
+        <Icon size={14} className={`${TONE_CLASSES[v.tone].text} shrink-0`} />
+        <p className="text-xs text-surface-300 flex-1 min-w-0 basis-60">{v.text}{unsafe && <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-300 border-amber-500/25">{status?.unsignedDev ? 'UNSIGNED TEST LIST' : 'TEST LIST'}</span>}</p>
+        {help && <button onClick={() => setShowHelp((x) => !x)} className="text-[11px] text-surface-400 hover:text-surface-100 underline">{showHelp ? 'Hide' : 'Why?'}</button>}
+        {v.showSetup && <button onClick={() => navigate('/assetto-corsa/setup', { state: { focus: 'catalog' } })} className="text-[11px] font-semibold text-primary-300 hover:text-primary-200 underline" data-testid="open-catalog-settings">{v.setupLabel}</button>}
+        {status?.configured && (
+          <button onClick={refresh} disabled={refreshing || !!status?.syncing} className="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1.5 disabled:opacity-50" title="Refresh the server list">
             {refreshing || status?.syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Refresh
           </button>
         )}
       </div>
-      {v.warnings.map((w, i) => <p key={i} className="flex gap-2 text-[11px] text-amber-200/90"><AlertTriangle size={12} className="shrink-0 mt-0.5" />{w}</p>)}
-      {(() => { const h = catalogErrorHelp(status?.lastError); return h ? <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-2.5" data-testid="catalog-error-help"><p className="text-[11px] font-bold text-amber-200">{h.title}</p><p className="text-[11px] text-surface-300 mt-0.5">{h.hint}</p></div> : null; })()}
-      {status?.notices.map((n, i) => <p key={i} className="flex gap-2 text-[11px] text-sky-200/90"><ListChecks size={12} className="shrink-0 mt-0.5" />{n}</p>)}
+      {help && showHelp && <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-2.5" data-testid="catalog-error-help"><p className="text-[11px] font-bold text-amber-200">{help.title}</p><p className="text-[11px] text-surface-300 mt-0.5">{help.hint}</p></div>}
       {autoNote && <p className="flex gap-2 text-[11px] text-sky-200/90" data-testid="auto-install-note"><ListChecks size={12} className="shrink-0 mt-0.5" />{autoNote}<button onClick={() => setAutoNote(null)} className="ml-auto text-surface-500 hover:text-surface-200" aria-label="Dismiss"><X size={12} /></button></p>}
       {changes.length > 0 && (
         <div className="rounded-lg border border-sky-500/25 bg-sky-500/5 p-2.5" data-testid="catalog-changes">
           <div className="flex items-center gap-2"><p className="text-[11px] font-bold text-sky-200">What changed</p><button onClick={() => setChanges([])} className="ml-auto text-surface-500 hover:text-surface-200" aria-label="Dismiss"><X size={12} /></button></div>
           <ul className="mt-1 space-y-0.5 text-[11px] text-surface-300 list-disc ml-4">{changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
-          <p className="mt-1 text-[10px] text-surface-500">Nothing on your computer was removed. Content that left the catalog stays installed.</p>
+          <p className="mt-1 text-[10px] text-surface-500">Nothing on your computer was removed. Content that left the list stays installed.</p>
         </div>
       )}
-    </Panel>
+    </div>
   );
 }

@@ -215,7 +215,9 @@ interface ElectronAPI {
     isSrpInstalling: () => Promise<boolean>;
     srpStatus: (serverId: string, force?: boolean) => Promise<{ success: true; status: AcServerLiveStatus } | { success: false; error: string }>;
     srpJoinStatus: (serverId: string) => Promise<{ success: true; join: AcJoinStatus } | { success: false; error: string }>;
-    srpJoin: (serverId: string) => Promise<{ success: boolean; error?: string; note?: string }>;
+    srpJoin: (serverId: string) => Promise<{ success: boolean; stage: 'blocked' | 'launch' | 'handed-off'; error?: string; note?: string; check: AcJoinCheck | null }>;
+    srpJoinCheck: (serverId: string) => Promise<{ success: true; check: AcJoinCheck } | { success: false; error: string }>;
+    srpAdoptCatalogHost: () => Promise<{ success: true; adopt: { host: boolean; results: { serverId: string; name: string; adopted: boolean; reason: string }[] } } | { success: false; error: string }>;
     getSrpEndpoints: (serverId: string) => Promise<{ success: true; settings: AcLocalEndpoints } | { success: false; error: string }>;
     setSrpEndpoints: (serverId: string, patch: Partial<AcLocalEndpoints>) => Promise<{ success: boolean; error?: string }>;
     srpDiagnostics: () => Promise<{ success: true; diagnostics: AcDiagnostics } | { success: false; error: string }>;
@@ -672,6 +674,14 @@ declare global {
     schemaVersion: string; serverId: string; serverName: string; acRoot: string | null; checkedAt: string; deep: boolean;
     sections: Record<'install' | 'csp' | 'track' | 'cars' | 'companion' | 'conflicts', AcCheckItem[]>;
     summary: { pass: number; warn: number; fail: number; unknown: number; info: number; readyToJoin: boolean; incomplete: boolean; blockers: string[] };
+  }
+  interface AcJoinIssue { id: string; kind: 'connection' | 'game' | 'content-manager' | 'csp' | 'content'; severity: 'blocker' | 'note'; title: string; detail: string; fix?: { kind: 'install' | 'manual' | 'setup' | 'adopt-host' | 'retry'; label: string; planItemIds?: string[] } }
+  interface AcJoinCheck {
+    serverId: string; state: 'ready' | 'missing' | 'unavailable'; headline: string; checkedAt: string;
+    connection: { configured: boolean; scope: 'lan' | 'public' | null; infoOnline: boolean | null; identity: 'match' | 'mismatch' | 'unknown'; gamePortTcp: 'open' | 'closed' | 'untested'; players?: number; maxPlayers?: number; serverTrack?: string; reason: string };
+    issues: AcJoinIssue[];
+    missing: { id: string; name: string; state: 'installed' | 'missing' | 'outdated' | 'incompatible' | 'manual' | 'unknown'; detail: string; installable: boolean; planItemId?: string; required: boolean }[];
+    canJoin: boolean; unverified: true; canAdoptHost: boolean;
   }
   interface AcCatalogStatus {
     configured: boolean; source: 'catalog' | 'builtin'; syncing: boolean;

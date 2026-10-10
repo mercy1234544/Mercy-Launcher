@@ -54,6 +54,13 @@ status?: "active"|"maintenance"|"retired"
 
 **Archive** (`archives[]`): `id`, `name`, `fileName`, `format:"7z"|"zip"`, `bytes` (exact), `sha256` (64 lowercase hex of the file), `url` (https) or `null`, `allowedHosts:[host…]`, `provider:{name,homepage}`, `redistribution:"provider-official"|"owner-authorized"|"none"`.
 
+## 2a. What a server MUST publish to be joinable (found while testing the real catalog)
+A catalog entry with `connection.public: null` **and no `connection.ports`** gives the launcher nothing to connect to. The launcher then needs:
+- `connection.public` = `{ host, gamePort, httpPort }` for a real, reachable **public host name** (this is what remote players use), and/or
+- `connection.ports` = `{ gamePort, httpPort }` (host-less; safe in production) so a player who is given an address — for example the owner on the home network — still gets the right ports.
+
+The join link opened in Content Manager needs the server's **HTTP port** (Content Manager reads the rest from the server's own `/INFO`); the launcher also tests the **game TCP port**, so both ports must be reachable from the player's PC. The launcher verifies that `/INFO` answers with the same server name as `displayName` (AssettoServer may append text after it) before it will join. As a stop-gap, when a catalog gives no ports for a server id the launcher already knows (`main`, `server2`), it keeps the ports from its own built-in package; never a host. Publish the ports explicitly so this stop-gap is not needed.
+
 ## 3. How to compute the values (generate them — do not hand-maintain)
 - Car identity: SHA-256 of `content/cars/<id>/data.acd` and of `content/cars/<id>/ui/ui_car.json` (raw bytes). Track marker: SHA-256 of the marker file. Layout: SHA-256 of `ui/<config>/ui_track.json` (`ui/ui_track.json` when `config` is `""`). Archive: SHA-256 and byte size of the archive file.
 - Read the server's real configuration (`server_cfg.ini`, `entry_list.ini`, content folders) so the catalog cannot drift from what runs. **Refuse to publish** if a referenced car/track is missing, a hash cannot be computed, or the document fails the JSON Schema (`docs/ac-catalog.schema.json`).

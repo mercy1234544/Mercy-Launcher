@@ -97,16 +97,16 @@ ok('bar: syncing shows progress text', V.catalogBar(status({ syncing: true }), N
 
 // ── (B) static structure ──────────────────────────────────────────────────────
 const page = read('src/renderer/pages/AssettoCorsaMercyServers.tsx'), bar = read('src/renderer/components/ac/AcCatalogBar.tsx');
-const card = read('src/renderer/components/ac/AcServerCard.tsx'), modal = read('src/renderer/components/ac/AcInstallModal.tsx');
+const card = read('src/renderer/components/ac/AcServerRow.tsx'), modal = read('src/renderer/components/ac/AcInstallModal.tsx');
 const setup = read('src/renderer/pages/AssettoCorsaSetup.tsx'), panel = read('src/renderer/components/ac/AcCatalogSettingsPanel.tsx'), ready = read('src/renderer/components/ac/AcReadinessPanel.tsx');
 const preload = read('src/main/preload.ts'), mainTs = read('src/main/main.ts'), types = read('src/renderer/types/electron.d.ts');
 
 ok('PAGE: shows the catalog bar, refreshes on open and reloads the list when the catalog changes', /<AcCatalogBar refreshOnOpen onCatalogChanged=\{onCatalogChanged\}/.test(page) && /listSrpServers/.test(page) && /mercy:ac-content-changed/.test(page));
-ok('BAR: manual Refresh, last-synced text, change list, and it follows catalog events', /refreshCatalog\('manual'\)/.test(bar) && /refreshCatalog\('section-open'\)/.test(bar) && /onCatalogEvent/.test(bar) && /data-testid="catalog-changes"/.test(bar) && /catalogBar\(status, now, settings\)/.test(bar));
+ok('BAR: manual Refresh, last-synced text, change list, and it follows catalog events', /refreshCatalog\('manual'\)/.test(bar) && /refreshCatalog\('section-open'\)/.test(bar) && /onCatalogEvent/.test(bar) && /data-testid="catalog-changes"/.test(bar) && /stripView\(status/.test(bar));
 ok('BAR: tells the player nothing was removed when content leaves the catalog', /Nothing on your computer was removed/.test(bar));
 ok('BAR: automatic installs are announced and trigger a re-check', /onCatalogAutoInstall/.test(bar) && /mercy:ac-content-changed/.test(bar));
-ok('CARD: readiness panel + keep-ready opt-in (only offered in automatic mode)', /AcReadinessPanel/.test(card) && /Keep this server ready automatically/.test(card) && /keepReady\?\.auto/.test(card));
-ok('CARD: shows catalog track names and the maintenance badge', /profile\.fromCatalog && profile\.tracks/.test(card) && /Maintenance/.test(card));
+ok('SETUP: the automatic-install opt-in is a per-server tick list in the catalog panel (only shown in automatic mode)', /data-testid="keep-ready-list"/.test(panel) && /autoServers/.test(panel) && /settings\.installMode === 'auto' && servers\.length > 0/.test(panel));
+ok('ROW: shows the maintenance badge and takes track names from the catalog', /Maintenance/.test(card) && /serverState === 'maintenance'/.test(card) && /rowFacts\(profile, live, check\)/.test(card));
 ok('READINESS: separates catalog / content / game port / status page / join and never claims a verified join', /readiness-facts/.test(ready) && /Join: not verified/.test(ready) && /Game port:/.test(ready) && /Status page:/.test(ready));
 ok('READINESS: reloads when content changes', /mercy:ac-content-changed/.test(ready));
 ok('MODAL: extra tracks have their own validated picker and files are sent per track', /function ExtraTrackPicker/.test(modal) && /trackArchivePaths/.test(modal) && /validateSrpTrackArchive\(f, trackId\)/.test(modal));
@@ -174,12 +174,12 @@ ok('MAIN: no catalog channel can start/stop/restart a server or touch server con
 
 // ── discoverability: the catalog settings are one click from the server list ─────────────────────────
 {
-  ok('NAV: the catalog bar has a visible "Catalog settings" / "Set up catalog" button that opens Setup focused on the catalog panel', /data-testid="open-catalog-settings"/.test(bar) && /navigate\('\/assetto-corsa\/setup', \{ state: \{ focus: 'catalog' \} \}\)/.test(bar) && /'Set up catalog'/.test(bar));
+  ok('NAV: the slim bar offers a link to Setup only when something needs fixing, and it opens Setup focused on the catalog panel', /data-testid="open-catalog-settings"/.test(bar) && /navigate\('\/assetto-corsa\/setup', \{ state: \{ focus: 'catalog' \} \}\)/.test(bar) && /v\.showSetup/.test(bar));
   ok('NAV: Setup scrolls the catalog panel into view when sent from the bar', /focus\?: string/.test(setup) && /location\.state/.test(setup) && /data-testid=\\"catalog-settings\\"/.test(setup.replace(/'/g, '"').replace(/\[data-testid="catalog-settings"\]/g, 'data-testid=\\"catalog-settings\\"')) );
   ok('NAV: the Setup panel is registered on the route the bar navigates to', /path="\/assetto-corsa\/setup" element=\{<AssettoCorsaSetup \/>\}/.test(read('src/renderer/App.tsx')));
-  ok('BAR + PANEL: both show the actionable help block for the last error', /data-testid="catalog-error-help"/.test(bar) && /data-testid="catalog-error-help"/.test(panel) && /catalogErrorHelp\(status\?\.lastError\)/.test(bar) && /catalogErrorHelp\(status\?\.lastError\)/.test(panel));
-  ok('CARD: shows the missing-content line and the HUD / companion facts', /data-testid="missing-content"/.test(card) && /data-testid="hud-companion"/.test(card) && /missingSummary\(plan\)/.test(card) && /hudCompanionLine\(profile\)/.test(card));
-  ok('CARDS come from the catalog, not from UI code: no server name, id, port or track is hardcoded in any catalog UI file', [card, bar, panel, ready, page].every((src) => !/SRP Daishi|SRP Traffic|srv-a|\b9600\b|\b9650\b|shuto_revival/.test(src.replace(/\/\/.*$/gm, ''))));
+  ok('BAR + PANEL: both can show the actionable help block for the last error (the bar tucks it behind "Why?")', /data-testid="catalog-error-help"/.test(bar) && /data-testid="catalog-error-help"/.test(panel) && /catalogErrorHelp\(status\?\.lastError\)/.test(bar) && /catalogErrorHelp\(status\?\.lastError\)/.test(panel) && /Why\?/.test(bar));
+  ok('ROW: the exact missing items and the HUD / companion facts are in the row details', /Missing or out of date/.test(card) && /check\.missing\.map/.test(card) && /data-testid="hud-companion"/.test(card) && /hudCompanionLine\(profile\)/.test(card));
+  ok('CARDS come from the catalog, not from UI code: no server name, id, port or track is hardcoded in any catalog UI file', [card, bar, panel, ready, page, read('src/renderer/lib/acJoinView.ts')].every((src) => !/SRP Daishi|SRP Traffic|srv-a|\b9600\b|\b9650\b|shuto_revival/.test(src.replace(/\/\/.*$/gm, ''))));
 }
 
 console.log(`\nAC CATALOG UI TESTS: ${pass} passed, ${fail} failed`);
