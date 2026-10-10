@@ -209,8 +209,9 @@ export function bytesToGb(b: number): number { return Math.round((b / 1024 ** 3)
 // ── plain-language catalog errors + card summaries ─────────────────────────────
 export interface ErrorHelp { title: string; hint: string }
 /** Turns a catalog sync error into what happened and what to do about it. Never hides the original message. */
-export function catalogErrorHelp(e: { code: string; message: string } | null | undefined): ErrorHelp | null {
+export function catalogErrorHelp(e: { code: string; message: string } | null | undefined, audience: 'developer' | 'player' = 'developer'): ErrorHelp | null {
   if (!e) return null;
+  if (audience === 'player') return playerCatalogHelp(e);
   const m = e.message || '';
   const keep = ' Nothing on your computer was changed, and the last good catalog (if there is one) is still the one in use.';
   switch (e.code) {
@@ -239,6 +240,19 @@ export function catalogErrorHelp(e: { code: string; message: string } | null | u
     case 'future': return { title: 'The catalog is dated in the future', hint: 'Check this computer\'s date and time.' + keep };
     case 'environment': return { title: 'A development catalog from a non-private address', hint: 'Development catalogs are only accepted from a private network address.' + keep };
     default: return { title: 'The catalog could not be refreshed', hint: m + keep };
+  }
+}
+
+/** What a player needs to know about a failed refresh: what happened, in plain words — no addresses, keys or settings to change. */
+function playerCatalogHelp(e: { code: string; message: string }): ErrorHelp {
+  const kept = ' Nothing on your computer was changed.';
+  switch (e.code) {
+    case 'unconfigured': return { title: 'The live server list is not set up', hint: 'This version of Mercy Launcher is showing its built-in list.' };
+    case 'network': case 'timeout': return { title: 'Cannot reach the server list', hint: 'Check that you are on the same network as the servers, then press Refresh. The launcher also keeps retrying on its own.' + kept };
+    case 'http': case 'redirect': case 'too-large': return { title: 'The server list is not available right now', hint: 'The list server answered with a problem. This is usually temporary; press Refresh in a minute.' + kept };
+    case 'signature': case 'unsigned': return { title: 'The server list could not be verified', hint: 'It was not signed by a key this launcher trusts, so it was not used.' + kept + ' If this keeps happening, tell the server owner.' };
+    case 'expired': case 'future': return { title: 'The server list is out of date', hint: 'The list has expired (or the clock on this computer is wrong). Check your date and time, then press Refresh.' + kept };
+    default: return { title: 'The server list was not used', hint: 'It failed the safety checks built into Mercy Launcher.' + kept + ' If this keeps happening, tell the server owner.' };
   }
 }
 

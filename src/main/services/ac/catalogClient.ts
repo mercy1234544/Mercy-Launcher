@@ -19,8 +19,19 @@ export class CatalogFetchError extends Error {
 
 export type BaseUrlCheck = { ok: true; base: string; catalogUrl: string; signatureUrl: string; healthUrl: string; privateHost: boolean } | { ok: false; error: string };
 
+/** Where the catalog files live under the base address. The defaults are the static-file layout; a server may publish the documented /catalog/v1/* API paths instead. */
+export interface CatalogPaths { catalog: string; signature: string; health: string }
+export const DEFAULT_CATALOG_PATHS: CatalogPaths = { catalog: 'catalog.json', signature: 'catalog.json.sig', health: 'health.json' };
+const PATH_RE = /^[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*$/;
+/** Accepts only plain relative paths (no scheme, host, query, dots-only segments); anything else falls back to the defaults. */
+export function normalizeCatalogPaths(raw: unknown): CatalogPaths {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const pick = (v: unknown, d: string) => { const t = typeof v === 'string' ? v.trim().replace(/^\/+/, '') : ''; return t && PATH_RE.test(t) && !t.split('/').some((x) => x === '.' || x === '..') ? t : d; };
+  return { catalog: pick(r.catalog, DEFAULT_CATALOG_PATHS.catalog), signature: pick(r.signature, DEFAULT_CATALOG_PATHS.signature), health: pick(r.health, DEFAULT_CATALOG_PATHS.health) };
+}
+
 /** Validates the owner-configured base URL. https always; plain http only for private/loopback hosts (LAN testing). */
-export function checkBaseUrl(raw: string | null | undefined): BaseUrlCheck {
+export function checkBaseUrl(raw: string | null | undefined, paths?: Partial<CatalogPaths> | null): BaseUrlCheck {
   const text = (raw ?? '').trim();
   if (!text) return { ok: false, error: 'No catalog address is configured.' };
   let u: URL; try { u = new URL(text); } catch { return { ok: false, error: 'The catalog address is not a valid URL.' }; }
@@ -34,7 +45,8 @@ export function checkBaseUrl(raw: string | null | undefined): BaseUrlCheck {
   } else if (u.protocol !== 'https:') return { ok: false, error: 'The catalog address must start with https://.' };
   const path = u.pathname.endsWith('/') ? u.pathname : u.pathname + '/';
   const base = `${u.protocol}//${u.host}${path}`;
-  return { ok: true, base, catalogUrl: base + 'catalog.json', signatureUrl: base + 'catalog.json.sig', healthUrl: base + 'health.json', privateHost };
+  const p = normalizeCatalogPaths(paths);
+  return { ok: true, base, catalogUrl: base + p.catalog, signatureUrl: base + p.signature, healthUrl: base + p.health, privateHost };
 }
 
 /** Real transport: GET with a size cap, an idle timeout, and same-host redirects only. */

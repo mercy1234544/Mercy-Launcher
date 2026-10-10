@@ -98,7 +98,12 @@ export function connectionLines(check: AcJoinCheck | null): string[] {
 
 /** The slim list header: one line, loud only when something is wrong. */
 export interface StripView { tone: Tone; text: string; showSetup: boolean; setupLabel: string }
-export function stripView(st: AcCatalogStatus | null, relative: (iso: string | null) => string): StripView {
+export function stripView(st: AcCatalogStatus | null, relative: (iso: string | null) => string, developer = true): StripView {
+  const v = stripViewFor(st, relative);
+  // Setup & Diagnostics holds the catalog address and keys; only developers are sent there.
+  return developer ? v : { ...v, showSetup: false, setupLabel: '' };
+}
+function stripViewFor(st: AcCatalogStatus | null, relative: (iso: string | null) => string): StripView {
   if (!st) return { tone: 'neutral', text: 'Loading the server list…', showSetup: false, setupLabel: '' };
   if (!st.configured) return { tone: 'neutral', text: 'Using the server list that came with this version. It will not update by itself.', showSetup: true, setupLabel: 'Connect to the live list' };
   if (st.source === 'builtin') return { tone: 'warn', text: st.lastError ? 'The live server list could not be loaded, so this older built-in list is shown.' : 'The live server list has not loaded yet; this older built-in list is shown.', showSetup: true, setupLabel: 'Fix' };

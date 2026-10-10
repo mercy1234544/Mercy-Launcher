@@ -20,6 +20,7 @@ import { MinecraftManager } from './services/MinecraftManager';
 import { AssettoCorsaManager } from './services/AssettoCorsaManager';
 import { GameScanner } from './services/GameScanner';
 import { AcPlayerService } from './services/ac/playerService';
+import { DEVELOPER_ONLY_MESSAGE, redactCatalogSettings, redactEndpoints, restrictCatalogPatch } from './services/ac/developerGate';
 import { MercyCredentialStore } from './services/MercyCredentialStore';
 import { ConnectionNegotiator } from './services/connection/ConnectionNegotiator';
 import { RelayConnectionManager } from './services/connection/RelayConnectionManager';
@@ -500,8 +501,11 @@ function registerIpcHandlers() {
   ipcMain.handle('assettocorsa:srp:join', (_, serverId: string) => acPlayerService.join(serverId).catch((e: any) => ({ success: false, stage: 'blocked' as const, error: e?.message || 'Could not start the join.', check: null })));
   ipcMain.handle('assettocorsa:srp:joinCheck', (_, serverId: string) => acSafe(async () => ({ check: await acPlayerService.joinCheck(serverId) })));
   ipcMain.handle('assettocorsa:srp:adoptCatalogHost', () => acSafe(async () => ({ adopt: await acPlayerService.adoptCatalogHost() })));
-  ipcMain.handle('assettocorsa:srp:getEndpoints', (_, serverId: string) => acSafe(() => ({ settings: acPlayerService.getLocalEndpoints(serverId) })));
+  // Technical settings (catalog address, signing keys, per-server connection overrides) are developer-only: see ac/developerGate.ts.
+  const developerMode = () => settingsManager.get('developerMode') === true;
+  ipcMain.handle('assettocorsa:srp:getEndpoints', (_, serverId: string) => acSafe(() => ({ settings: redactEndpoints(acPlayerService.getLocalEndpoints(serverId) as any, developerMode()) })));
   ipcMain.handle('assettocorsa:srp:setEndpoints', (_, serverId: string, patch: Record<string, unknown>) => acSafe(() => {
+    if (!developerMode()) throw new Error(DEVELOPER_ONLY_MESSAGE);
     const r = acPlayerService.setLocalEndpoints(serverId, patch as any);
     if (!r.success) throw new Error(r.error);
     return {};
@@ -523,12 +527,13 @@ function registerIpcHandlers() {
   // Server catalog (signed, synced). The renderer may only ask for a manual or section-open refresh; startup/periodic are main-only.
   ipcMain.handle('assettocorsa:catalog:status', () => acSafe(() => ({ status: acPlayerService.catalogStatus() })));
   ipcMain.handle('assettocorsa:catalog:refresh', (_, reason?: string) => acSafe(async () => ({ result: await acPlayerService.refreshCatalog(reason === 'section-open' ? 'section-open' : 'manual'), status: acPlayerService.catalogStatus() })));
-  ipcMain.handle('assettocorsa:catalog:getSettings', () => acSafe(() => ({ settings: acPlayerService.getCatalogSettings() })));
+  ipcMain.handle('assettocorsa:catalog:getSettings', () => acSafe(() => ({ settings: redactCatalogSettings(acPlayerService.getCatalogSettings(), developerMode()) })));
   ipcMain.handle('assettocorsa:catalog:setSettings', (_, patch: Record<string, unknown>) => acSafe(() => {
-    const r = acPlayerService.setCatalogSettings(patch && typeof patch === 'object' ? patch : {});
-    return { settings: r.settings, errors: r.errors, status: acPlayerService.catalogStatus() };
+    const gated = restrictCatalogPatch(patch && typeof patch === 'object' ? patch : {}, developerMode());
+    const r = acPlayerService.setCatalogSettings(gated.patch);
+    return { settings: redactCatalogSettings(r.settings, developerMode()), errors: [...gated.errors, ...r.errors], status: acPlayerService.catalogStatus() };
   }));
-  ipcMain.handle('assettocorsa:catalog:reset', () => acSafe(() => ({ status: acPlayerService.resetCatalog() })));
+  ipcMain.handle('assettocorsa:catalog:reset', () => acSafe(() => { if (!developerMode()) throw new Error(DEVELOPER_ONLY_MESSAGE); return { status: acPlayerService.resetCatalog() }; }));
   ipcMain.handle('assettocorsa:catalog:contentStatus', (_, serverId: string) => acSafe(async () => ({ content: await acPlayerService.contentStatus(serverId) })));
   ipcMain.handle('assettocorsa:catalog:readiness', (_, serverId: string) => acSafe(async () => { const content = await acPlayerService.contentStatus(serverId); return { content, readiness: await acPlayerService.readiness(serverId, content) }; }));
   ipcMain.handle('assettocorsa:srp:testEndpoint', (_, serverId: string, scope: 'lan' | 'public') => acSafe(async () => ({ test: await acPlayerService.testEndpoint(serverId, scope === 'lan' ? 'lan' : 'public') })));

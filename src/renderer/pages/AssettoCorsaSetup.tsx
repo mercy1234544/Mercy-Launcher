@@ -137,6 +137,9 @@ export default function AssettoCorsaSetup() {
   const [reports, setReports] = useState<Record<string, AcRequirementsReport | null>>({});
   const [loading, setLoading] = useState(true);
   const [openDetail, setOpenDetail] = useState<string | null>(null);
+  // The catalog address, signing keys, connection overrides and raw logs are developer-only (Settings → System → Developer options).
+  const [developer, setDeveloper] = useState(false);
+  useEffect(() => { window.electronAPI.settings?.get('developerMode').then((v: unknown) => setDeveloper(v === true)).catch(() => undefined); }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -184,10 +187,11 @@ export default function AssettoCorsaSetup() {
           <div className="flex gap-2 pt-3">
             <button onClick={chooseFolder} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"><FolderOpen size={12} /> Choose game folder…</button>
             {dg.acRootSource === 'manual' && <button onClick={autoDetect} className="text-xs text-surface-400 hover:text-surface-100 px-2">Use automatic detection</button>}
+            <button onClick={copy} className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5 ml-auto" data-testid="copy-diagnostics"><Copy size={12} /> Copy diagnostics</button>
           </div>
         </Panel>
 
-        <AcCatalogSettingsPanel onChanged={load} />
+        {developer && <AcCatalogSettingsPanel onChanged={load} />}
 
         <Panel>
           <h2 className="text-sm font-bold text-surface-100 mb-1">Content verification</h2>
@@ -217,7 +221,7 @@ export default function AssettoCorsaSetup() {
           <h2 className="text-sm font-bold text-surface-100 mb-1">Companion app &amp; HUD</h2>
           <Row label="SRP Board" tone={dg.srpBoard?.installed ? 'good' : 'warn'} value={dg.srpBoard?.installed ? `Installed${dg.srpBoard.version ? ` — version ${dg.srpBoard.version}` : ''}` : 'Not installed (optional). It hides the F9 position strip on Mercy\'s AssettoServer.'} />
           {dg.srpBoard?.installed && <Row label="Servers it matches" tone={dg.srpBoard.stamped && dg.srpBoard.stamped.length ? 'neutral' : 'warn'} value={dg.srpBoard.stamped === null ? 'Could not read its server list.' : dg.srpBoard.stamped.length === 0 ? 'None — it is not stamped, so it does nothing.' : dg.srpBoard.stamped.map((s) => `${s.kind} :${s.port}`).join('   ·   ')} />}
-          {dg.srpBoard?.installed && dg.srpBoard.coverage?.map((c) => {
+          {developer && dg.srpBoard?.installed && dg.srpBoard.coverage?.map((c) => {
             const p = profiles.find((x) => x.id === c.serverId);
             const parts = [c.public === null ? 'public: not configured' : c.public ? 'public: matched' : 'public: NOT in the stamp', c.lan === null ? null : c.lan ? 'LAN: matched' : 'LAN: NOT in the stamp'].filter(Boolean).join('   ·   ');
             const bad = c.public === false || c.lan === false;
@@ -228,30 +232,34 @@ export default function AssettoCorsaSetup() {
           <p className="text-[11px] text-surface-500 pt-2 flex gap-1.5"><ShieldCheck size={12} className="shrink-0 mt-0.5" />The SRP Board is stamped on this computer when installed, using the endpoints below. Only the owner's PC (with a LAN address set) gets a LAN entry; nobody else's stamp ever contains it.</p>
         </Panel>
 
-        <Panel className="space-y-3">
-          <div>
-            <h2 className="text-sm font-bold text-surface-100">Connection endpoints</h2>
-            <p className="text-[11px] text-surface-500 mt-0.5">Remote players join through a <span className="text-surface-300">public host name</span>; you, at home, can also set a <span className="text-surface-300">LAN address</span>. Nothing is configured by default and no address is built into the app. Public connectivity has <span className="text-surface-300">not been tested</span>.</p>
-          </div>
-          {profiles.map((p) => <EndpointEditor key={p.id} profile={p} onSaved={load} />)}
-        </Panel>
+        {developer && (
+          <Panel className="space-y-3">
+            <div>
+              <h2 className="text-sm font-bold text-surface-100">Connection endpoints</h2>
+              <p className="text-[11px] text-surface-500 mt-0.5">Remote players join through a <span className="text-surface-300">public host name</span>; you, at home, can also set a <span className="text-surface-300">LAN address</span>. Nothing is configured by default and no address is built into the app. Public connectivity has <span className="text-surface-300">not been tested</span>.</p>
+            </div>
+            {profiles.map((p) => <EndpointEditor key={p.id} profile={p} onSaved={load} />)}
+          </Panel>
+        )}
 
         <StoragePanel onChanged={load} />
 
-        <Panel>
-          <div className="flex items-center gap-2 mb-1">
-            <ScrollText size={14} className="text-surface-400" /><h2 className="text-sm font-bold text-surface-100">Troubleshooting</h2>
-            <button onClick={copy} className="ml-auto btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1.5"><Copy size={11} /> Copy diagnostics</button>
-          </div>
-          <p className="text-[11px] text-surface-500 mb-2">Everything here has IP addresses and host names removed, so it is safe to paste into a support message.</p>
-          {dg.interruptedInstalls.length > 0 && <div className="p-2.5 rounded-lg border border-amber-500/25 bg-amber-500/10 text-[11px] text-amber-200 mb-2">An earlier installation was interrupted. It will be rolled back automatically the next time you install something, so your files are restored.</div>}
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-surface-500 mt-2 mb-1">SRP lines from the last game session</h3>
-          {dg.cspLogSrpLines.length === 0 ? <p className="text-[11px] text-surface-500">None found. Join an SRP server once, then refresh.</p>
-            : <pre className="text-[10px] leading-relaxed text-surface-300 bg-surface-950/60 border border-overlay-6 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap">{dg.cspLogSrpLines.join('\n')}</pre>}
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-surface-500 mt-3 mb-1">Recent install log</h3>
-          {dg.installLog.length === 0 ? <p className="text-[11px] text-surface-500">Nothing installed yet.</p>
-            : <pre className="text-[10px] leading-relaxed text-surface-300 bg-surface-950/60 border border-overlay-6 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap max-h-56">{dg.installLog.join('\n')}</pre>}
-        </Panel>
+        {developer && (
+          <Panel>
+            <div className="flex items-center gap-2 mb-1">
+              <ScrollText size={14} className="text-surface-400" /><h2 className="text-sm font-bold text-surface-100">Troubleshooting</h2>
+              <button onClick={copy} className="ml-auto btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1.5"><Copy size={11} /> Copy diagnostics</button>
+            </div>
+            <p className="text-[11px] text-surface-500 mb-2">Everything here has IP addresses and host names removed, so it is safe to paste into a support message.</p>
+            {dg.interruptedInstalls.length > 0 && <div className="p-2.5 rounded-lg border border-amber-500/25 bg-amber-500/10 text-[11px] text-amber-200 mb-2">An earlier installation was interrupted. It will be rolled back automatically the next time you install something, so your files are restored.</div>}
+            <h3 className="text-[11px] font-bold uppercase tracking-wider text-surface-500 mt-2 mb-1">SRP lines from the last game session</h3>
+            {dg.cspLogSrpLines.length === 0 ? <p className="text-[11px] text-surface-500">None found. Join an SRP server once, then refresh.</p>
+              : <pre className="text-[10px] leading-relaxed text-surface-300 bg-surface-950/60 border border-overlay-6 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap">{dg.cspLogSrpLines.join('\n')}</pre>}
+            <h3 className="text-[11px] font-bold uppercase tracking-wider text-surface-500 mt-3 mb-1">Recent install log</h3>
+            {dg.installLog.length === 0 ? <p className="text-[11px] text-surface-500">Nothing installed yet.</p>
+              : <pre className="text-[10px] leading-relaxed text-surface-300 bg-surface-950/60 border border-overlay-6 rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap max-h-56">{dg.installLog.join('\n')}</pre>}
+          </Panel>
+        )}
       </>)}
     </motion.div>
   );

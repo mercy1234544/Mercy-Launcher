@@ -9,12 +9,15 @@ export interface SettingsSchema {
   minimizeToTray: boolean;
   autoUpdate: boolean;
   downloadPath: string | null;
+  /** Shows the technical options (catalog address, signing keys, connection overrides). Off for everyone by default. */
+  developerMode: boolean;
 }
 
 const DEFAULTS: SettingsSchema = {
   minimizeToTray: false,
   autoUpdate: true,
   downloadPath: null,
+  developerMode: false,
 };
 
 export class SettingsManager {

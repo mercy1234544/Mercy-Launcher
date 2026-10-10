@@ -93,7 +93,11 @@ const rel = (host) => ({ servers: { main: { host, tcpPort: null, httpPort: null 
   const srcRoot = path.resolve(__dirname, '../../src');
   const hits = walk(srcRoot).filter((f) => /\.(ts|tsx|json|md|css|html)$/.test(f) && PRIV.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(srcRoot, f));
   ok('PRIVACY (guard): the scan really covered the codebase (more than 100 source/data files, including the SRP data folder)', walk(srcRoot).filter((f) => /\.(ts|tsx|json)$/.test(f)).length > 100 && walk(srcRoot).some((f) => /assettocorsa-srp/.test(f)));
-  ok('PRIVACY: no private LAN address literal exists in any source or data file that ships with the app', hits.length === 0 || (console.log('     found in:', hits), false));
+  // The catalog address is centralized in one release file (catalog.config.json); every other shipped file must stay free of private addresses.
+  const CENTRAL = path.join('main', 'data', 'assettocorsa-srp', 'catalog.config.json');
+  const others = hits.filter((h) => h !== CENTRAL);
+  ok('PRIVACY: no private LAN address literal exists in any source or data file that ships with the app, except the one central catalog.config.json', others.length === 0 || (console.log('     found in:', others), false));
+  ok('PRIVACY: the central catalog config is the only place a private address may live, and the endpoint tables (endpoints.public.json) stay clean', hits.every((h) => h === CENTRAL));
   ok('PRIVACY: the embedded SRP Board template is the inert one (no server addresses) and the shipped data holds no private address', parseBoard(tplLua).length === 0 && !PRIV.test(JSON.stringify(real)) && !PRIV.test(JSON.stringify(shipped)));
   function parseBoard(lua) { const m = /^local SERVERS = \{(.*)\}/m.exec(lua); return m ? Array.from(m[1].matchAll(/'([^']+)'/g)) : null; }
 

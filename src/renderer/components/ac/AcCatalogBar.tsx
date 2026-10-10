@@ -23,6 +23,9 @@ export default function AcCatalogBar({ onCatalogChanged, refreshOnOpen }: Props)
   const [changes, setChanges] = useState<string[]>([]);
   const [autoNote, setAutoNote] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  // Developer options (Settings → System) reveal the catalog address/keys and the link to them; players get plain wording only.
+  const [developer, setDeveloper] = useState(false);
+  useEffect(() => { window.electronAPI.settings?.get('developerMode').then((v: unknown) => setDeveloper(v === true)).catch(() => undefined); }, []);
   const changed = useRef(onCatalogChanged);
   changed.current = onCatalogChanged;
 
@@ -63,15 +66,15 @@ export default function AcCatalogBar({ onCatalogChanged, refreshOnOpen }: Props)
     finally { setRefreshing(false); }
   };
 
-  const v = stripView(status, (iso) => relativeTime(iso, now));
-  const help = catalogErrorHelp(status?.lastError);
+  const v = stripView(status, (iso) => relativeTime(iso, now), developer);
+  const help = catalogErrorHelp(status?.lastError, developer ? 'developer' : 'player');
   const Icon = v.tone === 'good' ? CheckCircle2 : v.tone === 'neutral' ? Info : AlertTriangle;
   const unsafe = status?.environment === 'development' || status?.unsignedDev;
   return (
     <div className="space-y-2" data-testid="catalog-bar">
       <div className="flex items-center gap-2.5 flex-wrap rounded-xl border border-overlay-6 bg-surface-900/40 px-3 py-2">
         <Icon size={14} className={`${TONE_CLASSES[v.tone].text} shrink-0`} />
-        <p className="text-xs text-surface-300 flex-1 min-w-0 basis-60">{v.text}{unsafe && <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-300 border-amber-500/25">{status?.unsignedDev ? 'UNSIGNED TEST LIST' : 'TEST LIST'}</span>}</p>
+        <p className="text-xs text-surface-300 flex-1 min-w-0 basis-60">{v.text}{unsafe && <span title="These servers run on a private test network. They can only be joined from the same network." className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-amber-500/15 text-amber-300 border-amber-500/25">{status?.unsignedDev ? 'UNSIGNED TEST LIST' : developer ? 'TEST LIST' : 'TEST NETWORK'}</span>}</p>
         {help && <button onClick={() => setShowHelp((x) => !x)} className="text-[11px] text-surface-400 hover:text-surface-100 underline">{showHelp ? 'Hide' : 'Why?'}</button>}
         {v.showSetup && <button onClick={() => navigate('/assetto-corsa/setup', { state: { focus: 'catalog' } })} className="text-[11px] font-semibold text-primary-300 hover:text-primary-200 underline" data-testid="open-catalog-settings">{v.setupLabel}</button>}
         {status?.configured && (

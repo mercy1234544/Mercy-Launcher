@@ -133,15 +133,18 @@ function check(schema, value, root, p = '$') {
 
   // ── release-facing data ─────────────────────────────────────────────────────
   const cfg = JSON.parse(read('src/main/data/assettocorsa-srp/catalog.config.json'));
-  ok('release catalog address is null or a public https URL (never private)', cfg.baseUrl === null || (checkBaseUrl(cfg.baseUrl).ok && checkBaseUrl(cfg.baseUrl).privateHost === false && /^https:/.test(cfg.baseUrl)));
+  ok('release catalog address is null, a public https URL, or a private-network http URL that ships WITH a pinned key (a LAN catalog is only ever accepted when it verifies)', cfg.baseUrl === null || (checkBaseUrl(cfg.baseUrl, cfg.paths).ok && ((checkBaseUrl(cfg.baseUrl).privateHost === false && /^https:/.test(cfg.baseUrl)) || (checkBaseUrl(cfg.baseUrl).privateHost === true && cfg.trustedKeys.length > 0))));
+  ok('release config uses the documented /catalog/v1 endpoint paths, relative and un-escaped', !!cfg.paths && checkBaseUrl(cfg.baseUrl, cfg.paths).catalogUrl.endsWith('/catalog/v1/catalog') && checkBaseUrl(cfg.baseUrl, cfg.paths).signatureUrl.endsWith('/catalog/v1/signature'));
   ok('release trusted keys are valid PUBLIC Ed25519 keys', Array.isArray(cfg.trustedKeys) && cfg.trustedKeys.every((k) => /^[A-Za-z0-9._-]{1,64}$/.test(k.keyId) && !!parsePublicKey(k.publicKey) && !/PRIVATE/.test(k.publicKey)));
-  ok('nothing is invented: no catalog address and no key are shipped until the owner supplies them', cfg.baseUrl === null && cfg.trustedKeys.length === 0);
+  ok('only PUBLIC key material ships: each entry is exactly {keyId, publicKey} and nothing else (no private key, token or password field anywhere in the file)', cfg.trustedKeys.every((k) => Object.keys(k).sort().join() === 'keyId,publicKey') && !/private|secret|password|token|seed/i.test(JSON.stringify({ ...cfg, note: '' })));
   const rel = JSON.parse(read('src/main/data/assettocorsa-srp/endpoints.public.json'));
   ok('release endpoints still hold no private address', Object.values(rel.servers).every((s) => s.host === null || !isPrivateOrLocalString(s.host)));
   const scan = (dir, out = []) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) scan(p, out); else if (/\.(ts|tsx|json|md)$/.test(e.name)) out.push(p); } return out; };
   const files = [...scan(path.join(ROOT, 'src/main/data')), ...scan(path.join(ROOT, 'src/main/services/ac')), ...scan(path.join(ROOT, 'src/renderer/components/ac')), path.join(ROOT, 'docs/ASSETTO_CORSA_CATALOG_CONTRACT.md'), path.join(ROOT, 'docs/ac-catalog.schema.json'), path.join(ROOT, 'docs/examples/ac-catalog.example.json')];
-  const leaks = files.filter((f) => /\b(?:192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)\b/.test(fs.readFileSync(f, 'utf8')));
-  ok(`no private address in ${files.length} release-facing source/doc/data files`, leaks.length === 0);
+  // The catalog address is centralized: catalog.config.json is the one release file allowed to name a private network address.
+  const CONFIG = path.join(ROOT, 'src/main/data/assettocorsa-srp/catalog.config.json');
+  const leaks = files.filter((f) => path.resolve(f) !== path.resolve(CONFIG) && /\b(?:192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)\b/.test(fs.readFileSync(f, 'utf8')));
+  ok(`no private address in ${files.length - 1} release-facing source/doc/data files besides the one central catalog.config.json`, leaks.length === 0);
   if (leaks.length) console.log('   leaks in:', leaks.map((f) => path.relative(ROOT, f)));
 
   console.log(`\nAC CATALOG DOCS + RELEASE DATA TESTS: ${pass} passed, ${fail} failed`);

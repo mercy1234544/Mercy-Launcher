@@ -96,6 +96,13 @@ The launcher pins one or more `{keyId, publicKey}` (PEM or base64 raw 32 bytes).
 - **Development** (`environment:"development"`): may carry `connection.lan` for local testing; the client accepts it **only when fetched from a private/loopback URL**, labels it DEVELOPMENT, disables automatic installation, and never writes the LAN address to logs or diagnostics.
 - A production catalog fetched from a private URL is fine (testing the real catalog on the LAN); a development catalog fetched from the internet is rejected.
 
+## 8a. How the launcher is pointed at your catalog (release configuration)
+The launcher ships with the catalog address, the pinned PUBLIC signing key and the endpoint paths in **one** file, `src/main/data/assettocorsa-srp/catalog.config.json`. Players never type or see them; they are developer options (Settings → System → Developer options). The client fetches `<baseUrl>/<paths.catalog>` and `<baseUrl>/<paths.signature>` (the documented `/catalog/v1/catalog` and `/catalog/v1/signature`, or the static `catalog.json` / `catalog.json.sig` when no paths are configured), re-checks every `intervalMinutes` (5 for the LAN profile) and whenever the server section is opened, so a server registered or renamed on the dashboard shows up without a launcher release.
+- **Plain `http://` is accepted only for a private-network address.** A public address must be `https://`; a development catalog is refused from a public address.
+- **Moving to production** means replacing `baseUrl` with the public `https://` address (and adding the production public key). Nothing else in the launcher changes; `connection.public` then carries the real host and `connection.lan` disappears.
+- Only PUBLIC keys belong in that file. A private key, password or token must never be committed or shipped.
+- A catalog whose signature does not verify against a pinned key is never used, whatever address it came from.
+
 ## 9. Health and diagnostics
 `/health.json` (optional, regenerated at publish): `{ "ok": true, "service":"mercy-ac-catalog", "schemaVersion":"1.0.0", "revision": 12, "generatedAt":"…", "catalogSha256":"…" }`. It proves **only that the catalog was published** — not that a game server is up or joinable. Live player counts, if wanted, come from each game server's own read-only `/INFO` page on its HTTP port (already used by the launcher). Never expose the dashboard, logs, or filesystem listings.
 

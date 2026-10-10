@@ -1,6 +1,10 @@
 {
   "schemaVersion": "1.0.0",
-  "note": "RELEASE-FACING DEFAULTS for the server-catalog sync. Nothing is invented: baseUrl stays null (no catalog) and trustedKeys stays empty until the owner supplies the real https address of the published catalog and the PUBLIC Ed25519 signing key (never the private key). Only a public https address may be written here — a private/LAN address is rejected by test/assettocorsa/catalog-docs.test.js. Players can still override both in Setup & Diagnostics.",
-  "baseUrl": null,
-  "trustedKeys": []
+  "note": "RELEASE-FACING DEFAULTS for the server-catalog sync, and the ONLY place the catalog address and pinned signing key are written. Current profile: private-network (LAN) development catalog, accepted only from a private address and only while it verifies against the pinned public key. To go to production, replace baseUrl with the public https address (and add the production PUBLIC key); nothing else in the launcher changes. Only PUBLIC keys belong here, never a private key or secret. Players never see or edit these values; they are developer options (Settings > System > Developer options).",
+  "baseUrl": "http://192.168.1.148:18790",
+  "paths": { "catalog": "catalog/v1/catalog", "signature": "catalog/v1/signature", "health": "health.json" },
+  "intervalMinutes": 5,
+  "trustedKeys": [
+    { "keyId": "srp-ed25519-93365446dba82f13", "publicKey": "kHcGB3ImxjF2vAa2MxJkY9au8_Jfvm4kEMPniRscoQc" }
+  ]
 }

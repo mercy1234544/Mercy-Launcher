@@ -158,6 +158,13 @@ export default function Settings() {
     });
     return cleanup;
   }, []);
+  // Developer options: reveals the technical settings (server-catalog address, signing keys, connection overrides, logs). Off by default.
+  const [developerMode, setDeveloperMode] = useState(false);
+  useEffect(() => { window.electronAPI?.settings?.get('developerMode').then((v) => setDeveloperMode(v === true)).catch(() => {}); }, []);
+  const handleDeveloperMode = async (v: boolean) => {
+    setDeveloperMode(v);
+    await window.electronAPI?.settings?.set('developerMode', v).catch(() => {});
+  };
   const handleAutoUpdate = async (v: boolean) => {
     setAutoUpdate(v);
     await window.electronAPI?.settings?.set('autoUpdate', v).catch(() => {});
@@ -495,6 +502,8 @@ export default function Settings() {
               {/* ═══ System ═══ */}
               <Tabs.Content value="system" className="space-y-4 outline-none">
                 <>
+                  <Row icon={SlidersHorizontal} iconClass="bg-surface-700/40 border-overlay-10 text-surface-300" title="Developer options" sub="Show technical settings such as the server-catalog address and signing keys. Most players should leave this off."
+                    control={<Toggle checked={developerMode} onChange={handleDeveloperMode} />} />
                   <div className="grid grid-cols-2 gap-4">
                     <Panel>
                       <div className="flex items-center gap-3 mb-1">

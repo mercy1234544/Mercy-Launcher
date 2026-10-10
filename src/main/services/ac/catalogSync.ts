@@ -11,7 +11,7 @@ import * as path from 'path';
 import type { SrpBundle } from '../AcRequirementsChecker';
 import type { ReleaseEndpointsFile } from './endpoints';
 import { catalogToBundle, type AdaptedCatalog } from './catalogAdapter';
-import { checkBaseUrl, fetchCatalogFiles, MAX_CATALOG_BYTES, type FetchOutcome, type Transport } from './catalogClient';
+import { checkBaseUrl, fetchCatalogFiles, normalizeCatalogPaths, DEFAULT_CATALOG_PATHS, MAX_CATALOG_BYTES, type CatalogPaths, type FetchOutcome, type Transport } from './catalogClient';
 
 type Fetched = Extract<FetchOutcome, { kind: 'fetched' }>;
 import { diffCatalogs, type CatalogDiff } from './catalogDiff';
@@ -21,6 +21,8 @@ import { parsePublicKey, sha256Hex, verifyCatalogSignature, type TrustedKey } fr
 // ── settings ──────────────────────────────────────────────────────────────────
 export interface CatalogSettings {
   baseUrl: string | null;
+  /** Where the catalog + signature are served under baseUrl. Release-config only: a player cannot change it. */
+  paths: CatalogPaths;
   trustedKeys: TrustedKey[];
   /** Development catalogs fetched from a private address may be unsigned. Never applies to production catalogs. */
   allowUnsignedDev: boolean;
@@ -33,7 +35,7 @@ export interface CatalogSettings {
   autoServers: string[];
 }
 export const DEFAULT_SETTINGS: CatalogSettings = {
-  baseUrl: null, trustedKeys: [], allowUnsignedDev: false, intervalMinutes: 15, installMode: 'review', autoUpdateExisting: false, maxAutoDownloadBytes: 1024 ** 3, autoServers: [],
+  baseUrl: null, paths: DEFAULT_CATALOG_PATHS, trustedKeys: [], allowUnsignedDev: false, intervalMinutes: 15, installMode: 'review', autoUpdateExisting: false, maxAutoDownloadBytes: 1024 ** 3, autoServers: [],
 };
 export const INTERVAL_RANGE = [5, 120] as const;
 const KEY_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -49,6 +51,7 @@ export function normalizeSettings(raw: unknown, fallback: CatalogSettings = DEFA
   const baseOk = typeof r.baseUrl === 'string' && checkBaseUrl(r.baseUrl).ok;
   return {
     baseUrl: r.baseUrl === null ? null : baseOk ? (r.baseUrl as string).trim() : fallback.baseUrl,
+    paths: r.paths !== undefined ? normalizeCatalogPaths(r.paths) : fallback.paths,
     trustedKeys: Array.isArray(r.trustedKeys) ? keys : fallback.trustedKeys,
     allowUnsignedDev: typeof r.allowUnsignedDev === 'boolean' ? r.allowUnsignedDev : fallback.allowUnsignedDev,
     intervalMinutes: num(r.intervalMinutes, INTERVAL_RANGE[0], INTERVAL_RANGE[1], fallback.intervalMinutes),
@@ -238,7 +241,7 @@ export class CatalogSync {
   private log(line: string) { try { this.deps.log?.(`[catalog] ${line}`); } catch { /* logging must never break a sync */ } }
   private stateFile() { return path.join(this.dir, 'state.json'); }
   private saveState() { try { atomicWrite(this.stateFile(), JSON.stringify(this.state, null, 2)); } catch { /* best effort */ } }
-  private sourceKey(settings: CatalogSettings) { const c = checkBaseUrl(settings.baseUrl); return c.ok ? crypto.createHash('sha256').update(c.base).digest('hex').slice(0, 16) : null; }
+  private sourceKey(settings: CatalogSettings) { const c = checkBaseUrl(settings.baseUrl, settings.paths); return c.ok ? crypto.createHash('sha256').update(c.base).digest('hex').slice(0, 16) : null; }
 
   private loadState() {
     let s: SyncState = { ...EMPTY_STATE };
@@ -251,7 +254,7 @@ export class CatalogSync {
   private loadCache() {
     this.catalog = null; this.adaptedCache = null; this.verifiedKeyId = null; this.expiredNow = false;
     const settings = this.deps.settings.get();
-    const b = checkBaseUrl(settings.baseUrl);
+    const b = checkBaseUrl(settings.baseUrl, settings.paths);
     if (!b.ok || !this.state.accepted || this.state.sourceKey !== this.sourceKey(settings)) return;
     try {
       const bytes = fs.readFileSync(path.join(this.dir, 'catalog.json'));
@@ -268,7 +271,7 @@ export class CatalogSync {
   usingCatalog(): boolean { return !!this.catalog; }
 
   status(): CatalogStatus {
-    const settings = this.deps.settings.get(); const b = checkBaseUrl(settings.baseUrl);
+    const settings = this.deps.settings.get(); const b = checkBaseUrl(settings.baseUrl, settings.paths);
     const now = this.now().getTime();
     const acc = this.state.accepted;
     const expired = this.catalog?.catalog.expiresAt ? Date.parse(this.catalog.catalog.expiresAt) <= now : false;
@@ -310,7 +313,7 @@ export class CatalogSync {
   // ── refresh ─────────────────────────────────────────────────────────────────
   refresh(reason: SyncReason): Promise<SyncResult> {
     const settings = this.deps.settings.get();
-    const b = checkBaseUrl(settings.baseUrl);
+    const b = checkBaseUrl(settings.baseUrl, settings.paths);
     if (!b.ok) return Promise.resolve({ outcome: 'unconfigured', changed: false, error: { code: 'unconfigured', message: b.error } });
     const nowMs = this.now().getTime();
     if (this.inFlight) return this.inFlight;

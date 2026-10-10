@@ -6,9 +6,9 @@ interface ElectronAPI {
   close: () => Promise<void>;
 
   settings: {
-    get: (key: 'minimizeToTray' | 'autoUpdate' | 'downloadPath') => Promise<any>;
-    getAll: () => Promise<{ minimizeToTray: boolean; autoUpdate: boolean; downloadPath: string | null }>;
-    set: (key: 'minimizeToTray' | 'autoUpdate' | 'downloadPath', value: any) => Promise<boolean>;
+    get: (key: 'minimizeToTray' | 'autoUpdate' | 'downloadPath' | 'developerMode') => Promise<any>;
+    getAll: () => Promise<{ minimizeToTray: boolean; autoUpdate: boolean; downloadPath: string | null; developerMode: boolean }>;
+    set: (key: 'minimizeToTray' | 'autoUpdate' | 'downloadPath' | 'developerMode', value: any) => Promise<boolean>;
     getLoginItem: () => Promise<boolean>;
     setLoginItem: (enabled: boolean) => Promise<boolean>;
   };
