@@ -27,6 +27,8 @@ export interface MissingItem { id: string; name: string; state: ContentRow['stat
 export interface JoinConnection {
   configured: boolean;
   scope: 'lan' | 'public' | null;
+  /** True when the server has a usable address but NO public one is configured: only reachable from the owner's own network. */
+  lanOnly: boolean;
   /** Did the server's own status page answer just now? null = not asked (no address). */
   infoOnline: boolean | null;
   identity: 'match' | 'mismatch' | 'unknown';
@@ -85,7 +87,7 @@ export function identityMatches(infoName: string | undefined, expected: string):
 export function buildJoinCheck(i: JoinCheckInput): JoinCheck {
   const issues: JoinIssue[] = [];
   const ep = i.chosen;
-  const conn: JoinConnection = { configured: !!ep, scope: ep?.scope ?? null, infoOnline: null, identity: 'unknown', gamePortTcp: 'untested', reason: i.chosenReason };
+  const conn: JoinConnection = { configured: !!ep, scope: ep?.scope ?? null, lanOnly: !!ep && !i.endpoints.public, infoOnline: null, identity: 'unknown', gamePortTcp: 'untested', reason: i.chosenReason };
   const canAdoptHost = !ep && i.catalogHostIsPrivate && i.portsKnown;
 
   // ── 1. connection ────────────────────────────────────────────────────────────

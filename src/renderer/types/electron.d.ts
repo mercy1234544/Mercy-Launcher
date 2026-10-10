@@ -678,7 +678,7 @@ declare global {
   interface AcJoinIssue { id: string; kind: 'connection' | 'game' | 'content-manager' | 'csp' | 'content'; severity: 'blocker' | 'note'; title: string; detail: string; fix?: { kind: 'install' | 'manual' | 'setup' | 'adopt-host' | 'retry'; label: string; planItemIds?: string[] } }
   interface AcJoinCheck {
     serverId: string; state: 'ready' | 'missing' | 'unavailable'; headline: string; checkedAt: string;
-    connection: { configured: boolean; scope: 'lan' | 'public' | null; infoOnline: boolean | null; identity: 'match' | 'mismatch' | 'unknown'; gamePortTcp: 'open' | 'closed' | 'untested'; players?: number; maxPlayers?: number; serverTrack?: string; reason: string };
+    connection: { configured: boolean; scope: 'lan' | 'public' | null; lanOnly: boolean; infoOnline: boolean | null; identity: 'match' | 'mismatch' | 'unknown'; gamePortTcp: 'open' | 'closed' | 'untested'; players?: number; maxPlayers?: number; serverTrack?: string; reason: string };
     issues: AcJoinIssue[];
     missing: { id: string; name: string; state: 'installed' | 'missing' | 'outdated' | 'incompatible' | 'manual' | 'unknown'; detail: string; installable: boolean; planItemId?: string; required: boolean }[];
     canJoin: boolean; unverified: true; canAdoptHost: boolean;

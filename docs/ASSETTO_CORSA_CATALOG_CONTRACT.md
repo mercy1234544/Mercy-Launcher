@@ -102,6 +102,7 @@ The launcher ships with the catalog address, the pinned PUBLIC signing key and t
 - **Moving to production** means replacing `baseUrl` with the public `https://` address (and adding the production public key). Nothing else in the launcher changes; `connection.public` then carries the real host and `connection.lan` disappears.
 - Only PUBLIC keys belong in that file. A private key, password or token must never be committed or shipped.
 - A catalog whose signature does not verify against a pinned key is never used, whatever address it came from.
+- A player's saved settings never switch the release catalog off: a blank saved address (what older builds wrote) means "use the release address", and a saved address/key override is only honoured while Developer options is on. Servers reachable only on the private network are labelled as such; they are never presented as internet-accessible.
 
 ## 9. Health and diagnostics
 `/health.json` (optional, regenerated at publish): `{ "ok": true, "service":"mercy-ac-catalog", "schemaVersion":"1.0.0", "revision": 12, "generatedAt":"…", "catalogSha256":"…" }`. It proves **only that the catalog was published** — not that a game server is up or joinable. Live player counts, if wanted, come from each game server's own read-only `/INFO` page on its HTTP port (already used by the launcher). Never expose the dashboard, logs, or filesystem listings.

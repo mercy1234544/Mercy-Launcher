@@ -54,6 +54,8 @@ export interface PlayerServiceDeps {
   catalogSleep?: (ms: number) => Promise<void>;
   catalogRandom?: () => number;
   catalogReleaseDefaults?: Partial<CatalogSettings>;
+  /** Whether a saved catalog address / key override may be used (Developer options). Default: yes (tests). */
+  catalogAllowOverride?: () => boolean;
 }
 
 export interface RequiredContentRow { id: string; name: string; required: boolean; detail?: string }
@@ -113,7 +115,7 @@ export class AcPlayerService {
     this.installLog = path.join(deps.userDataPath, 'ac-install.log');
     this.autoFile = path.join(deps.userDataPath, 'ac-catalog', 'auto-attempts.json');
     try { this.autoAttempts = JSON.parse(fs.readFileSync(this.autoFile, 'utf8')); } catch { /* none yet */ }
-    this.catalogSettings = new CatalogSettingsStore(deps.userDataPath, deps.catalogReleaseDefaults ?? (catalogReleaseConfig as unknown as Partial<CatalogSettings>));
+    this.catalogSettings = new CatalogSettingsStore(deps.userDataPath, deps.catalogReleaseDefaults ?? (catalogReleaseConfig as unknown as Partial<CatalogSettings>), deps.catalogAllowOverride);
     this.sync = new CatalogSync({
       userDataPath: deps.userDataPath, settings: this.catalogSettings, boardBase: this.builtinBundle,
       builtin: (): AdaptedCatalog => ({ bundle: this.builtinBundle, release: this.builtinRelease, lanDefaults: {}, serverStatus: {}, notices: [] }),
@@ -358,6 +360,12 @@ export class AcPlayerService {
   // ── server catalog (signed, synced) ──────────────────────────────────────────
   startCatalog(): void { this.sync.start(); void this.refreshCatalog('startup').catch(() => undefined); }
   stopCatalog(): void { this.sync.stop(); }
+  /** The rules for which catalog settings apply changed (Developer options toggled): re-evaluate and refresh. */
+  catalogOverrideChanged(): void {
+    this.sync.settingsChanged(); this.statusCache.clear();
+    this.deps.broadcast('assettocorsa:catalog:event', { type: 'status', status: this.sync.status() });
+    void this.refreshCatalog('manual').catch(() => undefined);
+  }
   catalogStatus(): CatalogStatus { return this.sync.status(); }
   getCatalogSettings(): CatalogSettings { return this.catalogSettings.get(); }
   setCatalogSettings(patch: Partial<CatalogSettings>): { settings: CatalogSettings; errors: string[] } {

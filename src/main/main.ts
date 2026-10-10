@@ -181,6 +181,7 @@ function initializeServices() {
   gameScanner = new GameScanner(userDataPath);
   acPlayerService = new AcPlayerService({
     userDataPath,
+    catalogAllowOverride: () => settingsManager.get('developerMode') === true,
     detectAcRoot: async () => {
       let games = await gameScanner.getCached();
       if (!games.some((g) => g.mercyGameId === 'assettocorsa' && g.installPath)) games = await gameScanner.scan();
@@ -261,6 +262,7 @@ function registerIpcHandlers() {
     settingsManager.set(key, value);
     if (key === 'minimizeToTray') { if (value) createTray(); else destroyTray(); }
     if (key === 'autoUpdate') { autoUpdater.autoDownload = value; }
+    if (key === 'developerMode') acPlayerService?.catalogOverrideChanged();
     return true;
   });
   ipcMain.handle('settings:getLoginItem', () => app.getLoginItemSettings().openAtLogin);

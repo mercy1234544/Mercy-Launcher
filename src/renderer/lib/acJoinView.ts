@@ -88,6 +88,7 @@ export function connectionLines(check: AcJoinCheck | null): string[] {
   const c = check.connection; const out: string[] = [];
   if (!c.configured) { out.push('No server address is available.'); return out; }
   out.push(c.scope === 'lan' ? 'Using your home-network address.' : 'Using the public address.');
+  if (c.lanOnly) out.push('This server has no public internet address yet, so it can only be joined from the same network.');
   out.push(c.infoOnline ? 'The server answered its status page.' : 'The server did not answer its status page.');
   if (c.identity === 'match') out.push('It identified itself as the right server.');
   if (c.gamePortTcp === 'open') out.push('Its game port accepts connections.');

@@ -62,15 +62,20 @@ export function normalizeSettings(raw: unknown, fallback: CatalogSettings = DEFA
   };
 }
 
-/** Reads/writes userData/ac-catalog-settings.json on top of the release defaults (catalog.config.json). */
+/** Reads/writes userData/ac-catalog-settings.json on top of the release defaults (catalog.config.json).
+ *  The release config is what an ordinary player runs: an EMPTY saved address (null / "" — what older builds wrote when the
+ *  address box was left blank) never overrides it, and the address / keys / unsigned opt-in / interval saved in the file are
+ *  only honoured while `allowOverride()` is true (Developer options). Preferences (install mode, keep-ready list, …) always apply. */
 export class CatalogSettingsStore {
   private file: string;
-  constructor(userDataPath: string, private releaseDefaults: Partial<CatalogSettings> = {}) { this.file = path.join(userDataPath, 'ac-catalog-settings.json'); }
+  constructor(userDataPath: string, private releaseDefaults: Partial<CatalogSettings> = {}, private allowOverride: () => boolean = () => true) { this.file = path.join(userDataPath, 'ac-catalog-settings.json'); }
   private user(): Partial<CatalogSettings> { try { return JSON.parse(fs.readFileSync(this.file, 'utf8')); } catch { return {}; } }
   get(): CatalogSettings {
     const base = normalizeSettings(this.releaseDefaults);
-    const u = this.user();
-    const merged = normalizeSettings({ ...u, trustedKeys: Array.isArray(u.trustedKeys) ? u.trustedKeys : undefined, baseUrl: u.baseUrl === undefined ? base.baseUrl : u.baseUrl }, base);
+    const raw = this.user();
+    const u: Partial<CatalogSettings> = this.allowOverride() ? raw : { ...raw, baseUrl: undefined, trustedKeys: undefined, allowUnsignedDev: undefined, intervalMinutes: undefined };
+    const ownUrl = typeof u.baseUrl === 'string' && u.baseUrl.trim() !== '';
+    const merged = normalizeSettings({ ...u, trustedKeys: Array.isArray(u.trustedKeys) ? u.trustedKeys : undefined, baseUrl: ownUrl ? u.baseUrl : base.baseUrl }, base);
     const releaseKeys = base.trustedKeys.filter((k) => !merged.trustedKeys.some((x) => x.keyId === k.keyId));
     return { ...merged, trustedKeys: [...merged.trustedKeys, ...releaseKeys] };
   }
@@ -79,7 +84,7 @@ export class CatalogSettingsStore {
     const errors: string[] = [];
     const next: Record<string, unknown> = { ...this.user() };
     if ('baseUrl' in patch) {
-      if (patch.baseUrl === null || patch.baseUrl === '') next.baseUrl = null;
+      if (patch.baseUrl === null || patch.baseUrl === '') delete next.baseUrl;       // "no override": back to the release address
       else { const c = checkBaseUrl(patch.baseUrl); if (c.ok) next.baseUrl = patch.baseUrl!.trim(); else errors.push(c.error); }
     }
     if ('trustedKeys' in patch) {
